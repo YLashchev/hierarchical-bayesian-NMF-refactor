@@ -261,7 +261,7 @@ If you use this package, please cite:
 
 ## License
 
-MIT License
+TBD
 
 ---
 
