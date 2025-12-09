@@ -1,0 +1,2 @@
+model_type,rank,results_file,n_excluded,n_units,n_treated
+total,5,results/sensitivity/NB_births_total_5_sensitivity.csv,3,51,85

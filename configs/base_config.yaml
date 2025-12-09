@@ -1,0 +1,255 @@
+# =============================================================================
+# Bayesian Panel NMF - Base Configuration
+# =============================================================================
+# 
+# This is the generic configuration template for bayesian_panel_nmf.
+# Copy this file and modify for your specific analysis.
+#
+# Usage:
+#   python scripts/run_analysis.py --config configs/my_config.yaml
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Data Settings
+# -----------------------------------------------------------------------------
+data:
+  input_file: "data/panel_data.csv"
+  output_dir: "results"
+  
+  # Schema: Define how to interpret your data columns
+  # This allows the package to work with any panel data format
+  schema:
+    # Panel unit identifier (e.g., state, firm, county, individual)
+    unit_col: "state"
+    
+    # Time column (will be parsed as datetime)
+    time_col: "time"
+    
+    # Treatment indicator column (0 = control, 1 = treated)
+    treatment_col: "treated"
+    
+    # Outcome specifications: list of outcome variables
+    # Each outcome can have an optional denominator for rate calculations
+    outcomes:
+      - outcome_col: "outcome"
+        label: "total"
+        denominator_col: "population"  # Optional: set to null if not applicable
+    
+    # Additional columns to preserve (optional)
+    # These will be carried through preprocessing and available in output
+    additional_cols: []
+  
+  # Date format for parsing time column
+  # Use "auto" for automatic detection, or specify format string
+  # Examples: "%Y-%m-%d", "%m/%d/%y", "%d-%b-%Y"
+  date_format: "auto"
+  
+  # Time period filtering (optional)
+  # Set to null to use all available data
+  start_date: null
+  end_date: null
+  
+  # Temporal aggregation
+  aggregation:
+    enabled: false
+    # Options: "monthly", "bimonthly", "quarterly", "yearly"
+    period: "bimonthly"
+
+# -----------------------------------------------------------------------------
+# Model Settings
+# -----------------------------------------------------------------------------
+model:
+  # Outcome distribution: "NB" (Negative Binomial) or "Poisson"
+  outcome_distribution: "NB"
+  
+  # Matrix factorization rank
+  # Higher rank = more flexible model, but more parameters
+  # Typical values: 5-15
+  rank: 10
+  
+  # Model types to run
+  # Each type can have different outcome groupings and ranks to test
+  types:
+    total:
+      # Labels must match outcome specifications in schema
+      groups: ["total"]
+      ranks_to_test: [10]
+  
+  # Negative Binomial dispersion parameter
+  # Lower = more overdispersion; 1e-4 approximates Poisson
+  nb_disp: 1.0e-4
+  
+  # Whether to sample dispersion as a parameter
+  # If false, uses fixed nb_disp value
+  sample_disp: false
+  
+  # Adjustment for missing/suppressed data
+  # Set to true if your data has censored low counts
+  adjust_for_missingness: false
+  
+  # Whether to model treatment effects
+  # Set to false for control-only model (counterfactual estimation)
+  model_treated: true
+
+# -----------------------------------------------------------------------------
+# Prior Distributions (Optional)
+# -----------------------------------------------------------------------------
+# Default priors are used if not specified here.
+# Customize priors by overriding specific distributions.
+#
+# Available distributions:
+#   - Gamma: requires 'alpha' and 'beta'
+#   - HalfNormal: requires 'scale'
+#   - Normal: requires 'scale', optional 'loc' (default 0)
+#   - HalfCauchy: requires 'scale'
+#   - Exponential: requires 'rate'
+#   - InverseGamma: requires 'alpha' and 'beta'
+#   - Uniform: optional 'low' and 'high' (defaults 0, 1)
+#   - Beta: requires 'alpha' and 'beta'
+#   - StudentT: requires 'df', optional 'loc' and 'scale'
+#   - Laplace: requires 'scale', optional 'loc'
+#
+# priors:
+#   time_factor:
+#     distribution: "Gamma"
+#     alpha: 20.0
+#     beta: 20.0
+#   time_fe:
+#     distribution: "Gamma"
+#     alpha: 1.0
+#     beta: 1.0
+#   treatment_it_scale:
+#     distribution: "HalfNormal"
+#     scale: 0.1
+#   treatment_state_scale:
+#     distribution: "HalfNormal"
+#     scale: 1.0
+#   treatment_category_scale:
+#     distribution: "HalfNormal"
+#     scale: 1.0
+#   state_category_scale:
+#     distribution: "HalfNormal"
+#     scale: 1.0
+
+# -----------------------------------------------------------------------------
+# MCMC Settings
+# -----------------------------------------------------------------------------
+mcmc:
+  # Number of parallel chains
+  num_chains: 4
+  
+  # Warmup iterations (burn-in)
+  num_warmup: 1000
+  
+  # Sampling iterations per chain
+  num_samples: 2500
+  
+  # Thinning interval (keep every Nth sample)
+  # Reduces output size: effective samples = num_samples / thinning
+  thinning: 10
+  
+  # Random seed for reproducibility
+  random_seed: 8675309
+  
+  # Show progress bar during sampling
+  progress_bar: true
+
+# -----------------------------------------------------------------------------
+# Parallelization Settings
+# -----------------------------------------------------------------------------
+parallel:
+  # Number of workers for running multiple analyses in parallel
+  # Uses joblib for parallelization across different model types/ranks
+  # Set to 1 for sequential execution (safer, uses less memory)
+  # Set to -1 to use all available cores
+  num_workers: 1
+
+# -----------------------------------------------------------------------------
+# Placebo Test Settings
+# -----------------------------------------------------------------------------
+# Placebo tests run the model with fake treatment dates to validate that
+# no spurious effects exist in pre-treatment periods.
+#
+# Usage: python scripts/run_placebos.py --config configs/my_config.yaml
+#
+placebo:
+  # Model type to use for placebo tests (usually "total")
+  model_type: "total"
+  
+  # List of placebo treatment dates to test
+  # Format: "YYYY-MM-DD"
+  dates:
+    - "2016-03-01"
+    - "2016-05-01"
+    - "2016-07-01"
+    - "2016-09-01"
+    - "2016-11-01"
+    - "2017-03-01"
+    - "2017-05-01"
+    - "2017-07-01"
+    - "2017-09-01"
+    - "2017-11-01"
+    - "2018-03-01"
+    - "2018-05-01"
+    - "2018-07-01"
+    - "2018-09-01"
+    - "2018-11-01"
+    - "2019-03-01"
+    - "2019-05-01"
+    - "2019-07-01"
+    - "2019-09-01"
+    - "2019-11-01"
+    - "2020-03-01"
+  
+  # Units to apply placebo treatment to
+  # If null, uses units that were treated in original data
+  treated_units: null
+  
+  # How many months after placebo date to include in analysis
+  end_date_offset_months: 12
+
+# -----------------------------------------------------------------------------
+# Sensitivity/Spillover Analysis Settings
+# -----------------------------------------------------------------------------
+# Sensitivity analysis runs the model with modified donor pools to test
+# whether results are robust to excluding potentially affected control units
+# (e.g., neighboring states that might experience migration effects).
+#
+# Usage: python scripts/run_sensitivity.py --config configs/my_config.yaml
+#
+sensitivity:
+  # Model types to run sensitivity analysis for
+  # Set to null or empty to run for all model types
+  model_types: null
+  
+  # Ranks to test (if not specified, uses first rank from each model type)
+  ranks: [10]
+  
+  # States/units to exclude from donor pool
+  # These are typically neighboring states or states with potential spillover effects
+  # Example for abortion ban analysis: states where women might travel for services
+  exclude_states: []
+  # Example:
+  # exclude_states:
+  #   - "Arizona"
+  #   - "California" 
+  #   - "Florida"
+  #   - "Pennsylvania"
+  #   - "Kansas"
+  #   - "New Mexico"
+  #   - "Virginia"
+
+# -----------------------------------------------------------------------------
+# Output Settings
+# -----------------------------------------------------------------------------
+output:
+  # Save full posterior draws (large files, but full flexibility)
+  save_draws: true
+  
+  # Save summary statistics (small files, quick analysis)
+  save_summary: true
+  
+  # File naming pattern
+  # Available placeholders: {distribution}, {outcome}, {type}, {rank}
+  filename_pattern: "{distribution}_{outcome}_{type}_{rank}"

@@ -1,0 +1,83 @@
+# Quick test configuration - minimal MCMC for debugging
+# Run: python scripts/run_analysis.py --config configs/test_config.yaml --type nativity --rank 5
+
+data:
+  input_file: "data/raw/nativity_analyticdata.csv"
+  output_dir: "results"
+  
+  schema:
+    unit_col: "state"
+    time_col: "time"
+    treatment_col: "exposed"
+    outcomes:
+      # Hispanic nativity groups (for groups type)
+      - outcome_col: "birthshisp_usborn"
+        denominator_col: "pophisp_usborn"
+        label: "hisp_usborn"
+      - outcome_col: "birthshisp_foreign"
+        denominator_col: "pophisp_foreign"
+        label: "hisp_foreign"
+      # Non-Hispanic nativity groups (for groups type)
+      - outcome_col: "birthsnh_usborn"
+        denominator_col: "popnh_usborn"
+        label: "nh_usborn"
+      - outcome_col: "birthsnh_foreign"
+        denominator_col: "popnh_foreign"
+        label: "nh_foreign"
+      # Total nativity (for nativity type)
+      - outcome_col: "births_usborn"
+        denominator_col: "pop_usborn"
+        label: "usborn"
+      - outcome_col: "births_foreign"
+        denominator_col: "pop_foreign"
+        label: "foreign"
+    additional_cols:
+      - "banned_state"
+      - "year"
+      - "month"
+  
+  date_format: "%m/%d/%y"
+  start_date: "2016-01-01"
+  end_date: "2024-01-01"
+  
+  aggregation:
+    enabled: true
+    period: "bimonthly"
+
+model:
+  outcome_distribution: "NB"
+  types:
+    total:
+      # Aggregate all births (uses all outcomes and aggregates to single "total" group)
+      groups: ["total"]
+      ranks_to_test: [5]
+    groups:
+      # Stratified by Hispanic/Non-Hispanic and nativity
+      groups: ["hisp_usborn", "hisp_foreign", "nh_usborn", "nh_foreign"]
+      ranks_to_test: [5]
+    nativity:
+      # Stratified by US-born vs Foreign-born only
+      groups: ["usborn", "foreign"]
+      ranks_to_test: [5]
+  
+  nb_disp: 1.0e-4
+  sample_disp: false
+  adjust_for_missingness: true
+  model_treated: true
+
+# MINIMAL MCMC SETTINGS FOR TESTING
+mcmc:
+  num_chains: 1        # Single chain to avoid deadlocks
+  num_warmup: 100      # Very few warmup
+  num_samples: 100     # Very few samples
+  thinning: 1          # No thinning
+  random_seed: 8675309
+  progress_bar: true
+
+parallel:
+  num_workers: 1
+
+output:
+  save_draws: true
+  save_summary: true
+  filename_pattern: "{distribution}_{outcome}_{type}_{rank}"

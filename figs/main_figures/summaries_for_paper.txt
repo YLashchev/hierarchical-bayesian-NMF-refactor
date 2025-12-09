@@ -1,0 +1,19 @@
+------ Adjusted R-squareds based on Category ------- 
+# A tibble: 1 × 2
+  type     adj_r_squared
+  <chr>            <dbl>
+1 nativity         0.617
+------ Posterior Prob Southern vs Non-Southern States ------- 
+# A tibble: 1 × 6
+  mean_rate_south mean_rate_nonsouth mean_diff lower_diff upper_diff
+            <dbl>              <dbl>     <dbl>      <dbl>      <dbl>
+1            1.02               1.00    0.0191     0.0131     0.0279
+# ℹ 1 more variable: pr_south_greater <dbl>
+------ Posterior Prob Foreign-born > US-born ------- 
+# A tibble: 1 × 6
+  mean_rate_usborn mean_rate_foreign mean_diff lower_diff upper_diff
+             <dbl>             <dbl>     <dbl>      <dbl>      <dbl>
+1             1.02             0.992   -0.0245    -0.0350    -0.0130
+# ℹ 1 more variable: pr_foreign_greater <dbl>
+------ Fraction excess TX births from Pre Dobbs period ------- 
+Pre Dobbs: 21459 (0.454630), Post Dobbs: 25742 (0.545370)
