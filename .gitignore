@@ -1,3 +1,9 @@
+# R
+.Rhistory
+.RData
+.Rproj.user/
+TRUE
+
 # Python
 __pycache__/
 *.py[cod]
