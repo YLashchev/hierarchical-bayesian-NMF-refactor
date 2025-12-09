@@ -1,6 +1,6 @@
 # Bayesian Panel NMF
 
-A generalizable Python package for causal inference in panel data using Bayesian hierarchical models with low-rank matrix factorization.
+Python package for causal inference in panel data using Bayesian hierarchical models with low-rank matrix factorization. credit: Professor Alex Franks (UCSB, Statistics & Applied Probability)
 
 ## Overview
 
@@ -31,6 +31,36 @@ pip install -e .
 - Joblib >= 1.0.0
 
 ## Quick Start
+
+### Running with the Included Nativity Data
+
+The package includes sample data and a ready-to-use configuration for testing:
+
+```bash
+# Navigate to the package directory
+cd bayesian_panel_nmf
+
+# Install the package
+pip install -e .
+
+# Run the nativity analysis with the included config and data
+python scripts/run_analysis.py --config configs/nativity_config.yaml
+```
+
+This will:
+1. Load the nativity data from `data/raw/nativity_analyticdata.csv`
+2. Run the Bayesian panel NMF model
+3. Output results to the `results/` directory
+
+For a quick test run with fewer iterations, use the test config:
+
+```bash
+python scripts/run_analysis.py --config configs/test_config.yaml
+```
+
+---
+
+### Using Your Own Data
 
 ### 1. Prepare Your Data
 
@@ -238,7 +268,7 @@ MIT License
 ## To-Do / Roadmap
 
 The following features are planned for future development:
-- [ ] **GPU Support**: Add GPU acceleration via JAX/CUDA for faster MCMC inference on large datasets
+- [ ] **GPU Support**: Add GPU acceleration via JAX for faster MCMC inference on large datasets
 - [ ] **Spillover Analysis**: Implement scripts for testing potential spillover effects between treated and control units
 - [ ] **Sensitivity Analysis**: Add donor pool sensitivity tests (excluding neighboring states from control group)
 - [ ] **R Graphing Generalization**: Create generalized R plotting functions that work with any panel data schema (not hardcoded to specific column names)
