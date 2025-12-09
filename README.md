@@ -246,18 +246,9 @@ data_dict = preprocess_pipeline(df, groups=["total"], config=config)
 mcmc = run_mcmc_inference(data_dict, model, rank=10, **mcmc_config)
 ```
 
-## Citation
+## Credits
 
-If you use this package, please cite:
-
-```bibtex
-@article{dobbs_fertility_2024,
-  title={Impact of Abortion Bans on Fertility Rates},
-  author={Alex Franks, UCSB},
-  journal={JAMA},
-  year={2024}
-}
-```
+This package was developed by Alex Franks (UCSB, Statistics & Applied Probability).
 
 ## License
 
