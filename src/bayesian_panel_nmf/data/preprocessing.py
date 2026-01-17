@@ -181,6 +181,10 @@ def prepare_model_data(
     Reshapes long format data into multi-dimensional arrays
     organized by (categories, units, time).
     
+    Rate vs Count modeling:
+    - With denominator_col specified: Model estimates RATES (outcome per denominator)
+    - With denominator_col=None: Model estimates raw COUNTS (denominators set to 1)
+    
     Parameters
     ----------
     df : pd.DataFrame
@@ -190,7 +194,7 @@ def prepare_model_data(
     outcome_col : str
         Outcome column name
     denominator_col : str, optional
-        Denominator column name (None if no denominator)
+        Denominator column name. Set to None to model raw counts instead of rates.
     unit_col : str
         Unit column name
     time_col : str
@@ -252,11 +256,12 @@ def prepare_model_data(
         else:
             Y[k, d, n] = outcome_val
         
-        # Denominator
+        # Denominator (if specified, model rates; if None, model raw counts)
         if denominator_col and denominator_col in df.columns:
             denom_val = row[denominator_col]
             if pd.notna(denom_val) and denom_val > 0:
                 denominators[k, d, n] = denom_val / denominator_scale
+        # If denominator_col is None, denominators stay as 1s (raw counts)
         
         # Control status (treatment=0 means control)
         control_idx[k, d, n] = (row[treatment_col] == 0)
