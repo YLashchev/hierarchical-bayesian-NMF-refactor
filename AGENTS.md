@@ -761,19 +761,9 @@ The visualization module uses generic dimension names that map to the model's ar
 | `make_all_ppc_plots()` | Convenience function to generate all PPC plots |
 | `make_raw_rate_plot()` | Time series by treatment group (Treated/Control/Texas) |
 | `make_group_comparison_plot()` | Faceted comparison across outcome groups |
-| `make_unit_fit_plot()` | Observed vs predicted with credible intervals for a unit |
-| `make_all_unit_fit_plots()` | Generate fit plots for multiple/all units |
-| `make_fit_plot_by_index()` | Fit plot using K, D array indices |
-| `make_gap_plot()` | Observed/predicted ratio over time with CI |
-| `make_treatment_effect_histogram()` | Histogram of total treatment effect |
-| `make_combined_effect_plots()` | Combined 2x2 layout (fit, gap, histogram) |
 
 **Key features:**
 - Handles BOTH standardized (`unit`, `group`, `treatment`) and legacy (`state`, `category`, `exposure_code`) column names via `_standardize_columns()` helper
-- Generic dimension handling - works with any panel structure (states, hospitals, firms, etc.)
-- Index-based plotting via `make_fit_plot_by_index(k, d)` for programmatic iteration
-- Batch plot generation via `make_all_unit_fit_plots()`
-- Backward compatibility: `make_state_fit_plot` alias and `separate_texas` parameter still work
 - All PPC plots compare observed residuals vs predicted residuals in control period
 - Residuals: `obs_diff = outcome - exp(mu)`, `pred_diff = ypred - exp(mu)`
 - P-values: proportion of draws where observed statistic < predicted statistic
@@ -785,27 +775,12 @@ The visualization module uses generic dimension names that map to the model's ar
 ```python
 from bayesian_panel_nmf import (
     make_all_ppc_plots, 
-    make_unit_fit_plot,
-    make_all_unit_fit_plots,
-    make_fit_plot_by_index,
     make_raw_rate_plot,
-    make_gap_plot,
-    make_combined_effect_plots
+    make_group_comparison_plot
 )
 
 # Generate all PPC plots
 results = make_all_ppc_plots(draws_df, output_dir='figs/')
-
-# Single unit fit plot
-fig, ax = make_unit_fit_plot(draws_df, unit='TX', group='usborn')
-
-# Batch generate fit plots for all treated units
-plots = make_all_unit_fit_plots(draws_df, group='total', output_dir='figs/', treated_only=True)
-
-# Plot by array indices (useful for loops)
-for k in range(K):
-    for d in range(D):
-        fig, ax = make_fit_plot_by_index(draws_df, k=k, d=d)
 
 # Raw rate plot with treatment date markers
 treatment_dates = {'Texas SB8': '2022-01-01', 'Dobbs': '2023-01-01'}
@@ -814,11 +789,8 @@ fig, ax = make_raw_rate_plot(df, group='total', treatment_dates=treatment_dates,
 # Raw count plot (not rate)
 fig, ax = make_raw_rate_plot(df, group='total', plot_type='count')
 
-# Gap plot showing observed/predicted ratio
-fig, ax = make_gap_plot(draws_df, unit='TX', group='usborn')
-
-# Combined effect plots (fit + gap + histogram)
-fig = make_combined_effect_plots(draws_df, unit='TX', group='usborn')
+# Group comparison plot
+fig, axes = make_group_comparison_plot(df, groups=['usborn', 'foreign'])
 ```
 
 ### Phase 3: Debugging & Optimization
