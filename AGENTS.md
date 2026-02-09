@@ -743,6 +743,14 @@ Ported Posterior Predictive Check (PPC) plots from R to Python using matplotlib/
 
 **Module:** `src/bayesian_panel_nmf/visualization.py`
 
+**Dimension Terminology:**
+The visualization module uses generic dimension names that map to the model's array structure:
+| Dimension | Array Index | Description | Examples |
+|-----------|-------------|-------------|----------|
+| K | `groups` | Outcome categories | total, usborn, foreign, hisp_usborn |
+| D | `units` | Panel entities | states, hospitals, counties, firms |
+| N | `times` | Time periods | months, quarters, years |
+
 **Implemented functions:**
 | Function | Description |
 |----------|-------------|
@@ -753,10 +761,16 @@ Ported Posterior Predictive Check (PPC) plots from R to Python using matplotlib/
 | `make_all_ppc_plots()` | Convenience function to generate all PPC plots |
 | `make_raw_rate_plot()` | Time series by treatment group (Treated/Control/Texas) |
 | `make_group_comparison_plot()` | Faceted comparison across outcome groups |
-| `make_state_fit_plot()` | Observed vs predicted with credible intervals |
+| `make_unit_fit_plot()` | Observed vs predicted with credible intervals for a unit |
+| `make_all_unit_fit_plots()` | Generate fit plots for multiple/all units |
+| `make_fit_plot_by_index()` | Fit plot using K, D array indices |
 
 **Key features:**
 - Handles BOTH standardized (`unit`, `group`, `treatment`) and legacy (`state`, `category`, `exposure_code`) column names via `_standardize_columns()` helper
+- Generic dimension handling - works with any panel structure (states, hospitals, firms, etc.)
+- Index-based plotting via `make_fit_plot_by_index(k, d)` for programmatic iteration
+- Batch plot generation via `make_all_unit_fit_plots()`
+- Backward compatibility: `make_state_fit_plot` alias and `separate_texas` parameter still work
 - All PPC plots compare observed residuals vs predicted residuals in control period
 - Residuals: `obs_diff = outcome - exp(mu)`, `pred_diff = ypred - exp(mu)`
 - P-values: proportion of draws where observed statistic < predicted statistic
@@ -766,25 +780,26 @@ Ported Posterior Predictive Check (PPC) plots from R to Python using matplotlib/
 
 **Usage example:**
 ```python
-from bayesian_panel_nmf import make_all_ppc_plots, make_rmse_ppc_plot
+from bayesian_panel_nmf import (
+    make_all_ppc_plots, 
+    make_unit_fit_plot,
+    make_all_unit_fit_plots,
+    make_fit_plot_by_index
+)
 
-# Generate all PPC plots and save to figs/
+# Generate all PPC plots
 results = make_all_ppc_plots(draws_df, output_dir='figs/')
 
-# Generate individual plot
-fig, pvals = make_rmse_ppc_plot(draws_df, categories=['total'])
-fig.savefig('rmse_check.png')
-```
+# Single unit fit plot
+fig, ax = make_unit_fit_plot(draws_df, unit='TX', group='usborn')
 
-**Time series visualization example:**
-```python
-from bayesian_panel_nmf import make_raw_rate_plot, make_state_fit_plot
+# Batch generate fit plots for all treated units
+plots = make_all_unit_fit_plots(draws_df, group='total', output_dir='figs/')
 
-# Raw rate plot by treatment group
-fig, ax = make_raw_rate_plot(df, group='total', separate_texas=True)
-
-# State fit plot with credible intervals
-fig, ax = make_state_fit_plot(draws_df, unit='TX', group='usborn')
+# Plot by array indices (useful for loops)
+for k in range(K):
+    for d in range(D):
+        fig, ax = make_fit_plot_by_index(draws_df, k=k, d=d)
 ```
 
 ### Phase 3: Debugging & Optimization
