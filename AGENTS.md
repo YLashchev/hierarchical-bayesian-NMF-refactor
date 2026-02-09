@@ -751,6 +751,9 @@ Ported Posterior Predictive Check (PPC) plots from R to Python using matplotlib/
 | `make_rmse_ppc_plot()` | RMSE comparison (observed vs predicted) |
 | `make_unit_corr_ppc_plot()` | Cross-unit correlation (spectral norm) |
 | `make_all_ppc_plots()` | Convenience function to generate all PPC plots |
+| `make_raw_rate_plot()` | Time series by treatment group (Treated/Control/Texas) |
+| `make_group_comparison_plot()` | Faceted comparison across outcome groups |
+| `make_state_fit_plot()` | Observed vs predicted with credible intervals |
 
 **Key features:**
 - Handles BOTH standardized (`unit`, `group`, `treatment`) and legacy (`state`, `category`, `exposure_code`) column names via `_standardize_columns()` helper
@@ -771,6 +774,17 @@ results = make_all_ppc_plots(draws_df, output_dir='figs/')
 # Generate individual plot
 fig, pvals = make_rmse_ppc_plot(draws_df, categories=['total'])
 fig.savefig('rmse_check.png')
+```
+
+**Time series visualization example:**
+```python
+from bayesian_panel_nmf import make_raw_rate_plot, make_state_fit_plot
+
+# Raw rate plot by treatment group
+fig, ax = make_raw_rate_plot(df, group='total', separate_texas=True)
+
+# State fit plot with credible intervals
+fig, ax = make_state_fit_plot(draws_df, unit='TX', group='usborn')
 ```
 
 ### Phase 3: Debugging & Optimization
