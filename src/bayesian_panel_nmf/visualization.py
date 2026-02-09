@@ -831,6 +831,7 @@ def make_raw_rate_plot(
     separate_unit: Optional[str] = None,
     separate_texas: bool = False,  # Backward compatibility alias
     smooth_window: Optional[int] = None,
+    plot_type: str = 'rate',  # 'rate' or 'count'
     figsize: Tuple[int, int] = (10, 6),
 ) -> Tuple[plt.Figure, plt.Axes]:
     """
@@ -865,6 +866,9 @@ def make_raw_rate_plot(
         If True, equivalent to separate_unit='Texas'.
     smooth_window : int, optional
         Rolling window size for smoothing. If None, no smoothing applied.
+    plot_type : str, default='rate'
+        What to plot on y-axis: 'rate' (outcome/denominator * rate_multiplier)
+        or 'count' (raw outcome counts).
     figsize : tuple, default=(10, 6)
         Figure size (width, height).
         
@@ -938,17 +942,22 @@ def make_raw_rate_plot(
         denominator=('denominator', 'sum')
     ).reset_index()
     
-    # Compute rate
-    agg_df['rate'] = (agg_df['outcome'] / agg_df['denominator']) * rate_multiplier
+    # Compute y-value based on plot_type
+    if plot_type == 'count':
+        agg_df['y_value'] = agg_df['outcome']
+        ylabel = 'Count'
+    else:  # 'rate' (default)
+        agg_df['y_value'] = (agg_df['outcome'] / agg_df['denominator']) * rate_multiplier
+        ylabel = f'Rate per {rate_multiplier:,.0f}'
     
     # Apply smoothing if requested
     if smooth_window is not None and smooth_window > 1:
         agg_df = agg_df.sort_values(['treatment_group', 'time'])
-        agg_df['rate_smooth'] = agg_df.groupby('treatment_group')['rate'].transform(
+        agg_df['y_smooth'] = agg_df.groupby('treatment_group')['y_value'].transform(
             lambda x: x.rolling(window=smooth_window, center=True, min_periods=1).mean()
         )
     else:
-        agg_df['rate_smooth'] = agg_df['rate']
+        agg_df['y_smooth'] = agg_df['y_value']
     
     # Sort by time
     agg_df = agg_df.sort_values('time')
@@ -981,7 +990,7 @@ def make_raw_rate_plot(
         
         ax.plot(
             group_data['time'],
-            group_data['rate_smooth'],
+            group_data['y_smooth'],
             label=tgroup,
             color=color,
             linewidth=linewidth,
@@ -992,29 +1001,33 @@ def make_raw_rate_plot(
         if smooth_window is not None and smooth_window > 1:
             ax.scatter(
                 group_data['time'],
-                group_data['rate'],
+                group_data['y_value'],
                 color=color,
                 alpha=0.2,
                 s=10,
             )
     
-    # Add treatment date markers
+    # Add treatment date markers with rotated labels
     if treatment_dates is not None:
-        for label, date in treatment_dates.items():
-            date = pd.to_datetime(date)
-            ax.axvline(x=date, color='black', linestyle='--', linewidth=1.0, alpha=0.7)
-            # Add label at top of plot
+        marker_colors = ['#FF8C00', '#DC143C', '#9400D3', '#228B22']  # Orange, Crimson, Violet, Green
+        for i, (label, date_str) in enumerate(treatment_dates.items()):
+            date = pd.to_datetime(date_str)
+            color = marker_colors[i % len(marker_colors)]
+            ax.axvline(x=date, color=color, linestyle='--', linewidth=1.5, alpha=0.8)
+            # Add rotated label near top of plot
+            y_pos = ax.get_ylim()[1] * 0.95
             ax.text(
-                date, ax.get_ylim()[1], f' {label}',
-                ha='left', va='top', fontsize=9, rotation=0,
-                color='black', alpha=0.8,
+                date, y_pos, f' {label}',
+                ha='left', va='top', fontsize=9, rotation=90,
+                color=color, alpha=0.9, fontweight='bold',
             )
     
     # Styling
     group_label = f' ({group})' if group else ''
     ax.set_xlabel('Time', fontsize=11)
-    ax.set_ylabel(f'Rate per {rate_multiplier:,.0f}{group_label}', fontsize=11)
-    ax.set_title(f'Rate by Treatment Group{group_label}', fontsize=13, fontweight='bold')
+    ax.set_ylabel(f'{ylabel}{group_label}', fontsize=11)
+    title_type = 'Rate' if plot_type == 'rate' else 'Count'
+    ax.set_title(f'{title_type} by Treatment Group{group_label}', fontsize=13, fontweight='bold')
     ax.legend(loc='best', frameon=True, fancybox=True)
     
     # Rotate x-axis labels for readability
@@ -1030,6 +1043,7 @@ def make_group_comparison_plot(
     groups: Optional[List[str]] = None,
     rate_multiplier: float = 1000,
     treatment_dates: Optional[Dict[str, str]] = None,
+    plot_type: str = 'rate',  # 'rate' or 'count'
     figsize: Tuple[int, int] = (12, 8),
 ) -> Tuple[plt.Figure, np.ndarray]:
     """
@@ -1049,6 +1063,8 @@ def make_group_comparison_plot(
         Multiplier for rate calculation.
     treatment_dates : dict, optional
         Dictionary of {label: date} for vertical marker lines.
+    plot_type : str, default='rate'
+        What to plot: 'rate' (outcome/denominator * multiplier) or 'count' (raw counts).
     figsize : tuple, default=(12, 8)
         Figure size (width, height).
         
@@ -1125,8 +1141,13 @@ def make_group_comparison_plot(
             denominator=('denominator', 'sum')
         ).reset_index()
         
-        # Compute rate
-        agg_df['rate'] = (agg_df['outcome'] / agg_df['denominator']) * rate_multiplier
+        # Compute y-value based on plot_type
+        if plot_type == 'count':
+            agg_df['y_value'] = agg_df['outcome']
+            ylabel = 'Count'
+        else:  # 'rate'
+            agg_df['y_value'] = (agg_df['outcome'] / agg_df['denominator']) * rate_multiplier
+            ylabel = f'Rate per {rate_multiplier:,.0f}'
         agg_df = agg_df.sort_values('time')
         
         # Plot each treatment group
@@ -1141,21 +1162,23 @@ def make_group_comparison_plot(
             
             ax.plot(
                 tg_data['time'],
-                tg_data['rate'],
+                tg_data['y_value'],
                 label=tgroup,
                 color=color,
                 linewidth=linewidth,
                 alpha=alpha,
             )
         
-        # Add treatment date markers
+        # Add treatment date markers with colors
         if treatment_dates is not None:
-            for label, date in treatment_dates.items():
-                date = pd.to_datetime(date)
-                ax.axvline(x=date, color='black', linestyle='--', linewidth=1.0, alpha=0.7)
+            marker_colors = ['#FF8C00', '#DC143C', '#9400D3', '#228B22']
+            for i, (label, date_str) in enumerate(treatment_dates.items()):
+                date = pd.to_datetime(date_str)
+                color = marker_colors[i % len(marker_colors)]
+                ax.axvline(x=date, color=color, linestyle='--', linewidth=1.0, alpha=0.8)
         
         ax.set_title(group, fontsize=11, fontweight='bold')
-        ax.set_ylabel(f'Rate per {rate_multiplier:,.0f}', fontsize=9)
+        ax.set_ylabel(ylabel, fontsize=9)
         
         # Only add legend to first subplot
         if idx == 0:
@@ -1167,7 +1190,8 @@ def make_group_comparison_plot(
     
     # Set common x-label
     fig.supxlabel('Time', fontsize=11)
-    fig.suptitle('Rate Comparison by Group', fontsize=13, fontweight='bold', y=1.02)
+    title_type = 'Rate' if plot_type == 'rate' else 'Count'
+    fig.suptitle(f'{title_type} Comparison by Group', fontsize=13, fontweight='bold', y=1.02)
     
     # Rotate x-axis labels
     for ax in axes_flat[:len(groups)]:
@@ -1385,6 +1409,7 @@ def make_all_unit_fit_plots(
     output_dir: Optional[str] = None,
     ci_level: float = 0.95,
     figsize: Tuple[int, int] = (10, 6),
+    treated_only: bool = False,
 ) -> Dict[str, Tuple[plt.Figure, plt.Axes]]:
     """
     Generate fit plots for multiple units.
@@ -1397,7 +1422,8 @@ def make_all_unit_fit_plots(
     draws_df : pd.DataFrame
         DataFrame with posterior draws. See make_unit_fit_plot for required columns.
     units : list of str, optional
-        Units (D dimension) to plot. If None, plots all unique units in the data.
+        Units (D dimension) to plot. If None, plots all unique units in the data
+        (or all treated units if treated_only=True).
     group : str, optional
         Group/category (K dimension) to filter to. If None and multiple groups exist,
         uses the first group for each unit.
@@ -1408,6 +1434,10 @@ def make_all_unit_fit_plots(
         Credible interval level.
     figsize : tuple, default=(10, 6)
         Figure size for each plot.
+    treated_only : bool, default=False
+        If True, only generate plots for units that have treatment == 1
+        at some point (i.e., treated/banned units). Ignored if units is explicitly
+        provided. Excludes aggregate units like "Ban States".
         
     Returns
     -------
@@ -1427,6 +1457,14 @@ def make_all_unit_fit_plots(
     ...     output_dir='figs/'
     ... )
     
+    >>> # Generate plots for treated units only
+    >>> results = make_all_unit_fit_plots(
+    ...     draws_df,
+    ...     treated_only=True,
+    ...     group='usborn',
+    ...     output_dir='figs/'
+    ... )
+    
     >>> # Access individual plots
     >>> fig, ax = results['Texas']
     >>> fig.savefig('texas_custom.png', dpi=300)
@@ -1436,7 +1474,15 @@ def make_all_unit_fit_plots(
     
     # Get units to plot
     if units is None:
-        units = df['unit'].unique().tolist()
+        if treated_only:
+            # Filter to units with any treatment == 1
+            treated_units = _identify_treated_units(df)
+            # Exclude aggregate units like "Ban States"
+            units = [u for u in treated_units 
+                     if not str(u).lower().startswith('ban states')]
+            print(f"Filtering to {len(units)} treated units")
+        else:
+            units = df['unit'].unique().tolist()
     
     if len(units) == 0:
         warnings.warn("No units found in data.")
@@ -1677,3 +1723,390 @@ def make_all_ppc_plots(
     
     print("Done.")
     return results
+
+
+# =============================================================================
+# Treatment Effect Analysis Plots
+# =============================================================================
+
+def make_gap_plot(
+    draws_df: pd.DataFrame,
+    unit: str,
+    group: Optional[str] = None,
+    ci_level: float = 0.95,
+    figsize: Tuple[int, int] = (10, 6),
+) -> Tuple[plt.Figure, plt.Axes]:
+    """
+    Create a gap plot showing the ratio of observed to predicted outcome over time.
+    
+    Shows (observed / predicted) - 1, which represents the proportional deviation
+    from the counterfactual. Positive values indicate observed > predicted.
+    
+    Parameters
+    ----------
+    draws_df : pd.DataFrame
+        DataFrame with MCMC draws. Must contain columns:
+        - .draw: draw identifier
+        - unit: panel entity (D dimension)
+        - time: time period
+        - outcome: observed outcome
+        - ypred: posterior predictive value
+        - treatment: binary treatment indicator
+    unit : str
+        Unit (D dimension) to plot.
+    group : str, optional
+        Group/category (K dimension) to filter to.
+    ci_level : float, default=0.95
+        Credible interval level.
+    figsize : tuple, default=(10, 6)
+        Figure size.
+        
+    Returns
+    -------
+    fig : matplotlib.Figure
+        The figure object.
+    ax : matplotlib.Axes
+        The axes object.
+    """
+    _setup_plot_style()
+    
+    # Standardize column names
+    df = _standardize_columns(draws_df)
+    
+    # Filter to specific unit
+    df = df[df['unit'] == unit].copy()
+    
+    if len(df) == 0:
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.text(0.5, 0.5, f'No data for unit: {unit}', ha='center', va='center', transform=ax.transAxes)
+        ax.set_title(f'Gap Plot: {unit}')
+        return fig, ax
+    
+    # Filter to specific group if provided
+    if group is not None and 'group' in df.columns:
+        df = df[df['group'] == group].copy()
+    elif 'group' in df.columns:
+        available_groups = df['group'].unique()
+        if len(available_groups) > 1:
+            warnings.warn(f"Multiple groups found. Using first group: {available_groups[0]}")
+        group = available_groups[0]
+        df = df[df['group'] == group].copy()
+    
+    if len(df) == 0:
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.text(0.5, 0.5, f'No data for unit: {unit}, group: {group}', 
+                ha='center', va='center', transform=ax.transAxes)
+        ax.set_title(f'Gap Plot: {unit}')
+        return fig, ax
+    
+    # Ensure time is datetime
+    if 'time' in df.columns:
+        df['time'] = pd.to_datetime(df['time'])
+    
+    # Compute gap: (observed / ypred) - 1
+    df['gap'] = df['outcome'] / df['ypred'] - 1
+    
+    # Compute quantiles across draws
+    alpha = 1 - ci_level
+    lower_q = alpha / 2
+    upper_q = 1 - alpha / 2
+    
+    summary_df = df.groupby('time').agg(
+        treatment=('treatment', 'first'),
+        gap_mean=('gap', 'mean'),
+        gap_lower=('gap', lambda x: np.quantile(x, lower_q)),
+        gap_upper=('gap', lambda x: np.quantile(x, upper_q)),
+    ).reset_index()
+    
+    summary_df = summary_df.sort_values('time')
+    
+    # Find first treatment date
+    first_treatment_time = None
+    if summary_df['treatment'].sum() > 0:
+        first_treatment_time = summary_df.loc[summary_df['treatment'] == 1, 'time'].min()
+    
+    # Create plot
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    # Plot pre-treatment period
+    pre_mask = summary_df['time'] < first_treatment_time if first_treatment_time else [True] * len(summary_df)
+    post_mask = ~pre_mask if first_treatment_time else [False] * len(summary_df)
+    
+    # Pre-treatment ribbon
+    if sum(pre_mask) > 0:
+        ax.fill_between(
+            summary_df.loc[pre_mask, 'time'],
+            summary_df.loc[pre_mask, 'gap_lower'],
+            summary_df.loc[pre_mask, 'gap_upper'],
+            alpha=0.3,
+            color='steelblue',
+        )
+        ax.plot(
+            summary_df.loc[pre_mask, 'time'],
+            summary_df.loc[pre_mask, 'gap_mean'],
+            color='steelblue',
+            linewidth=2,
+        )
+    
+    # Post-treatment ribbon (different color)
+    if sum(post_mask) > 0:
+        ax.fill_between(
+            summary_df.loc[post_mask, 'time'],
+            summary_df.loc[post_mask, 'gap_lower'],
+            summary_df.loc[post_mask, 'gap_upper'],
+            alpha=0.3,
+            color='#E41A1C',
+        )
+        ax.plot(
+            summary_df.loc[post_mask, 'time'],
+            summary_df.loc[post_mask, 'gap_mean'],
+            color='#E41A1C',
+            linewidth=2,
+        )
+    
+    # Add horizontal line at 0
+    ax.axhline(y=0, color='black', linestyle='--', linewidth=1, alpha=0.7)
+    
+    # Add vertical line at treatment date
+    if first_treatment_time is not None:
+        ax.axvline(x=first_treatment_time, color='black', linestyle='--', linewidth=1.5, alpha=0.7)
+    
+    # Styling
+    group_label = f' ({group})' if group else ''
+    ax.set_xlabel('Time', fontsize=11)
+    ax.set_ylabel('Observed / Predicted - 1', fontsize=11)
+    ax.set_title(f'Gap Plot: {unit}{group_label}', fontsize=13, fontweight='bold')
+    
+    plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
+    plt.tight_layout()
+    
+    return fig, ax
+
+
+def make_treatment_effect_histogram(
+    draws_df: pd.DataFrame,
+    unit: str,
+    group: Optional[str] = None,
+    target_col: str = 'outcome',
+    figsize: Tuple[int, int] = (10, 6),
+) -> Tuple[plt.Figure, plt.Axes]:
+    """
+    Create a histogram of total treatment effect (observed - predicted) in the treatment period.
+    
+    Computes the sum of (observed - predicted) across all treatment period observations
+    for each draw, and plots the resulting distribution.
+    
+    Parameters
+    ----------
+    draws_df : pd.DataFrame
+        DataFrame with MCMC draws. Must contain columns:
+        - .draw: draw identifier
+        - unit: panel entity
+        - outcome (or target_col): observed outcome
+        - ypred: posterior predictive value
+        - treatment: binary treatment indicator
+    unit : str
+        Unit (D dimension) to analyze.
+    group : str, optional
+        Group/category (K dimension) to filter to.
+    target_col : str, default='outcome'
+        Name of the outcome column.
+    figsize : tuple, default=(10, 6)
+        Figure size.
+        
+    Returns
+    -------
+    fig : matplotlib.Figure
+        The figure object.
+    ax : matplotlib.Axes
+        The axes object.
+    """
+    _setup_plot_style()
+    
+    # Standardize column names
+    df = _standardize_columns(draws_df)
+    
+    # Handle target column
+    if target_col not in df.columns and 'outcome' in df.columns:
+        target_col = 'outcome'
+    
+    # Filter to specific unit
+    df = df[df['unit'] == unit].copy()
+    
+    if len(df) == 0:
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.text(0.5, 0.5, f'No data for unit: {unit}', ha='center', va='center', transform=ax.transAxes)
+        ax.set_title(f'Treatment Effect: {unit}')
+        return fig, ax
+    
+    # Filter to specific group if provided
+    if group is not None and 'group' in df.columns:
+        df = df[df['group'] == group].copy()
+    elif 'group' in df.columns:
+        available_groups = df['group'].unique()
+        if len(available_groups) > 1:
+            warnings.warn(f"Multiple groups found. Using first group: {available_groups[0]}")
+        group = available_groups[0]
+        df = df[df['group'] == group].copy()
+    
+    # Filter to treatment period only
+    df_treat = df[df['treatment'] == 1].copy()
+    
+    if len(df_treat) == 0:
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.text(0.5, 0.5, f'No treatment period data for unit: {unit}', 
+                ha='center', va='center', transform=ax.transAxes)
+        ax.set_title(f'Treatment Effect: {unit}')
+        return fig, ax
+    
+    # Compute total difference per draw
+    totals_df = df_treat.groupby('.draw').agg(
+        obs=('outcome', 'sum'),
+        pred=('ypred', 'sum')
+    ).reset_index()
+    totals_df['diff'] = totals_df['obs'] - totals_df['pred']
+    
+    # Compute p-value: proportion where predicted > observed
+    pval = (totals_df['pred'] > totals_df['obs']).mean()
+    
+    # Create histogram
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    ax.hist(totals_df['diff'], bins=50, alpha=0.7, color='steelblue', edgecolor='white')
+    ax.axvline(x=0, color='red', linestyle='--', linewidth=2)
+    
+    # Add p-value annotation
+    ax.text(
+        0.95, 0.95, f'p = {pval:.3f}',
+        transform=ax.transAxes,
+        ha='right', va='top',
+        fontsize=12, fontweight='bold',
+        color='red',
+        bbox=dict(boxstyle='round', facecolor='white', alpha=0.8)
+    )
+    
+    # Add mean annotation
+    mean_diff = totals_df['diff'].mean()
+    ax.axvline(x=mean_diff, color='black', linestyle='-', linewidth=1.5, alpha=0.7)
+    ax.text(
+        0.95, 0.85, f'Mean: {mean_diff:,.0f}',
+        transform=ax.transAxes,
+        ha='right', va='top',
+        fontsize=10,
+        color='black',
+        bbox=dict(boxstyle='round', facecolor='white', alpha=0.8)
+    )
+    
+    # Styling
+    group_label = f' ({group})' if group else ''
+    ax.set_xlabel('Observed - Predicted', fontsize=11)
+    ax.set_ylabel('Count', fontsize=11)
+    ax.set_title(f'Treatment Effect Distribution: {unit}{group_label}', fontsize=13, fontweight='bold')
+    
+    plt.tight_layout()
+    
+    return fig, ax
+
+
+def make_combined_effect_plots(
+    draws_df: pd.DataFrame,
+    unit: str,
+    group: Optional[str] = None,
+    ci_level: float = 0.95,
+    figsize: Tuple[int, int] = (15, 10),
+) -> Tuple[plt.Figure, np.ndarray]:
+    """
+    Create a combined plot with fit, gap, and histogram subplots.
+    
+    Similar to the R `make_all_te_plots` function, this creates a 2x2 layout with:
+    - Top left: Observed vs Predicted (fit plot)
+    - Top right: Gap plot (observed/predicted - 1)
+    - Bottom: Treatment effect histogram
+    
+    Parameters
+    ----------
+    draws_df : pd.DataFrame
+        DataFrame with MCMC draws.
+    unit : str
+        Unit (D dimension) to plot.
+    group : str, optional
+        Group/category (K dimension) to filter to.
+    ci_level : float, default=0.95
+        Credible interval level.
+    figsize : tuple, default=(15, 10)
+        Figure size.
+        
+    Returns
+    -------
+    fig : matplotlib.Figure
+        The figure object.
+    axes : np.ndarray
+        Array of axes objects.
+    """
+    _setup_plot_style()
+    
+    fig = plt.figure(figsize=figsize)
+    gs = gridspec.GridSpec(2, 2, height_ratios=[1, 1])
+    
+    # Top left: Fit plot
+    ax1 = fig.add_subplot(gs[0, 0])
+    fit_fig, fit_ax = make_unit_fit_plot(draws_df, unit=unit, group=group, ci_level=ci_level)
+    # Copy content from fit_ax to ax1
+    for line in fit_ax.get_lines():
+        ax1.plot(line.get_xdata(), line.get_ydata(), 
+                 color=line.get_color(), linewidth=line.get_linewidth(),
+                 linestyle=line.get_linestyle(), alpha=line.get_alpha(),
+                 label=line.get_label())
+    for coll in fit_ax.collections:
+        # Copy filled areas
+        if hasattr(coll, 'get_paths'):
+            paths = coll.get_paths()
+            if len(paths) > 0:
+                try:
+                    fc = coll.get_facecolor()[0] if len(coll.get_facecolor()) > 0 else 'steelblue'
+                    alpha = coll.get_alpha() if coll.get_alpha() is not None else 0.3
+                    ax1.fill_between(fit_ax.get_xlim(), 0, 0, alpha=alpha)  # Placeholder
+                except:
+                    pass
+    ax1.set_xlabel(fit_ax.get_xlabel())
+    ax1.set_ylabel(fit_ax.get_ylabel())
+    ax1.set_title(fit_ax.get_title())
+    plt.close(fit_fig)
+    
+    # Top right: Gap plot
+    ax2 = fig.add_subplot(gs[0, 1])
+    gap_fig, gap_ax = make_gap_plot(draws_df, unit=unit, group=group, ci_level=ci_level)
+    for line in gap_ax.get_lines():
+        ax2.plot(line.get_xdata(), line.get_ydata(),
+                 color=line.get_color(), linewidth=line.get_linewidth(),
+                 linestyle=line.get_linestyle(), alpha=line.get_alpha())
+    ax2.axhline(y=0, color='black', linestyle='--', linewidth=1, alpha=0.7)
+    ax2.set_xlabel(gap_ax.get_xlabel())
+    ax2.set_ylabel(gap_ax.get_ylabel())
+    ax2.set_title(gap_ax.get_title())
+    plt.close(gap_fig)
+    
+    # Bottom: Histogram (spans both columns)
+    ax3 = fig.add_subplot(gs[1, :])
+    hist_fig, hist_ax = make_treatment_effect_histogram(draws_df, unit=unit, group=group)
+    for patch in hist_ax.patches:
+        ax3.add_patch(plt.Rectangle(
+            (patch.get_x(), patch.get_y()), patch.get_width(), patch.get_height(),
+            facecolor=patch.get_facecolor(), edgecolor=patch.get_edgecolor(),
+            alpha=patch.get_alpha()
+        ))
+    ax3.set_xlim(hist_ax.get_xlim())
+    ax3.set_ylim(hist_ax.get_ylim())
+    ax3.axvline(x=0, color='red', linestyle='--', linewidth=2)
+    ax3.set_xlabel(hist_ax.get_xlabel())
+    ax3.set_ylabel(hist_ax.get_ylabel())
+    ax3.set_title(hist_ax.get_title())
+    plt.close(hist_fig)
+    
+    # Add overall title
+    group_label = f' - {group}' if group else ''
+    fig.suptitle(f'Treatment Effect Analysis: {unit}{group_label}', fontsize=14, fontweight='bold', y=1.02)
+    
+    plt.tight_layout()
+    
+    return fig, np.array([ax1, ax2, ax3])

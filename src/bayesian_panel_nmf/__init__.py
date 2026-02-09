@@ -28,6 +28,10 @@ from bayesian_panel_nmf.visualization import (
     make_unit_fit_plot,
     make_all_unit_fit_plots,
     make_fit_plot_by_index,
+    # Treatment effect analysis
+    make_gap_plot,
+    make_treatment_effect_histogram,
+    make_combined_effect_plots,
     # Backward compatibility alias
     make_state_fit_plot,
 )
@@ -54,6 +58,10 @@ __all__ = [
     'make_unit_fit_plot',
     'make_all_unit_fit_plots',
     'make_fit_plot_by_index',
+    # Visualization (Treatment Effect Analysis)
+    'make_gap_plot',
+    'make_treatment_effect_histogram',
+    'make_combined_effect_plots',
     # Backward compatibility
     'make_state_fit_plot',  # Alias for make_unit_fit_plot
 ]
