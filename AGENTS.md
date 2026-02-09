@@ -764,6 +764,9 @@ The visualization module uses generic dimension names that map to the model's ar
 | `make_unit_fit_plot()` | Observed vs predicted with credible intervals for a unit |
 | `make_all_unit_fit_plots()` | Generate fit plots for multiple/all units |
 | `make_fit_plot_by_index()` | Fit plot using K, D array indices |
+| `make_gap_plot()` | Observed/predicted ratio over time with CI |
+| `make_treatment_effect_histogram()` | Histogram of total treatment effect |
+| `make_combined_effect_plots()` | Combined 2x2 layout (fit, gap, histogram) |
 
 **Key features:**
 - Handles BOTH standardized (`unit`, `group`, `treatment`) and legacy (`state`, `category`, `exposure_code`) column names via `_standardize_columns()` helper
@@ -784,7 +787,10 @@ from bayesian_panel_nmf import (
     make_all_ppc_plots, 
     make_unit_fit_plot,
     make_all_unit_fit_plots,
-    make_fit_plot_by_index
+    make_fit_plot_by_index,
+    make_raw_rate_plot,
+    make_gap_plot,
+    make_combined_effect_plots
 )
 
 # Generate all PPC plots
@@ -794,12 +800,25 @@ results = make_all_ppc_plots(draws_df, output_dir='figs/')
 fig, ax = make_unit_fit_plot(draws_df, unit='TX', group='usborn')
 
 # Batch generate fit plots for all treated units
-plots = make_all_unit_fit_plots(draws_df, group='total', output_dir='figs/')
+plots = make_all_unit_fit_plots(draws_df, group='total', output_dir='figs/', treated_only=True)
 
 # Plot by array indices (useful for loops)
 for k in range(K):
     for d in range(D):
         fig, ax = make_fit_plot_by_index(draws_df, k=k, d=d)
+
+# Raw rate plot with treatment date markers
+treatment_dates = {'Texas SB8': '2022-01-01', 'Dobbs': '2023-01-01'}
+fig, ax = make_raw_rate_plot(df, group='total', treatment_dates=treatment_dates, separate_unit='TX')
+
+# Raw count plot (not rate)
+fig, ax = make_raw_rate_plot(df, group='total', plot_type='count')
+
+# Gap plot showing observed/predicted ratio
+fig, ax = make_gap_plot(draws_df, unit='TX', group='usborn')
+
+# Combined effect plots (fit + gap + histogram)
+fig = make_combined_effect_plots(draws_df, unit='TX', group='usborn')
 ```
 
 ### Phase 3: Debugging & Optimization
