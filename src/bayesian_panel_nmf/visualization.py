@@ -1,15 +1,27 @@
 """
-Posterior Predictive Check (PPC) visualization utilities for bayesian_panel_nmf.
+Visualization utilities for bayesian_panel_nmf.
 
-This module provides functions to generate PPC plots that compare observed vs predicted
-statistics in the control period. These diagnostics help assess model fit.
+This module provides two types of visualization functions:
+
+1. **PPC (Posterior Predictive Check) Plots**: Diagnostic plots comparing observed vs 
+   predicted statistics in the control period. These help assess model fit.
+   - make_abs_ppc_plot: Maximum absolute residual comparison
+   - make_acf_ppc_plot: Autocorrelation of residuals at specified lag
+   - make_rmse_ppc_plot: RMSE comparison (observed vs predicted)
+   - make_unit_corr_ppc_plot: Cross-unit correlation (spectral norm)
+   - make_all_ppc_plots: Convenience function to generate all PPC plots
+
+2. **Time Series Plots**: Visualizations for exploring the data and model results.
+   - make_raw_rate_plot: Rate by treatment group over time
+   - make_group_comparison_plot: Faceted comparison of rates across outcome groups
+   - make_state_fit_plot: Observed vs predicted for a specific unit with CI
 
 The module handles BOTH standardized and legacy column names:
 - Standardized: unit, group, denominator, treatment
 - Legacy: state, category, population, exposure_code
 
-All functions return (fig, pvals_df) tuples where fig is a matplotlib Figure
-and pvals_df is a DataFrame with p-values for each facet.
+PPC functions return (fig, pvals_df) tuples where fig is a matplotlib Figure
+and pvals_df is a DataFrame with p-values. Time series functions return (fig, ax/axes).
 """
 
 import numpy as np
@@ -795,6 +807,530 @@ def make_unit_corr_ppc_plot(
     )
     
     return fig, pvals_df
+
+
+# =============================================================================
+# Time Series Visualization Functions
+# =============================================================================
+
+def make_raw_rate_plot(
+    df: pd.DataFrame,
+    group: Optional[str] = None,
+    rate_multiplier: float = 1000,
+    treatment_dates: Optional[dict] = None,
+    separate_texas: bool = False,
+    smooth_window: Optional[int] = None,
+    figsize: Tuple[int, int] = (10, 6),
+) -> Tuple[plt.Figure, plt.Axes]:
+    """
+    Create a time series plot showing rates by treatment group.
+    
+    Creates a line plot with different colors for Treated, Control, and optionally
+    Texas as a separate group. Supports smoothing and treatment date markers.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame with columns: unit, time, group, outcome, denominator, treatment
+        (or legacy column names: state, category, population, exposure_code).
+    group : str, optional
+        Group/category to filter to (e.g., 'total', 'usborn'). If None, aggregates
+        all groups together.
+    rate_multiplier : float, default=1000
+        Multiplier for rate calculation (e.g., 1000 = per 1,000 population).
+    treatment_dates : dict, optional
+        Dictionary of {label: date} for vertical marker lines.
+        Example: {'Dobbs': '2022-06-24', 'Roe v Wade Overturned': '2022-06-24'}
+    separate_texas : bool, default=False
+        If True, show Texas as a separate group from other treated states.
+    smooth_window : int, optional
+        Rolling window size for smoothing. If None, no smoothing applied.
+    figsize : tuple, default=(10, 6)
+        Figure size (width, height).
+        
+    Returns
+    -------
+    fig : matplotlib.Figure
+        The figure object.
+    ax : matplotlib.Axes
+        The axes object.
+        
+    Examples
+    --------
+    >>> fig, ax = make_raw_rate_plot(df, group='total', rate_multiplier=1000)
+    >>> fig.savefig('rate_plot.png')
+    
+    >>> fig, ax = make_raw_rate_plot(
+    ...     df, 
+    ...     group='total',
+    ...     treatment_dates={'Dobbs': '2022-06-24'},
+    ...     separate_texas=True,
+    ...     smooth_window=3
+    ... )
+    """
+    _setup_plot_style()
+    
+    # Standardize column names
+    df = _standardize_columns(df)
+    
+    # Ensure time is datetime
+    if 'time' in df.columns:
+        df['time'] = pd.to_datetime(df['time'])
+    
+    # Filter to specific group if provided
+    if group is not None and 'group' in df.columns:
+        df = df[df['group'] == group].copy()
+    
+    # Identify treated units
+    treated_units = _identify_treated_units(df)
+    
+    # Assign treatment group labels
+    def assign_treatment_group(row):
+        if separate_texas and row['unit'] == 'Texas':
+            return 'Texas'
+        elif row['unit'] in treated_units:
+            return 'Treated'
+        else:
+            return 'Control'
+    
+    df['treatment_group'] = df.apply(assign_treatment_group, axis=1)
+    
+    # Aggregate by treatment_group and time
+    agg_df = df.groupby(['treatment_group', 'time']).agg(
+        outcome=('outcome', 'sum'),
+        denominator=('denominator', 'sum')
+    ).reset_index()
+    
+    # Compute rate
+    agg_df['rate'] = (agg_df['outcome'] / agg_df['denominator']) * rate_multiplier
+    
+    # Apply smoothing if requested
+    if smooth_window is not None and smooth_window > 1:
+        agg_df = agg_df.sort_values(['treatment_group', 'time'])
+        agg_df['rate_smooth'] = agg_df.groupby('treatment_group')['rate'].transform(
+            lambda x: x.rolling(window=smooth_window, center=True, min_periods=1).mean()
+        )
+    else:
+        agg_df['rate_smooth'] = agg_df['rate']
+    
+    # Sort by time
+    agg_df = agg_df.sort_values('time')
+    
+    # Define colors
+    colors = {
+        'Treated': '#E41A1C',   # Red
+        'Control': '#999999',   # Gray
+        'Texas': '#FF7F00',     # Orange
+    }
+    
+    # Create plot
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    # Plot order: Control first (in back), then Treated, then Texas
+    plot_order = ['Control', 'Treated']
+    if separate_texas:
+        plot_order.append('Texas')
+    
+    for tgroup in plot_order:
+        group_data = agg_df[agg_df['treatment_group'] == tgroup]
+        if len(group_data) == 0:
+            continue
+        
+        color = colors.get(tgroup, '#333333')
+        linewidth = 2.0 if tgroup != 'Control' else 1.5
+        alpha = 1.0 if tgroup != 'Control' else 0.7
+        
+        ax.plot(
+            group_data['time'],
+            group_data['rate_smooth'],
+            label=tgroup,
+            color=color,
+            linewidth=linewidth,
+            alpha=alpha,
+        )
+        
+        # If smoothed, also show raw data as faint points
+        if smooth_window is not None and smooth_window > 1:
+            ax.scatter(
+                group_data['time'],
+                group_data['rate'],
+                color=color,
+                alpha=0.2,
+                s=10,
+            )
+    
+    # Add treatment date markers
+    if treatment_dates is not None:
+        for label, date in treatment_dates.items():
+            date = pd.to_datetime(date)
+            ax.axvline(x=date, color='black', linestyle='--', linewidth=1.0, alpha=0.7)
+            # Add label at top of plot
+            ax.text(
+                date, ax.get_ylim()[1], f' {label}',
+                ha='left', va='top', fontsize=9, rotation=0,
+                color='black', alpha=0.8,
+            )
+    
+    # Styling
+    group_label = f' ({group})' if group else ''
+    ax.set_xlabel('Time', fontsize=11)
+    ax.set_ylabel(f'Rate per {rate_multiplier:,.0f}{group_label}', fontsize=11)
+    ax.set_title(f'Rate by Treatment Group{group_label}', fontsize=13, fontweight='bold')
+    ax.legend(loc='best', frameon=True, fancybox=True)
+    
+    # Rotate x-axis labels for readability
+    plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
+    
+    plt.tight_layout()
+    
+    return fig, ax
+
+
+def make_group_comparison_plot(
+    df: pd.DataFrame,
+    groups: Optional[List[str]] = None,
+    rate_multiplier: float = 1000,
+    treatment_dates: Optional[dict] = None,
+    figsize: Tuple[int, int] = (12, 8),
+) -> Tuple[plt.Figure, np.ndarray]:
+    """
+    Create a faceted plot comparing rates across different outcome groups.
+    
+    Each subplot shows treated vs control time series for a different group/category.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame with columns: unit, time, group, outcome, denominator, treatment
+        (or legacy column names).
+    groups : list of str, optional
+        List of groups to plot. If None, uses all unique groups in the data.
+    rate_multiplier : float, default=1000
+        Multiplier for rate calculation.
+    treatment_dates : dict, optional
+        Dictionary of {label: date} for vertical marker lines.
+    figsize : tuple, default=(12, 8)
+        Figure size (width, height).
+        
+    Returns
+    -------
+    fig : matplotlib.Figure
+        The figure object.
+    axes : np.ndarray
+        Array of axes objects.
+        
+    Examples
+    --------
+    >>> fig, axes = make_group_comparison_plot(
+    ...     df, 
+    ...     groups=['usborn', 'foreign'],
+    ...     treatment_dates={'Dobbs': '2022-06-24'}
+    ... )
+    >>> fig.savefig('group_comparison.png')
+    """
+    _setup_plot_style()
+    
+    # Standardize column names
+    df = _standardize_columns(df)
+    
+    # Ensure time is datetime
+    if 'time' in df.columns:
+        df['time'] = pd.to_datetime(df['time'])
+    
+    # Get groups to plot
+    if groups is None:
+        groups = df['group'].unique().tolist()
+    
+    n_groups = len(groups)
+    if n_groups == 0:
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.text(0.5, 0.5, 'No groups to plot', ha='center', va='center', transform=ax.transAxes)
+        return fig, np.array([ax])
+    
+    # Determine subplot layout
+    ncols = min(2, n_groups)
+    nrows = int(np.ceil(n_groups / ncols))
+    
+    fig, axes = plt.subplots(nrows, ncols, figsize=figsize, squeeze=False, sharex=True)
+    axes_flat = axes.flatten()
+    
+    # Identify treated units
+    treated_units = _identify_treated_units(df)
+    
+    # Colors
+    colors = {
+        'Treated': '#E41A1C',
+        'Control': '#999999',
+    }
+    
+    for idx, group in enumerate(groups):
+        ax = axes_flat[idx]
+        
+        # Filter to this group
+        group_df = df[df['group'] == group].copy()
+        
+        if len(group_df) == 0:
+            ax.text(0.5, 0.5, f'No data for {group}', ha='center', va='center', transform=ax.transAxes)
+            ax.set_title(group, fontsize=11, fontweight='bold')
+            continue
+        
+        # Assign treatment group
+        group_df['treatment_group'] = group_df['unit'].apply(
+            lambda u: 'Treated' if u in treated_units else 'Control'
+        )
+        
+        # Aggregate by treatment_group and time
+        agg_df = group_df.groupby(['treatment_group', 'time']).agg(
+            outcome=('outcome', 'sum'),
+            denominator=('denominator', 'sum')
+        ).reset_index()
+        
+        # Compute rate
+        agg_df['rate'] = (agg_df['outcome'] / agg_df['denominator']) * rate_multiplier
+        agg_df = agg_df.sort_values('time')
+        
+        # Plot each treatment group
+        for tgroup in ['Control', 'Treated']:
+            tg_data = agg_df[agg_df['treatment_group'] == tgroup]
+            if len(tg_data) == 0:
+                continue
+            
+            color = colors.get(tgroup, '#333333')
+            linewidth = 2.0 if tgroup == 'Treated' else 1.5
+            alpha = 1.0 if tgroup == 'Treated' else 0.7
+            
+            ax.plot(
+                tg_data['time'],
+                tg_data['rate'],
+                label=tgroup,
+                color=color,
+                linewidth=linewidth,
+                alpha=alpha,
+            )
+        
+        # Add treatment date markers
+        if treatment_dates is not None:
+            for label, date in treatment_dates.items():
+                date = pd.to_datetime(date)
+                ax.axvline(x=date, color='black', linestyle='--', linewidth=1.0, alpha=0.7)
+        
+        ax.set_title(group, fontsize=11, fontweight='bold')
+        ax.set_ylabel(f'Rate per {rate_multiplier:,.0f}', fontsize=9)
+        
+        # Only add legend to first subplot
+        if idx == 0:
+            ax.legend(loc='best', frameon=True, fontsize=8)
+    
+    # Hide unused axes
+    for idx in range(len(groups), len(axes_flat)):
+        axes_flat[idx].set_visible(False)
+    
+    # Set common x-label
+    fig.supxlabel('Time', fontsize=11)
+    fig.suptitle('Rate Comparison by Group', fontsize=13, fontweight='bold', y=1.02)
+    
+    # Rotate x-axis labels
+    for ax in axes_flat[:len(groups)]:
+        plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
+    
+    plt.tight_layout()
+    
+    return fig, axes
+
+
+def make_state_fit_plot(
+    draws_df: pd.DataFrame,
+    unit: str,
+    group: Optional[str] = None,
+    ci_level: float = 0.95,
+    figsize: Tuple[int, int] = (10, 6),
+) -> Tuple[plt.Figure, plt.Axes]:
+    """
+    Create a plot showing observed vs predicted for a specific unit.
+    
+    Shows the observed outcome as points, the predicted mean as a line,
+    and a credible interval as a ribbon.
+    
+    Parameters
+    ----------
+    draws_df : pd.DataFrame
+        DataFrame with posterior draws. Must contain columns:
+        - .draw: draw identifier
+        - unit (or state): panel entity
+        - time: time period
+        - outcome: observed outcome value
+        - ypred: posterior predictive value
+        - treatment: binary treatment indicator
+        Optionally:
+        - group (or category): outcome category
+        - mu: counterfactual log-rate (for showing counterfactual)
+    unit : str
+        Unit (e.g., state name) to plot.
+    group : str, optional
+        Group/category to filter to. If None and multiple groups exist,
+        uses the first group.
+    ci_level : float, default=0.95
+        Credible interval level (e.g., 0.95 for 95% CI).
+    figsize : tuple, default=(10, 6)
+        Figure size (width, height).
+        
+    Returns
+    -------
+    fig : matplotlib.Figure
+        The figure object.
+    ax : matplotlib.Axes
+        The axes object.
+        
+    Examples
+    --------
+    >>> fig, ax = make_state_fit_plot(draws_df, unit='Texas', group='total')
+    >>> fig.savefig('texas_fit.png')
+    
+    >>> fig, ax = make_state_fit_plot(draws_df, unit='Oklahoma', ci_level=0.90)
+    """
+    _setup_plot_style()
+    
+    # Standardize column names
+    df = _standardize_columns(draws_df)
+    
+    # Filter to specific unit
+    df = df[df['unit'] == unit].copy()
+    
+    if len(df) == 0:
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.text(0.5, 0.5, f'No data for unit: {unit}', ha='center', va='center', transform=ax.transAxes)
+        ax.set_title(f'Observed vs Predicted: {unit}')
+        return fig, ax
+    
+    # Filter to specific group if provided
+    if group is not None and 'group' in df.columns:
+        df = df[df['group'] == group].copy()
+    elif 'group' in df.columns:
+        # Use first group if not specified
+        available_groups = df['group'].unique()
+        if len(available_groups) > 1:
+            warnings.warn(f"Multiple groups found for {unit}. Using first group: {available_groups[0]}. "
+                          f"Specify group parameter to select a different one.")
+        group = available_groups[0]
+        df = df[df['group'] == group].copy()
+    
+    if len(df) == 0:
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.text(0.5, 0.5, f'No data for unit: {unit}, group: {group}', 
+                ha='center', va='center', transform=ax.transAxes)
+        ax.set_title(f'Observed vs Predicted: {unit}')
+        return fig, ax
+    
+    # Ensure time is datetime
+    if 'time' in df.columns:
+        df['time'] = pd.to_datetime(df['time'])
+    
+    # Compute quantiles of ypred across draws
+    alpha = 1 - ci_level
+    lower_q = alpha / 2
+    upper_q = 1 - alpha / 2
+    
+    summary_df = df.groupby('time').agg(
+        outcome=('outcome', 'first'),  # Observed is same across draws
+        treatment=('treatment', 'first'),
+        ypred_mean=('ypred', 'mean'),
+        ypred_lower=('ypred', lambda x: np.quantile(x, lower_q)),
+        ypred_upper=('ypred', lambda x: np.quantile(x, upper_q)),
+    ).reset_index()
+    
+    # Check if mu is available for counterfactual
+    has_mu = 'mu' in df.columns
+    if has_mu:
+        mu_summary = df.groupby('time').agg(
+            mu_mean=('mu', lambda x: np.mean(np.exp(x))),
+            mu_lower=('mu', lambda x: np.quantile(np.exp(x), lower_q)),
+            mu_upper=('mu', lambda x: np.quantile(np.exp(x), upper_q)),
+        ).reset_index()
+        summary_df = summary_df.merge(mu_summary, on='time', how='left')
+    
+    summary_df = summary_df.sort_values('time')
+    
+    # Create plot
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    # Plot credible interval as ribbon
+    ax.fill_between(
+        summary_df['time'],
+        summary_df['ypred_lower'],
+        summary_df['ypred_upper'],
+        alpha=0.3,
+        color='steelblue',
+        label=f'{int(ci_level*100)}% CI',
+    )
+    
+    # Plot predicted mean line
+    ax.plot(
+        summary_df['time'],
+        summary_df['ypred_mean'],
+        color='steelblue',
+        linewidth=2,
+        label='Predicted Mean',
+    )
+    
+    # Plot observed as points
+    ax.scatter(
+        summary_df['time'],
+        summary_df['outcome'],
+        color='black',
+        s=40,
+        zorder=5,
+        label='Observed',
+    )
+    
+    # If counterfactual (mu) is available and there's treatment, show it
+    if has_mu and summary_df['treatment'].sum() > 0:
+        # Show counterfactual only in treatment period
+        treated_mask = summary_df['treatment'] == 1
+        if treated_mask.any():
+            ax.plot(
+                summary_df.loc[treated_mask, 'time'],
+                summary_df.loc[treated_mask, 'mu_mean'],
+                color='#E41A1C',
+                linewidth=2,
+                linestyle='--',
+                label='Counterfactual',
+            )
+            ax.fill_between(
+                summary_df.loc[treated_mask, 'time'],
+                summary_df.loc[treated_mask, 'mu_lower'],
+                summary_df.loc[treated_mask, 'mu_upper'],
+                alpha=0.2,
+                color='#E41A1C',
+            )
+    
+    # Add vertical line at first treatment date
+    if summary_df['treatment'].sum() > 0:
+        first_treatment_time = summary_df.loc[summary_df['treatment'] == 1, 'time'].min()
+        ax.axvline(
+            x=first_treatment_time,
+            color='black',
+            linestyle='--',
+            linewidth=1.5,
+            alpha=0.7,
+        )
+        ax.text(
+            first_treatment_time, ax.get_ylim()[1], ' Treatment Start',
+            ha='left', va='top', fontsize=9, color='black', alpha=0.8,
+        )
+    
+    # Styling
+    group_label = f' ({group})' if group else ''
+    ax.set_xlabel('Time', fontsize=11)
+    ax.set_ylabel('Outcome', fontsize=11)
+    ax.set_title(f'Observed vs Predicted: {unit}{group_label}', fontsize=13, fontweight='bold')
+    ax.legend(loc='best', frameon=True, fancybox=True)
+    
+    # Rotate x-axis labels
+    plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
+    
+    plt.tight_layout()
+    
+    return fig, ax
 
 
 # =============================================================================

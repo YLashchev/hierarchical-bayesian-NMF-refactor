@@ -15,13 +15,17 @@ from bayesian_panel_nmf.inference import run_mcmc_inference, generate_prediction
 from bayesian_panel_nmf.output import format_draws
 from bayesian_panel_nmf.models import model
 
-# Visualization (PPC plots)
+# Visualization (PPC plots and time series)
 from bayesian_panel_nmf.visualization import (
     make_abs_ppc_plot,
     make_acf_ppc_plot,
     make_rmse_ppc_plot,
     make_unit_corr_ppc_plot,
     make_all_ppc_plots,
+    # Time series visualization
+    make_raw_rate_plot,
+    make_group_comparison_plot,
+    make_state_fit_plot,
 )
 
 __all__ = [
@@ -40,4 +44,8 @@ __all__ = [
     'make_rmse_ppc_plot',
     'make_unit_corr_ppc_plot',
     'make_all_ppc_plots',
+    # Visualization (Time Series)
+    'make_raw_rate_plot',
+    'make_group_comparison_plot',
+    'make_state_fit_plot',
 ]
