@@ -1,0 +1,17 @@
+Browser                 Browser base class
+Chrome                  Local Chrome process
+ChromeRemote            Remote Chrome process
+Chromote                Chromote class
+ChromoteSession         ChromoteSession class
+chrome_versions         Chrome versions cache helpers
+chrome_versions_list    List installed or available Chrome binary
+                        versions
+chromote-options        chromote Options
+chromote_info           Show information about the chromote package and
+                        Chrome browser
+default_chrome_args     Default Chrome arguments
+default_chromote_object
+                        Default Chromote object
+find_chrome             Find path to Chrome or Chromium browser
+with_chrome_version     Use a specific version of Chrome or related
+                        binaries

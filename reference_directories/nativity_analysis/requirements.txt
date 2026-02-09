@@ -1,0 +1,25 @@
+# Core dependencies
+numpy>=1.21.0
+pandas>=1.3.0
+scipy>=1.7.0
+
+# Bayesian modeling
+jax>=0.4.0
+jaxlib>=0.4.0
+numpyro>=0.12.0
+
+# Visualization
+matplotlib>=3.5.0
+seaborn>=0.11.0
+
+# Configuration
+pyyaml>=6.0
+
+# Development/testing
+pytest>=7.0.0
+black>=22.0.0
+flake8>=4.0.0
+
+# Jupyter for exploratory analysis
+jupyter>=1.0.0
+ipykernel>=6.0.0

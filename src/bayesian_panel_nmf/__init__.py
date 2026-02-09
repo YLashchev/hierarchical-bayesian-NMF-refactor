@@ -7,7 +7,7 @@ using Bayesian hierarchical models with low-rank matrix factorization.
 
 __version__ = "0.1.0"
 
-from .data import load_panel_data, wide_to_long, preprocess_pipeline, DataSchema
+from .data import load_panel_data, wide_to_long, preprocess_pipeline, DataSchema, OutcomeSpec
 from .models import model
 from .inference import run_mcmc_inference, generate_predictions, merge_draws_and_data
 
@@ -16,6 +16,7 @@ __all__ = [
     'wide_to_long',
     'preprocess_pipeline',
     'DataSchema',
+    'OutcomeSpec',
     'model',
     'run_mcmc_inference',
     'generate_predictions',
