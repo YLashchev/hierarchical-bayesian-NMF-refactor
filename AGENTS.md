@@ -76,9 +76,13 @@ import numpyro
 import numpyro.distributions as dist
 from numpyro.infer import MCMC, NUTS, Predictive
 
-from bayesian_panel_nmf.data import load_panel_data, wide_to_long, preprocess_pipeline, DataSchema, OutcomeSpec
-from bayesian_panel_nmf.models import model
-from bayesian_panel_nmf.inference import run_mcmc_inference, generate_predictions, merge_draws_and_data
+from bayesian_panel_nmf import (
+    load_and_prepare,
+    run_mcmc_inference,
+    generate_predictions,
+    format_draws,
+    model
+)
 ```
 
 ### Type Hints
@@ -94,7 +98,7 @@ def run_mcmc_inference(
 ```
 
 ### Docstrings
-Use **NumPy/SciPy style**. See `src/bayesian_panel_nmf/inference/sampler.py` for examples:
+Use **NumPy/SciPy style**. See `src/bayesian_panel_nmf/inference.py` for examples:
 ```python
 def run_mcmc_inference(data_dict, model_fn, rank=10):
     """
@@ -194,20 +198,14 @@ bayesian_panel_nmf/
 │   └── run_analysis.py         # Main entry point
 ├── src/bayesian_panel_nmf/
 │   ├── __init__.py             # Package exports
-│   ├── data/
-│   │   ├── __init__.py         # Data subpackage exports
-│   │   ├── loader.py           # CSV loading, validation, wide_to_long()
-│   │   ├── preprocessing.py    # Aggregation, filtering, preprocess_pipeline()
-│   │   └── schema.py           # DataSchema and OutcomeSpec classes
-│   ├── models/
-│   │   ├── __init__.py         # Models subpackage exports
-│   │   ├── panel_nmf_model.py  # Core Bayesian model (model function)
-│   │   ├── priors.py           # Prior configurations and distribution helpers
-│   │   └── utils.py            # Missingness adjustment
-│   └── inference/
-│       ├── __init__.py         # Inference subpackage exports
-│       ├── sampler.py          # MCMC execution (run_mcmc_inference, generate_predictions)
-│       └── postprocessing.py   # Draw merging, summary stats (merge_draws_and_data)
+│   ├── data.py                 # Combined loading + preparation (load_and_prepare)
+│   ├── inference.py            # Simplified MCMC execution (run_mcmc_inference, generate_predictions)
+│   ├── output.py               # Draw formatting (format_draws)
+│   └── models/
+│       ├── __init__.py         # Models subpackage exports
+│       ├── panel_nmf_model.py  # Core Bayesian model (model function)
+│       ├── priors.py           # Prior configurations and distribution helpers
+│       └── utils.py            # Missingness adjustment
 ├── nativity_analysis.qmd       # R/Quarto visualization
 └── plot_utilities.R            # R plotting functions
 ```
@@ -215,25 +213,17 @@ bayesian_panel_nmf/
 ## 6. Data Flow
 
 ```
-Raw CSV (wide format)
+Config (YAML)
         ↓
-load_panel_data(filepath, schema)       # Validates columns, parses dates
+load_and_prepare(filepath, config, groups) → data_dict
         ↓
-wide_to_long(df, schema)                # Converts wide → long format
-        ↓                                 # Standardizes to: unit, time, group, outcome, denominator, treatment
-preprocess_pipeline(df, groups, config) # Filters time, aggregates, builds arrays
+run_mcmc_inference(data_dict, model, rank, config) → MCMC
         ↓
-data_dict {Y, denominators, control_idx_array, missing_idx_array, groups, units, times, df_preprocessed}
+generate_predictions(mcmc, data_dict, model, rank, config) → predictions
         ↓
-run_mcmc_inference(data_dict, model, rank, ...)  # NUTS sampler
+format_draws(samples, predictions, data_dict) → DataFrame
         ↓
-MCMC object {posterior samples}
-        ↓
-generate_predictions(mcmc, model, data_dict, rank, ...)  # Posterior predictive
-        ↓
-merge_draws_and_data(samples, predictions, df_preprocessed, ...)  # Tidy output
-        ↓
-Results CSV (draws + observed data)
+Results CSV
 ```
 
 ## 7. Key Data Structures
@@ -326,9 +316,11 @@ When modifying `panel_nmf_model.py`:
 2. **Keep plate structure intact** - independence assumptions are encoded in plates
 3. **Test convergence** - any prior changes should be validated with R-hat < 1.01, ESS > 400
 
-## 10. Codebase Simplification Refactor (PLANNED)
+## 10. Codebase Simplification Refactor (COMPLETED)
 
-**Status:** Not yet started. The current codebase uses the original modular structure described in Section 5.
+**Status:** Completed on February 9, 2026.
+
+The refactor successfully consolidated the codebase from ~1,724 lines across 6+ files to ~735 lines across 4 files (a ~57% reduction). The deprecated `data/` and `inference/` subdirectories have been removed and replaced with the simplified flat module structure described in Section 5.
 
 ### 10.1 Problem Diagnosis
 
@@ -377,15 +369,15 @@ format_draws(samples, predictions, data_dict) → DataFrame with FIXED output co
 
 ### 10.5 File Structure Comparison
 
-| Current Files | Lines | Target Files | Lines | Notes |
-|--------------|-------|--------------|-------|-------|
-| `data/schema.py` | ~186 | Remove | 0 | Inline into data.py |
-| `data/loader.py` | ~249 | `data.py` | ~150 | Combined loading + prep |
+| Old Files | Lines | New Files | Lines | Notes |
+|-----------|-------|-----------|-------|-------|
+| `data/schema.py` | ~186 | (removed) | — | Inlined into data.py |
+| `data/loader.py` | ~249 | `data.py` | ~250 | Combined loading + prep |
 | `data/preprocessing.py` | ~348 | (merged above) | — | |
-| `inference/postprocessing.py` | ~353 | `output.py` | ~100 | Simplified formatting |
-| `inference/sampler.py` | ~317 | `inference.py` | ~150 | Keep, remove col params |
-| `scripts/run_analysis.py` | ~271 | (simplify) | ~100 | Cleaner main loop |
-| **Total** | **~1,724** | **Target** | **~500** | **~70% reduction** |
+| `inference/postprocessing.py` | ~353 | `output.py` | ~150 | Simplified formatting |
+| `inference/sampler.py` | ~317 | `inference.py` | ~200 | Simplified, removed col params |
+| `scripts/run_analysis.py` | ~271 | (simplified) | ~135 | Cleaner main loop |
+| **Total** | **~1,724** | **Actual** | **~735** | **~57% reduction** |
 
 ### 10.6 Standard Column Names
 
@@ -421,7 +413,9 @@ All code after loading uses these **fixed names**—no parameters needed:
 
 ### 10.7 Implementation Tasks
 
-#### Task 1: Create `src/bayesian_panel_nmf/data.py` (~150 lines)
+All tasks were completed as part of this refactor. The following documents what was implemented:
+
+#### Task 1: Created `src/bayesian_panel_nmf/data.py` ✓
 
 **Purpose:** Single module for all data loading and preparation.
 
@@ -483,7 +477,7 @@ def _build_model_arrays(df: pd.DataFrame, groups: List[str]) -> dict:
 
 ---
 
-#### Task 2: Create `src/bayesian_panel_nmf/output.py` (~100 lines)
+#### Task 2: Created `src/bayesian_panel_nmf/output.py` ✓
 
 **Purpose:** Single module for formatting MCMC output.
 
@@ -524,11 +518,11 @@ def format_draws(
 
 ---
 
-#### Task 3: Simplify `src/bayesian_panel_nmf/inference.py` (~150 lines)
+#### Task 3: Simplified `src/bayesian_panel_nmf/inference.py` ✓
 
 **Purpose:** Keep inference logic, remove column name clutter.
 
-**Functions to keep (simplified signatures):**
+**Functions (simplified signatures):**
 
 ```python
 def run_mcmc_inference(
@@ -549,15 +543,15 @@ def generate_predictions(
     """Generate posterior predictive samples."""
 ```
 
-**Remove:**
+**Removed:**
 - Any column name parameters
 - Redundant data reshaping (done in `data.py`)
 
 ---
 
-#### Task 4: Simplify `scripts/run_analysis.py` (~100 lines)
+#### Task 4: Simplified `scripts/run_analysis.py` ✓
 
-**Target structure:**
+**Implemented structure:**
 
 ```python
 def main():
@@ -603,7 +597,7 @@ def main():
 
 ---
 
-#### Task 5: Update `src/bayesian_panel_nmf/__init__.py`
+#### Task 5: Updated `src/bayesian_panel_nmf/__init__.py` ✓
 
 **Exports:**
 
@@ -624,9 +618,9 @@ __all__ = [
 
 ---
 
-#### Task 6: Keep `models/` unchanged
+#### Task 6: Kept `models/` unchanged ✓
 
-These files require no changes:
+These files required no changes:
 - `models/panel_nmf_model.py` - Core Bayesian model
 - `models/priors.py` - Prior configurations  
 - `models/utils.py` - Missingness adjustment
@@ -635,32 +629,32 @@ They operate on arrays, not DataFrames, so standardized column names don't affec
 
 ---
 
-#### Task 7: Remove deprecated files
+#### Task 7: Removed deprecated files ✓
 
-After Tasks 1-5 are complete and tested:
+The following files and directories were removed:
 
 ```bash
-# Remove old data modules
-rm src/bayesian_panel_nmf/data/schema.py
-rm src/bayesian_panel_nmf/data/loader.py
-rm src/bayesian_panel_nmf/data/preprocessing.py
-rm src/bayesian_panel_nmf/data/__init__.py
-rmdir src/bayesian_panel_nmf/data/
+# Removed old data modules
+src/bayesian_panel_nmf/data/schema.py
+src/bayesian_panel_nmf/data/loader.py
+src/bayesian_panel_nmf/data/preprocessing.py
+src/bayesian_panel_nmf/data/__init__.py
+src/bayesian_panel_nmf/data/
 
-# Remove old inference modules  
-rm src/bayesian_panel_nmf/inference/postprocessing.py
-rm src/bayesian_panel_nmf/inference/sampler.py
-rm src/bayesian_panel_nmf/inference/__init__.py
-rmdir src/bayesian_panel_nmf/inference/
+# Removed old inference modules  
+src/bayesian_panel_nmf/inference/postprocessing.py
+src/bayesian_panel_nmf/inference/sampler.py
+src/bayesian_panel_nmf/inference/__init__.py
+src/bayesian_panel_nmf/inference/
 ```
 
-**Final structure:**
+**Current structure:**
 ```
 src/bayesian_panel_nmf/
 ├── __init__.py
-├── data.py              # NEW: Combined loading + preparation
-├── inference.py         # NEW: Simplified from inference/sampler.py
-├── output.py            # NEW: Draw formatting
+├── data.py              # Combined loading + preparation
+├── inference.py         # Simplified MCMC execution
+├── output.py            # Draw formatting
 └── models/
     ├── __init__.py
     ├── panel_nmf_model.py
