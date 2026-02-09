@@ -201,6 +201,7 @@ bayesian_panel_nmf/
 │   ├── data.py                 # Combined loading + preparation (load_and_prepare)
 │   ├── inference.py            # Simplified MCMC execution (run_mcmc_inference, generate_predictions)
 │   ├── output.py               # Draw formatting (format_draws)
+│   ├── visualization.py        # PPC plots (make_*_ppc_plot functions)
 │   └── models/
 │       ├── __init__.py         # Models subpackage exports
 │       ├── panel_nmf_model.py  # Core Bayesian model (model function)
@@ -724,18 +725,75 @@ The following are explicitly **not** part of this refactor but could be added la
 | Spatial aggregation | Aggregate units (e.g., counties → states) |
 | Placebo tests | `run_placebos.py` script |
 | Sensitivity analysis | `run_sensitivity.py` script |
-| Python visualization | Port R plotting to matplotlib/seaborn |
+| ~~Python visualization~~ | ~~Port R plotting to matplotlib/seaborn~~ (DONE - see Phase 2) |
 | GPU support | JAX/CUDA acceleration |
 
-## 11. Future Roadmap
+## 11. Development Roadmap
 
-- [ ] **GPU Support**: JAX/CUDA acceleration for faster MCMC
-- [ ] **Test Suite**: pytest with unit and integration tests
-- [ ] **Spillover Analysis**: Scripts for cross-state spillover effects
-- [ ] **Sensitivity Analysis**: Donor pool sensitivity (exclude neighboring states)
-- [ ] **Python Visualization**: Port R plotting to matplotlib/seaborn
-- [ ] **Type Hints**: Complete coverage across all modules
-- [ ] **Logging**: Replace print statements with proper logging
+### Phase 1: Codebase Simplification ✅ COMPLETED (Feb 9, 2026)
+- [x] Created simplified `data.py` with `load_and_prepare()`
+- [x] Created simplified `output.py` with `format_draws()`
+- [x] Created simplified `inference.py` with config-driven API
+- [x] Updated `run_analysis.py` to use new modules
+- [x] Removed deprecated `data/` and `inference/` subdirectories
+- [x] Line count reduction: ~1,724 → ~735 lines (~57% reduction)
+
+### Phase 2: Python Visualization (PPC Plots) ✅ COMPLETED (Feb 9, 2026)
+Ported Posterior Predictive Check (PPC) plots from R to Python using matplotlib/seaborn.
+
+**Module:** `src/bayesian_panel_nmf/visualization.py`
+
+**Implemented functions:**
+| Function | Description |
+|----------|-------------|
+| `make_abs_ppc_plot()` | Maximum absolute residual comparison |
+| `make_acf_ppc_plot()` | Autocorrelation of residuals at specified lag |
+| `make_rmse_ppc_plot()` | RMSE comparison (observed vs predicted) |
+| `make_unit_corr_ppc_plot()` | Cross-unit correlation (spectral norm) |
+| `make_all_ppc_plots()` | Convenience function to generate all PPC plots |
+
+**Key features:**
+- Handles BOTH standardized (`unit`, `group`, `treatment`) and legacy (`state`, `category`, `exposure_code`) column names via `_standardize_columns()` helper
+- All PPC plots compare observed residuals vs predicted residuals in control period
+- Residuals: `obs_diff = outcome - exp(mu)`, `pred_diff = ypred - exp(mu)`
+- P-values: proportion of draws where observed statistic < predicted statistic
+- Faceted histograms by unit and category with p-value annotations
+- Returns `(fig, pvals_df)` tuples for programmatic access
+- `make_all_ppc_plots()` can optionally save plots to files
+
+**Usage example:**
+```python
+from bayesian_panel_nmf import make_all_ppc_plots, make_rmse_ppc_plot
+
+# Generate all PPC plots and save to figs/
+results = make_all_ppc_plots(draws_df, output_dir='figs/')
+
+# Generate individual plot
+fig, pvals = make_rmse_ppc_plot(draws_df, categories=['total'])
+fig.savefig('rmse_check.png')
+```
+
+### Phase 3: Debugging & Optimization
+- [ ] Add comprehensive logging (replace print statements)
+- [ ] Profile MCMC inference for bottlenecks
+- [ ] Optimize array operations in `format_draws()`
+- [ ] Add input validation with descriptive error messages
+- [ ] Memory optimization for large datasets
+
+### Phase 4: Testing with Synthetic Data
+- [ ] Create synthetic data generator for panel data
+- [ ] Unit tests for `data.py` functions
+- [ ] Unit tests for `output.py` functions
+- [ ] Integration tests with known treatment effects
+- [ ] Convergence tests (R-hat, ESS validation)
+- [ ] Edge case tests (missing data, single group, etc.)
+
+### Phase 5: Future Enhancements
+- [ ] GPU support via JAX/CUDA
+- [ ] Staggered treatment timing support
+- [ ] Spillover analysis scripts
+- [ ] Sensitivity analysis (donor pool variations)
+- [ ] Long-format input support (skip wide_to_long)
 
 ## 12. Related Resources
 
@@ -751,3 +809,35 @@ The following are explicitly **not** part of this refactor but could be added la
 5. **Test locally**: Run with `--rank 5` for quick validation
 6. **Check convergence**: Verify R-hat < 1.01 in MCMC output
 7. **Verify output format**: Ensure standardized column names in output CSVs
+
+## 14. Agent Configuration
+
+Custom agents are defined in `.opencode/agent/` (excluded from git):
+
+| Agent | File | Purpose |
+|-------|------|---------|
+| `master-planner` | `master-planner.md` | Project coordination, planning, documentation updates |
+| `code-implementer` | `code-implementer.md` | Code implementation following project patterns |
+| `documentation-writer` | `documentation-writer.md` | Documentation creation and updates |
+
+### Creating New Agents
+
+For specialized tasks, create new agent configuration files:
+
+**Example: `debugger.md`**
+```yaml
+---
+description: Debug and optimize Bayesian Panel NMF code
+mode: primary
+---
+You are a debugging specialist for the Bayesian Panel NMF project...
+```
+
+**Example: `test-writer.md`**
+```yaml
+---
+description: Write tests for Bayesian Panel NMF using pytest
+mode: primary
+---
+You are a test engineer for the Bayesian Panel NMF project...
+```
