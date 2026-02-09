@@ -14,7 +14,14 @@ This module provides two types of visualization functions:
 2. **Time Series Plots**: Visualizations for exploring the data and model results.
    - make_raw_rate_plot: Rate by treatment group over time
    - make_group_comparison_plot: Faceted comparison of rates across outcome groups
-   - make_state_fit_plot: Observed vs predicted for a specific unit with CI
+   - make_unit_fit_plot: Observed vs predicted for a specific unit with CI
+   - make_all_unit_fit_plots: Fit plots for multiple units
+   - make_fit_plot_by_index: Fit plot by K (group) and D (unit) array indices
+
+The module operates on generic panel data dimensions:
+- K = groups (outcome categories, e.g., age groups, demographic categories)
+- D = units (panel entities, e.g., states, hospitals, counties, firms)
+- N = time periods
 
 The module handles BOTH standardized and legacy column names:
 - Standardized: unit, group, denominator, treatment
@@ -24,12 +31,14 @@ PPC functions return (fig, pvals_df) tuples where fig is a matplotlib Figure
 and pvals_df is a DataFrame with p-values. Time series functions return (fig, ax/axes).
 """
 
+from pathlib import Path
+from typing import Optional, List, Tuple, Dict, Union
+import warnings
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-from typing import Optional, List, Tuple, Union
-import warnings
 
 
 # =============================================================================
@@ -82,10 +91,10 @@ def _standardize_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 def _identify_treated_units(df: pd.DataFrame) -> List[str]:
     """
-    Identify units (states) that have treatment at any time point.
+    Identify units that have treatment at any time point.
     
-    In the R code, this is the 'banned_state' concept - states that have
-    exposure_code == 1 at some point.
+    In the original R code, this was the 'banned_state' concept - units
+    that have treatment == 1 at some point.
     
     Parameters
     ----------
@@ -302,16 +311,16 @@ def make_abs_ppc_plot(
     draws_df : pd.DataFrame
         DataFrame with MCMC draws. Must contain columns:
         - .draw: draw identifier
-        - unit (or state): panel entity
-        - group (or category): outcome category
-        - treatment (or exposure_code): binary treatment indicator
+        - unit: panel entity (D dimension)
+        - group: outcome category (K dimension)
+        - treatment: binary treatment indicator
         - outcome (or the specified outcome_col): observed outcome
         - ypred: posterior predictive value
         - mu: counterfactual log-rate
     outcome_col : str, default='outcome'
         Name of the outcome column.
     categories : list of str, optional
-        Categories to include. If None, uses all categories.
+        Categories (K dimension) to include. If None, uses all categories.
     figsize : tuple, default=(12, 8)
         Figure size (width, height).
         
@@ -346,7 +355,7 @@ def make_abs_ppc_plot(
     # Filter to categories
     df = df[df['group'].isin(categories)]
     
-    # Identify treated units (banned states)
+    # Identify treated units
     treated_units = _identify_treated_units(df)
     
     # Filter to control period only
@@ -355,7 +364,7 @@ def make_abs_ppc_plot(
     # Filter to treated units only
     df_control = df_control[df_control['unit'].isin(treated_units)]
     
-    # Exclude aggregate states if present
+    # Exclude aggregate units if present (e.g., "Ban States")
     df_control = df_control[~df_control['unit'].str.contains('Ban States', case=False, na=False)]
     
     # Compute residuals
@@ -422,7 +431,7 @@ def make_acf_ppc_plot(
     outcome_col : str, default='outcome'
         Name of the outcome column.
     categories : list of str, optional
-        Categories to include. If None, uses all categories.
+        Categories (K dimension) to include. If None, uses all categories.
     figsize : tuple, default=(12, 8)
         Figure size (width, height).
         
@@ -540,7 +549,7 @@ def make_rmse_ppc_plot(
     outcome_col : str, default='outcome'
         Name of the outcome column.
     categories : list of str, optional
-        Categories to include. If None, uses all categories.
+        Categories (K dimension) to include. If None, uses all categories.
     figsize : tuple, default=(12, 8)
         Figure size (width, height).
         
@@ -629,8 +638,8 @@ def make_unit_corr_ppc_plot(
     Posterior Predictive Check: Cross-Unit Correlation (Spectral Norm).
     
     Computes the spectral norm (largest eigenvalue) of the correlation matrix
-    of residuals across units for each time point. Tests whether the model
-    captures cross-sectional dependence.
+    of residuals across units (D dimension) for each time point. Tests whether 
+    the model captures cross-sectional dependence.
     
     Residuals:
     - obs_diff = outcome - exp(mu)
@@ -649,7 +658,7 @@ def make_unit_corr_ppc_plot(
     outcome_col : str, default='outcome'
         Name of the outcome column.
     categories : list of str, optional
-        Categories to include. If None, uses all categories.
+        Categories (K dimension) to include. If None, uses all categories.
     ndraws : int, default=1000
         Maximum number of draws to use (for computational efficiency).
     figsize : tuple, default=(10, 6)
@@ -784,7 +793,7 @@ def make_unit_corr_ppc_plot(
         fig, ax = plt.subplots(figsize=figsize)
         ax.text(0.5, 0.5, 'Insufficient data for spectral norm computation',
                 ha='center', va='center', transform=ax.transAxes)
-        ax.set_title('Difference in State Correlations')
+        ax.set_title('Difference in Unit Correlations')
         return fig, pd.DataFrame(columns=['group', 'pval'])
     
     # Compute p-values
@@ -799,7 +808,7 @@ def make_unit_corr_ppc_plot(
         stats_df=eval_stats,
         pvals_df=pvals_df,
         x_col='eval_diff',
-        title='Difference in State Correlations',
+        title='Difference in Unit Correlations',
         xlabel='Observed - Predicted Spectral Norm',
         facet_cols=['group'],
         figsize=figsize,
@@ -816,9 +825,11 @@ def make_unit_corr_ppc_plot(
 def make_raw_rate_plot(
     df: pd.DataFrame,
     group: Optional[str] = None,
+    unit_col: str = 'unit',
     rate_multiplier: float = 1000,
-    treatment_dates: Optional[dict] = None,
-    separate_texas: bool = False,
+    treatment_dates: Optional[Dict[str, str]] = None,
+    separate_unit: Optional[str] = None,
+    separate_texas: bool = False,  # Backward compatibility alias
     smooth_window: Optional[int] = None,
     figsize: Tuple[int, int] = (10, 6),
 ) -> Tuple[plt.Figure, plt.Axes]:
@@ -826,23 +837,32 @@ def make_raw_rate_plot(
     Create a time series plot showing rates by treatment group.
     
     Creates a line plot with different colors for Treated, Control, and optionally
-    Texas as a separate group. Supports smoothing and treatment date markers.
+    a specific unit as a separate group. Supports smoothing and treatment date markers.
     
     Parameters
     ----------
     df : pd.DataFrame
         DataFrame with columns: unit, time, group, outcome, denominator, treatment
         (or legacy column names: state, category, population, exposure_code).
+        The 'unit' column represents the D dimension (panel entities such as
+        states, hospitals, counties, firms, etc.).
     group : str, optional
-        Group/category to filter to (e.g., 'total', 'usborn'). If None, aggregates
-        all groups together.
+        Group/category (K dimension) to filter to (e.g., 'total', 'usborn'). 
+        If None, aggregates all groups together.
+    unit_col : str, default='unit'
+        Name of the column containing unit identifiers (D dimension).
+        Use this if your data has a different column name for the panel entity.
     rate_multiplier : float, default=1000
         Multiplier for rate calculation (e.g., 1000 = per 1,000 population).
     treatment_dates : dict, optional
         Dictionary of {label: date} for vertical marker lines.
-        Example: {'Dobbs': '2022-06-24', 'Roe v Wade Overturned': '2022-06-24'}
+        Example: {'Policy Change': '2022-06-24', 'Implementation': '2022-09-01'}
+    separate_unit : str, optional
+        If provided, show this specific unit as a separate group from other 
+        treated units. Useful for highlighting a particular unit of interest.
     separate_texas : bool, default=False
-        If True, show Texas as a separate group from other treated states.
+        Deprecated. Use separate_unit='Texas' instead.
+        If True, equivalent to separate_unit='Texas'.
     smooth_window : int, optional
         Rolling window size for smoothing. If None, no smoothing applied.
     figsize : tuple, default=(10, 6)
@@ -860,18 +880,35 @@ def make_raw_rate_plot(
     >>> fig, ax = make_raw_rate_plot(df, group='total', rate_multiplier=1000)
     >>> fig.savefig('rate_plot.png')
     
+    >>> # Separate a specific unit
     >>> fig, ax = make_raw_rate_plot(
     ...     df, 
     ...     group='total',
-    ...     treatment_dates={'Dobbs': '2022-06-24'},
-    ...     separate_texas=True,
+    ...     treatment_dates={'Policy': '2022-06-24'},
+    ...     separate_unit='TX',
     ...     smooth_window=3
     ... )
+    
+    >>> # For backward compatibility with older code
+    >>> fig, ax = make_raw_rate_plot(df, group='total', separate_texas=True)
     """
     _setup_plot_style()
     
+    # Handle backward compatibility for separate_texas
+    if separate_texas and separate_unit is None:
+        separate_unit = 'Texas'
+        warnings.warn(
+            "separate_texas is deprecated. Use separate_unit='Texas' instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+    
     # Standardize column names
     df = _standardize_columns(df)
+    
+    # Handle custom unit column name
+    if unit_col != 'unit' and unit_col in df.columns:
+        df = df.rename(columns={unit_col: 'unit'})
     
     # Ensure time is datetime
     if 'time' in df.columns:
@@ -886,8 +923,8 @@ def make_raw_rate_plot(
     
     # Assign treatment group labels
     def assign_treatment_group(row):
-        if separate_texas and row['unit'] == 'Texas':
-            return 'Texas'
+        if separate_unit is not None and row['unit'] == separate_unit:
+            return separate_unit
         elif row['unit'] in treated_units:
             return 'Treated'
         else:
@@ -920,16 +957,18 @@ def make_raw_rate_plot(
     colors = {
         'Treated': '#E41A1C',   # Red
         'Control': '#999999',   # Gray
-        'Texas': '#FF7F00',     # Orange
     }
+    # Add color for separate_unit if specified
+    if separate_unit is not None:
+        colors[separate_unit] = '#FF7F00'  # Orange
     
     # Create plot
     fig, ax = plt.subplots(figsize=figsize)
     
-    # Plot order: Control first (in back), then Treated, then Texas
+    # Plot order: Control first (in back), then Treated, then separate_unit
     plot_order = ['Control', 'Treated']
-    if separate_texas:
-        plot_order.append('Texas')
+    if separate_unit is not None:
+        plot_order.append(separate_unit)
     
     for tgroup in plot_order:
         group_data = agg_df[agg_df['treatment_group'] == tgroup]
@@ -990,13 +1029,14 @@ def make_group_comparison_plot(
     df: pd.DataFrame,
     groups: Optional[List[str]] = None,
     rate_multiplier: float = 1000,
-    treatment_dates: Optional[dict] = None,
+    treatment_dates: Optional[Dict[str, str]] = None,
     figsize: Tuple[int, int] = (12, 8),
 ) -> Tuple[plt.Figure, np.ndarray]:
     """
     Create a faceted plot comparing rates across different outcome groups.
     
-    Each subplot shows treated vs control time series for a different group/category.
+    Each subplot shows treated vs control time series for a different group/category
+    (K dimension).
     
     Parameters
     ----------
@@ -1004,7 +1044,7 @@ def make_group_comparison_plot(
         DataFrame with columns: unit, time, group, outcome, denominator, treatment
         (or legacy column names).
     groups : list of str, optional
-        List of groups to plot. If None, uses all unique groups in the data.
+        List of groups (K dimension) to plot. If None, uses all unique groups.
     rate_multiplier : float, default=1000
         Multiplier for rate calculation.
     treatment_dates : dict, optional
@@ -1024,7 +1064,7 @@ def make_group_comparison_plot(
     >>> fig, axes = make_group_comparison_plot(
     ...     df, 
     ...     groups=['usborn', 'foreign'],
-    ...     treatment_dates={'Dobbs': '2022-06-24'}
+    ...     treatment_dates={'Policy': '2022-06-24'}
     ... )
     >>> fig.savefig('group_comparison.png')
     """
@@ -1138,7 +1178,7 @@ def make_group_comparison_plot(
     return fig, axes
 
 
-def make_state_fit_plot(
+def make_unit_fit_plot(
     draws_df: pd.DataFrame,
     unit: str,
     group: Optional[str] = None,
@@ -1149,25 +1189,26 @@ def make_state_fit_plot(
     Create a plot showing observed vs predicted for a specific unit.
     
     Shows the observed outcome as points, the predicted mean as a line,
-    and a credible interval as a ribbon.
+    and a credible interval as a ribbon. The unit corresponds to the D dimension
+    in the model (panel entities such as states, hospitals, counties, firms, etc.).
     
     Parameters
     ----------
     draws_df : pd.DataFrame
         DataFrame with posterior draws. Must contain columns:
         - .draw: draw identifier
-        - unit (or state): panel entity
-        - time: time period
+        - unit: panel entity (D dimension)
+        - time: time period (N dimension)
         - outcome: observed outcome value
         - ypred: posterior predictive value
         - treatment: binary treatment indicator
         Optionally:
-        - group (or category): outcome category
+        - group: outcome category (K dimension)
         - mu: counterfactual log-rate (for showing counterfactual)
     unit : str
-        Unit (e.g., state name) to plot.
+        Unit (D dimension) to plot, e.g., a state name, hospital ID, etc.
     group : str, optional
-        Group/category to filter to. If None and multiple groups exist,
+        Group/category (K dimension) to filter to. If None and multiple groups exist,
         uses the first group.
     ci_level : float, default=0.95
         Credible interval level (e.g., 0.95 for 95% CI).
@@ -1183,10 +1224,10 @@ def make_state_fit_plot(
         
     Examples
     --------
-    >>> fig, ax = make_state_fit_plot(draws_df, unit='Texas', group='total')
+    >>> fig, ax = make_unit_fit_plot(draws_df, unit='Texas', group='total')
     >>> fig.savefig('texas_fit.png')
     
-    >>> fig, ax = make_state_fit_plot(draws_df, unit='Oklahoma', ci_level=0.90)
+    >>> fig, ax = make_unit_fit_plot(draws_df, unit='Hospital_123', ci_level=0.90)
     """
     _setup_plot_style()
     
@@ -1333,6 +1374,209 @@ def make_state_fit_plot(
     return fig, ax
 
 
+# Backward compatibility alias
+make_state_fit_plot = make_unit_fit_plot
+
+
+def make_all_unit_fit_plots(
+    draws_df: pd.DataFrame,
+    units: Optional[List[str]] = None,
+    group: Optional[str] = None,
+    output_dir: Optional[str] = None,
+    ci_level: float = 0.95,
+    figsize: Tuple[int, int] = (10, 6),
+) -> Dict[str, Tuple[plt.Figure, plt.Axes]]:
+    """
+    Generate fit plots for multiple units.
+    
+    Creates observed vs predicted plots for each specified unit (D dimension).
+    Units can be states, hospitals, counties, firms, or any other panel entity.
+    
+    Parameters
+    ----------
+    draws_df : pd.DataFrame
+        DataFrame with posterior draws. See make_unit_fit_plot for required columns.
+    units : list of str, optional
+        Units (D dimension) to plot. If None, plots all unique units in the data.
+    group : str, optional
+        Group/category (K dimension) to filter to. If None and multiple groups exist,
+        uses the first group for each unit.
+    output_dir : str, optional
+        If provided, saves plots to this directory as {unit}_fit.png.
+        Creates the directory if it doesn't exist.
+    ci_level : float, default=0.95
+        Credible interval level.
+    figsize : tuple, default=(10, 6)
+        Figure size for each plot.
+        
+    Returns
+    -------
+    dict
+        Dictionary mapping unit names to (fig, ax) tuples.
+        
+    Examples
+    --------
+    >>> # Generate plots for all units
+    >>> results = make_all_unit_fit_plots(draws_df, output_dir='figs/unit_fits/')
+    
+    >>> # Generate plots for specific units
+    >>> results = make_all_unit_fit_plots(
+    ...     draws_df,
+    ...     units=['Texas', 'Oklahoma', 'Louisiana'],
+    ...     group='total',
+    ...     output_dir='figs/'
+    ... )
+    
+    >>> # Access individual plots
+    >>> fig, ax = results['Texas']
+    >>> fig.savefig('texas_custom.png', dpi=300)
+    """
+    # Standardize column names
+    df = _standardize_columns(draws_df)
+    
+    # Get units to plot
+    if units is None:
+        units = df['unit'].unique().tolist()
+    
+    if len(units) == 0:
+        warnings.warn("No units found in data.")
+        return {}
+    
+    # Create output directory if specified
+    if output_dir is not None:
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+    
+    results = {}
+    
+    print(f"Generating fit plots for {len(units)} units...")
+    
+    for i, unit in enumerate(units):
+        try:
+            fig, ax = make_unit_fit_plot(
+                draws_df=draws_df,
+                unit=unit,
+                group=group,
+                ci_level=ci_level,
+                figsize=figsize,
+            )
+            results[unit] = (fig, ax)
+            
+            # Save if output_dir provided
+            if output_dir is not None:
+                # Sanitize unit name for filename
+                safe_name = str(unit).replace('/', '_').replace('\\', '_').replace(' ', '_')
+                filename = f"{safe_name}_fit.png"
+                fig.savefig(output_path / filename, dpi=150, bbox_inches='tight')
+                
+            if (i + 1) % 10 == 0:
+                print(f"  Processed {i + 1}/{len(units)} units")
+                
+        except Exception as e:
+            warnings.warn(f"Failed to create plot for unit '{unit}': {e}")
+            continue
+    
+    if output_dir is not None:
+        print(f"Saved {len(results)} plots to {output_dir}")
+    
+    return results
+
+
+def make_fit_plot_by_index(
+    draws_df: pd.DataFrame,
+    k: Optional[int] = None,
+    d: Optional[int] = None,
+    ci_level: float = 0.95,
+    figsize: Tuple[int, int] = (10, 6),
+) -> Tuple[plt.Figure, plt.Axes]:
+    """
+    Create a fit plot by K (group) and D (unit) indices.
+    
+    Useful when working directly with array indices rather than names.
+    This function maps the integer indices to the corresponding group and unit
+    names, then calls make_unit_fit_plot.
+    
+    The model operates on (K, D, N) arrays where:
+    - K = groups (outcome categories)
+    - D = units (panel entities)
+    - N = time periods
+    
+    Parameters
+    ----------
+    draws_df : pd.DataFrame
+        DataFrame with posterior draws. Must contain 'unit' and 'group' columns.
+        If the data contains 'K' and 'D' index columns, those will be used
+        for the mapping. Otherwise, indices are based on sorted unique values.
+    k : int, optional
+        Group index (K dimension). If None, uses first group (k=0).
+    d : int, optional
+        Unit index (D dimension). If None, uses first unit (d=0).
+    ci_level : float, default=0.95
+        Credible interval level.
+    figsize : tuple, default=(10, 6)
+        Figure size.
+        
+    Returns
+    -------
+    fig : matplotlib.Figure
+        The figure object.
+    ax : matplotlib.Axes
+        The axes object.
+        
+    Examples
+    --------
+    >>> # Plot first unit, first group
+    >>> fig, ax = make_fit_plot_by_index(draws_df, k=0, d=0)
+    
+    >>> # Plot 5th unit, 2nd group
+    >>> fig, ax = make_fit_plot_by_index(draws_df, k=1, d=4)
+    
+    >>> # Get unit name from index
+    >>> groups = sorted(draws_df['group'].unique())
+    >>> units = sorted(draws_df['unit'].unique())
+    >>> print(f"Plotting group={groups[1]}, unit={units[4]}")
+    """
+    # Standardize column names
+    df = _standardize_columns(draws_df)
+    
+    # Set defaults
+    if k is None:
+        k = 0
+    if d is None:
+        d = 0
+    
+    # Check for explicit index columns
+    if 'K' in df.columns and 'D' in df.columns:
+        # Use explicit index columns
+        groups = df.groupby('K')['group'].first().sort_index().tolist()
+        units = df.groupby('D')['unit'].first().sort_index().tolist()
+    else:
+        # Infer from sorted unique values
+        groups = sorted(df['group'].unique())
+        units = sorted(df['unit'].unique())
+    
+    # Validate indices
+    if k >= len(groups):
+        raise IndexError(f"Group index k={k} out of range. Max index is {len(groups) - 1}. "
+                         f"Available groups: {groups}")
+    if d >= len(units):
+        raise IndexError(f"Unit index d={d} out of range. Max index is {len(units) - 1}. "
+                         f"Available units: {units[:10]}{'...' if len(units) > 10 else ''}")
+    
+    group_name = groups[k]
+    unit_name = units[d]
+    
+    print(f"Plotting: group={group_name} (k={k}), unit={unit_name} (d={d})")
+    
+    return make_unit_fit_plot(
+        draws_df=draws_df,
+        unit=unit_name,
+        group=group_name,
+        ci_level=ci_level,
+        figsize=figsize,
+    )
+
+
 # =============================================================================
 # Convenience Functions
 # =============================================================================
@@ -1346,7 +1590,7 @@ def make_all_ppc_plots(
     acf_lag: int = 6,
     max_treat_date: Optional[str] = None,
     ndraws: int = 1000,
-) -> dict:
+) -> Dict[str, Dict]:
     """
     Generate all PPC plots and optionally save to files.
     
@@ -1359,7 +1603,7 @@ def make_all_ppc_plots(
     outcome_col : str, default='outcome'
         Name of the outcome column.
     categories : list of str, optional
-        Categories to include.
+        Categories (K dimension) to include.
     figsize : tuple, default=(12, 8)
         Figure size for plots.
     acf_lag : int, default=6
@@ -1410,7 +1654,6 @@ def make_all_ppc_plots(
     
     # Save plots if output_dir provided
     if output_dir is not None:
-        from pathlib import Path
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         

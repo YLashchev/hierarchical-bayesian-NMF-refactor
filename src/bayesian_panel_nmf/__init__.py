@@ -25,6 +25,10 @@ from bayesian_panel_nmf.visualization import (
     # Time series visualization
     make_raw_rate_plot,
     make_group_comparison_plot,
+    make_unit_fit_plot,
+    make_all_unit_fit_plots,
+    make_fit_plot_by_index,
+    # Backward compatibility alias
     make_state_fit_plot,
 )
 
@@ -47,5 +51,9 @@ __all__ = [
     # Visualization (Time Series)
     'make_raw_rate_plot',
     'make_group_comparison_plot',
-    'make_state_fit_plot',
+    'make_unit_fit_plot',
+    'make_all_unit_fit_plots',
+    'make_fit_plot_by_index',
+    # Backward compatibility
+    'make_state_fit_plot',  # Alias for make_unit_fit_plot
 ]
