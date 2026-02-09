@@ -7,18 +7,18 @@ using Bayesian hierarchical models with low-rank matrix factorization.
 
 __version__ = "0.1.0"
 
-from .data import load_panel_data, wide_to_long, preprocess_pipeline, DataSchema, OutcomeSpec
-from .models import model
-from .inference import run_mcmc_inference, generate_predictions, merge_draws_and_data
+# =============================================================================
+# New Simplified API (preferred)
+# =============================================================================
+from bayesian_panel_nmf.data import load_and_prepare
+from bayesian_panel_nmf.inference import run_mcmc_inference, generate_predictions
+from bayesian_panel_nmf.output import format_draws
+from bayesian_panel_nmf.models import model
 
 __all__ = [
-    'load_panel_data',
-    'wide_to_long',
-    'preprocess_pipeline',
-    'DataSchema',
-    'OutcomeSpec',
-    'model',
+    'load_and_prepare',
     'run_mcmc_inference',
     'generate_predictions',
-    'merge_draws_and_data',
+    'format_draws',
+    'model',
 ]
