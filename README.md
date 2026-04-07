@@ -90,7 +90,7 @@ data:
 
 model:
   outcome_distribution: "NB"
-  rank: 10
+  rank: 3
   types:
     total:
       groups: ["total"]
@@ -248,7 +248,7 @@ mcmc = run_mcmc_inference(data_dict, model, rank=10, **mcmc_config)
 
 ## Credits
 
-This package was developed by Alex Franks (UCSB, Statistics & Applied Probability).
+This package was developed by Yan Laschev and Alex Franks (UCSB, Statistics & Applied Probability).
 
 ## License
 
