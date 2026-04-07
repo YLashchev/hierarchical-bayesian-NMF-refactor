@@ -260,9 +260,13 @@ TBD
 
 The following features are planned for future development:
 - [ ] **REGEX in yaml**: Add options for specifiying outcome and denom prefixes in situations with many groups
-- [ ] ** Missing Data**: Support for missing data when small counts are supressed
+- [ ] **Missing Data**: Support for missing data when small counts are supressed
 - [ ] **GPU Support**: Add GPU acceleration via JAX for faster MCMC inference on large datasets
 - [ ] **Spillover Analysis**: Implement scripts for testing potential spillover effects between treated and control units
 - [ ] **Sensitivity Analysis**: Add donor pool sensitivity tests (excluding neighboring states from control group)
 - [ ] **R Graphing Generalization**: Create generalized R plotting functions that work with any panel data schema (not hardcoded to specific column names)
 - [ ] **Unit Testing and Debugging**: Add comprehensive unit tests and debugging utilities for the package
+
+### Other Extensions to consider
+- [ ] **Support for Gaussian / t-distributed outcomes**
+- [ ] **Expand class of supported latent variable models** Include GPLVM formulation, linear factor model (and NMF for counts).
