@@ -259,6 +259,8 @@ TBD
 ## To-Do / Roadmap
 
 The following features are planned for future development:
+- [ ] **REGEX in yaml**: Add options for specifiying outcome and denom prefixes in situations with many groups
+- [ ] ** Missing Data**: Support for missing data when small counts are supressed
 - [ ] **GPU Support**: Add GPU acceleration via JAX for faster MCMC inference on large datasets
 - [ ] **Spillover Analysis**: Implement scripts for testing potential spillover effects between treated and control units
 - [ ] **Sensitivity Analysis**: Add donor pool sensitivity tests (excluding neighboring states from control group)
