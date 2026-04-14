@@ -1,5 +1,12 @@
 # Agent configurations
 .opencode/
+AGENTS.md
+
+# Type checker config
+ty.toml
+
+# Raw data (large CSVs)
+data/raw/*.csv
 
 # Reference implementations (not part of package)
 reference_directories/
