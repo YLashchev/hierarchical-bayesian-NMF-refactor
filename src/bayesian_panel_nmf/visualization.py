@@ -35,6 +35,7 @@ import warnings
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from loguru import logger
 
 
 # =============================================================================
@@ -1242,47 +1243,52 @@ def make_all_ppc_plots(
     """
     results = {}
     
-    print("Generating PPC plots...")
+    logger.info("Generating PPC plots...")
     
     # Maximum absolute residual
-    print("  - Maximum absolute residual plot...")
+    logger.info("  - Maximum absolute residual plot...")
     fig_abs, pvals_abs = make_abs_ppc_plot(
         draws_df, outcome_col=outcome_col, categories=categories, figsize=figsize
     )
     results['abs'] = {'fig': fig_abs, 'pvals': pvals_abs}
+    logger.debug(f"    Generated {len(pvals_abs)} p-values for abs residual check")
     
     # ACF
-    print(f"  - ACF plot (lag={acf_lag})...")
+    logger.info(f"  - ACF plot (lag={acf_lag})...")
     fig_acf, pvals_acf = make_acf_ppc_plot(
         draws_df, lag=acf_lag, outcome_col=outcome_col, categories=categories, figsize=figsize
     )
     results['acf'] = {'fig': fig_acf, 'pvals': pvals_acf}
+    logger.debug(f"    Generated {len(pvals_acf)} p-values for ACF check")
     
     # RMSE
-    print("  - RMSE plot...")
+    logger.info("  - RMSE plot...")
     fig_rmse, pvals_rmse = make_rmse_ppc_plot(
         draws_df, outcome_col=outcome_col, categories=categories, figsize=figsize
     )
     results['rmse'] = {'fig': fig_rmse, 'pvals': pvals_rmse}
+    logger.debug(f"    Generated {len(pvals_rmse)} p-values for RMSE check")
     
     # Unit correlation
-    print("  - Unit correlation plot...")
+    logger.info("  - Unit correlation plot...")
     fig_corr, pvals_corr = make_unit_corr_ppc_plot(
         draws_df, max_treat_date=max_treat_date, outcome_col=outcome_col,
         categories=categories, ndraws=ndraws, figsize=(10, 6)
     )
     results['unit_corr'] = {'fig': fig_corr, 'pvals': pvals_corr}
+    logger.debug(f"    Generated {len(pvals_corr)} p-values for unit correlation check")
     
     # Save plots if output_dir provided
     if output_dir is not None:
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         
-        print(f"Saving plots to {output_dir}...")
+        logger.info(f"Saving plots to {output_dir}...")
         fig_abs.savefig(output_path / 'ppc_abs_residual.png', dpi=150, bbox_inches='tight')
         fig_acf.savefig(output_path / 'ppc_acf.png', dpi=150, bbox_inches='tight')
         fig_rmse.savefig(output_path / 'ppc_rmse.png', dpi=150, bbox_inches='tight')
         fig_corr.savefig(output_path / 'ppc_unit_corr.png', dpi=150, bbox_inches='tight')
+        logger.debug("  Saved all PPC plot images")
         
         # Save p-values to CSV
         all_pvals = []
@@ -1294,9 +1300,9 @@ def make_all_ppc_plots(
         if all_pvals:
             combined_pvals = pd.concat(all_pvals, ignore_index=True)
             combined_pvals.to_csv(output_path / 'ppc_pvalues.csv', index=False)
-            print(f"  Saved p-values to {output_path / 'ppc_pvalues.csv'}")
+            logger.info(f"  Saved p-values to {output_path / 'ppc_pvalues.csv'}")
     
-    print("Done.")
+    logger.info("PPC plots completed.")
     return results
 
 

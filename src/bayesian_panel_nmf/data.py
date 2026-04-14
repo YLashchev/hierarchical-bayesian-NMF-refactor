@@ -12,6 +12,14 @@ from typing import Dict, List, Any, Optional
 
 import numpy as np
 import pandas as pd
+from loguru import logger
+
+from bayesian_panel_nmf.validation import (
+    validate_filepath,
+    validate_config,
+    validate_groups,
+    DataError,
+)
 
 
 # =============================================================================
@@ -31,7 +39,8 @@ TREATMENT_COL = "treatment"
 def load_and_prepare(
     filepath: str,
     config: Dict[str, Any],
-    groups: List[str]
+    groups: List[str],
+    exclude_units: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """
     Load CSV, standardize columns, filter, aggregate, and prepare model arrays.
@@ -48,6 +57,10 @@ def load_and_prepare(
         Full config dict with 'data', 'model', 'mcmc' sections
     groups : list of str
         Which outcome groups to include (e.g., ["total"] or ["usborn", "foreign"])
+    exclude_units : list of str, optional
+        Units (e.g., states) to exclude from the analysis. Useful when
+        certain units have missing data for specific subgroups (e.g.,
+        California lacks marital status data for births).
 
     Returns
     -------
@@ -61,32 +74,71 @@ def load_and_prepare(
         - units: list of str (D labels)
         - times: list of datetime (N labels)
         - df_preprocessed: DataFrame with standardized columns
+
+    Raises
+    ------
+    ValidationError
+        If filepath doesn't exist or is invalid
+    ConfigValidationError
+        If config is missing required sections or keys
+    DataValidationError
+        If data file is missing required columns or has invalid values
     """
+    # =========================================================================
+    # Input validation
+    # =========================================================================
+    logger.debug("Validating inputs...")
+    validate_filepath(filepath)
+    validate_config(config)
+    validate_groups(groups)
+    logger.debug("Input validation passed")
+
     data_config = config.get("data", {})
+    
+    logger.info(f"Loading data from: {filepath}")
+    logger.debug(f"Requested groups: {groups}")
 
     # Parse schema from config
     schema_info = _parse_schema(config)
+    logger.debug(f"Schema parsed: unit_col={schema_info['unit_col']}, time_col={schema_info['time_col']}")
 
     # Load and standardize column names
     df = _load_and_standardize(filepath, schema_info, data_config.get("date_format", "auto"))
+    logger.debug(f"Loaded {len(df)} rows, columns: {list(df.columns)}")
 
     # Convert wide format to long format with standard columns
     df = _wide_to_long(df, schema_info, groups)
+    logger.debug(f"After wide_to_long: {len(df)} rows")
 
     # Filter time range
-    df = _filter_time_range(
-        df,
-        data_config.get("start_date"),
-        data_config.get("end_date")
-    )
+    start_date = data_config.get("start_date")
+    end_date = data_config.get("end_date")
+    df = _filter_time_range(df, start_date, end_date)
+    if start_date or end_date:
+        logger.debug(f"Filtered to date range [{start_date}, {end_date}): {len(df)} rows")
+
+    # Exclude specified units
+    if exclude_units:
+        before_count = df[UNIT_COL].nunique()
+        df = df[~df[UNIT_COL].isin(exclude_units)].reset_index(drop=True)
+        after_count = df[UNIT_COL].nunique()
+        logger.info(f"Excluded units {exclude_units}: {before_count} → {after_count} units")
 
     # Aggregate temporally if configured
     agg_config = data_config.get("aggregation", {})
     if agg_config.get("enabled", False):
-        df = _aggregate_temporal(df, agg_config.get("period", "bimonthly"))
+        period = agg_config.get("period", "bimonthly")
+        df = _aggregate_temporal(df, period)
+        logger.info(f"Aggregated to {period}: {len(df)} rows")
 
     # Build model arrays
     data_dict = _build_model_arrays(df, groups)
+    
+    K, D, N = data_dict['Y'].shape
+    logger.info(f"Model arrays built: K={K} groups, D={D} units, N={N} time periods")
+    logger.debug(f"Y shape: {data_dict['Y'].shape}, dtype: {data_dict['Y'].dtype}")
+    logger.debug(f"Control observations: {data_dict['control_idx_array'].sum()}")
+    logger.debug(f"Missing observations: {data_dict['missing_idx_array'].sum()}")
 
     # Include preprocessed DataFrame for output merging
     data_dict["df_preprocessed"] = df
@@ -132,39 +184,60 @@ def _load_and_standardize(
     Load CSV and parse time column.
 
     Does NOT rename columns yet - that happens in _wide_to_long.
+    
+    Raises
+    ------
+    DataValidationError
+        If required columns are missing, time cannot be parsed, or treatment has invalid values
     """
     path = Path(filepath)
     if not path.exists():
+        logger.error(f"Data file not found: {filepath}")
         raise FileNotFoundError(f"Data file not found: {filepath}")
 
     df = pd.read_csv(path)
+    logger.debug(f"CSV loaded: {len(df)} rows, {len(df.columns)} columns")
 
-    # Validate required columns exist
+    # Extract column names from schema
     time_col = schema_info["time_col"]
     unit_col = schema_info["unit_col"]
     treatment_col = schema_info["treatment_col"]
 
+    # Build list of required columns
     required = [unit_col, time_col, treatment_col]
+    outcome_cols = []
     for o in schema_info["outcomes"]:
         required.append(o["outcome_col"])
+        outcome_cols.append(o["outcome_col"])
         if o["denominator_col"]:
             required.append(o["denominator_col"])
 
+    # Check required columns exist
     missing = set(required) - set(df.columns)
     if missing:
-        raise ValueError(f"Missing required columns: {missing}")
+        raise DataError(f"Missing columns: {sorted(missing)}")
+    logger.debug(f"All required columns present: {required}")
 
     # Parse time column
     if date_format == "auto":
         formats_to_try = [None, "%Y-%m-%d", "%m/%d/%y", "%m/%d/%Y", "%d-%m-%Y"]
+        parsed = False
         for fmt in formats_to_try:
             try:
                 df[time_col] = pd.to_datetime(df[time_col], format=fmt)
+                parsed = True
+                logger.debug(f"Time column parsed with format: {fmt or 'auto-detected'}")
                 break
             except (ValueError, TypeError):
                 continue
+        if not parsed:
+            raise DataError(f"Could not parse time column '{time_col}'")
     else:
-        df[time_col] = pd.to_datetime(df[time_col], format=date_format)
+        try:
+            df[time_col] = pd.to_datetime(df[time_col], format=date_format)
+            logger.debug(f"Time column parsed with specified format: {date_format}")
+        except ValueError as e:
+            raise DataError(f"Could not parse time column '{time_col}': {e}")
 
     return df
 
@@ -207,6 +280,7 @@ def _wide_to_long(
         long_dfs.append(subset)
 
     if not long_dfs:
+        logger.error(f"No matching outcomes found for groups: {groups}")
         raise ValueError(f"No matching outcomes found for groups: {groups}")
 
     df_long = pd.concat(long_dfs, ignore_index=True)
@@ -273,6 +347,7 @@ def _aggregate_temporal(df: pd.DataFrame, period: str) -> pd.DataFrame:
     }
 
     if period not in period_map:
+        logger.error(f"Unknown aggregation period: {period}")
         raise ValueError(f"Unknown period: {period}. Use: monthly, bimonthly, quarterly, yearly")
 
     months_per_period, period_func = period_map[period]

@@ -1,18 +1,12 @@
 data:
   input_file: "data/raw/nativity_analyticdata.csv"
-  output_dir: "results/test"
+  output_dir: "results/production_test"
   
   schema:
     unit_col: "state"
     time_col: "time"
     treatment_col: "exposed"
     outcomes:
-      - outcome_col: "birthshisp_usborn"
-        denominator_col: "pophisp_usborn"
-        label: "hisp_usborn"
-      - outcome_col: "birthshisp_foreign"
-        denominator_col: "pophisp_foreign"
-        label: "hisp_foreign"
       - outcome_col: "births_usborn"
         denominator_col: "pop_usborn"
         label: "usborn"
@@ -31,21 +25,18 @@ data:
 model:
   outcome_distribution: "NB"
   types:
-    total:
-      groups: ["total"]
-      ranks_to_test: [5]
     nativity:
       groups: ["usborn", "foreign"]
-      ranks_to_test: [5]
+      ranks_to_test: [10]
   nb_disp: 1.0e-4
   sample_disp: false
   adjust_for_missingness: true
   model_treated: true
 
 mcmc:
-  num_chains: 2
-  num_warmup: 100
-  num_samples: 100
-  thinning: 1
-  random_seed: 42
+  num_chains: 4
+  num_warmup: 1000
+  num_samples: 2500
+  thinning: 10
+  random_seed: 8675309
   progress_bar: true
