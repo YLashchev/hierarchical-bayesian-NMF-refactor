@@ -18,6 +18,7 @@ setup(
         "numpy>=1.20.0",
         "pyyaml>=5.4",
         "joblib>=1.0.0",
+        "loguru>=0.6.0",
     ],
     extras_require={
         "viz": [

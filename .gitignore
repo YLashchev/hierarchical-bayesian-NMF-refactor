@@ -1,8 +1,21 @@
+# Agent configurations
+.opencode/
+AGENTS.md
+
+# Type checker config
+ty.toml
+
+# Raw data (large CSVs)
+data/raw/*.csv
+
+# Reference implementations (not part of package)
+reference_directories/
+
 # R
 .Rhistory
 .RData
 .Rproj.user/
-TRUE
+.Rlibrary/
 
 # Python
 __pycache__/
@@ -28,36 +41,38 @@ wheels/
 
 # Virtual environments
 venv/
+ENV/
 env/
 .venv/
 .env/
 
-# IDEs
+# IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-.DS_Store
 
 # Jupyter
 .ipynb_checkpoints/
-*.ipynb
 
-# Results (large MCMC output files)
+# OS
+.DS_Store
+Thumbs.db
+
+# Results (generated, not source)
 results/*.csv
 !results/.gitkeep
+
+# Figures (generated, not source)
+figs/*.png
+figs/*.pdf
+figs/**/*.png
+figs/**/*.pdf
 
 # Quarto/RMarkdown cache
 *_cache/
 *_files/
 *.html
-
-# Figures (optional: remove if you want to track generated figures)
-# figs/main_figures/*.png
-# figs/supplement_figures/**/*.png
-
-# Data (optional: remove if data should be tracked)
-# data/raw/*.csv
 
 # Logs
 *.log

@@ -223,27 +223,79 @@ python scripts/run_analysis.py --config configs/nativity_config.yaml
 
 ```python
 from bayesian_panel_nmf import (
-    load_panel_data, 
-    DataSchema,
+    load_panel_data,
+    wide_to_long,
     preprocess_pipeline,
     run_mcmc_inference,
+    generate_predictions,
+    merge_draws_and_data,
+    DataSchema,
+    OutcomeSpec,
     model
 )
 
 # Load data with custom schema
 schema = DataSchema(
     unit_col="state",
-    time_col="time",
-    treatment_col="treatment",
-    outcomes=[OutcomeSpec("deaths", "births", "etc")]
+    time_col="date",
+    treatment_col="treated",
+    outcomes=[OutcomeSpec(outcome_col="sales", label="total", denominator_col="population")]
 )
-df = load_panel_data("my_data.csv", schema=schema)
+df_raw = load_panel_data("my_data.csv", schema=schema)
 
-# Preprocess
-data_dict = preprocess_pipeline(df, groups=["total"], config=config)
+# Convert to long format
+df_long = wide_to_long(df_raw, schema=schema)
 
-# Run inference
-mcmc = run_mcmc_inference(data_dict, model, rank=10, **mcmc_config)
+# Preprocess (config dict contains data/model/mcmc sections)
+data_dict = preprocess_pipeline(
+    df=df_long,
+    groups=["total"],
+    config=config,
+    outcome_col='outcome',
+    denominator_col='denominator',
+    unit_col='unit',
+    time_col='time',
+    group_col='group',
+    treatment_col='treatment'
+)
+
+# Run MCMC inference
+mcmc = run_mcmc_inference(
+    data_dict=data_dict,
+    model_fn=model,
+    rank=10,
+    outcome_dist="NB",
+    num_chains=4,
+    num_warmup=1000,
+    num_samples=2500
+)
+
+# Generate predictions
+predictions = generate_predictions(
+    mcmc=mcmc,
+    model_fn=model,
+    data_dict=data_dict,
+    rank=10,
+    outcome_dist="NB"
+)
+
+# Merge draws with observed data
+samples = mcmc.get_samples(group_by_chain=True)
+draws_df = merge_draws_and_data(
+    samples={'mu_ctrl': samples['mu_ctrl'], 'te': samples.get('te')},
+    predictions=predictions,
+    df_preprocessed=data_dict['df_preprocessed'],
+    groups=data_dict['groups'],
+    units=data_dict['units'],
+    times=data_dict['times'],
+    unit_col='unit',
+    time_col='time',
+    group_col='group',
+    outcome_col='outcome'
+)
+
+# Save results
+draws_df.to_csv("results/my_analysis.csv", index=False)
 ```
 
 ## Credits
