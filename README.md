@@ -16,19 +16,19 @@ Requires Python 3.12+ and [`uv`](https://docs.astral.sh/uv/). All other dependen
 
 ## Quick Start
 
-Run the shipped nativity analysis end-to-end:
+The repo ships with `data/raw/fertility_data.csv` (state-level US birth counts 2016–2024) and a matching config. Smoke-test a single type at low rank (~1 min on a laptop):
 
 ```bash
-uv run scripts/run_analysis.py --config configs/nativity_config.yaml
+uv run scripts/run_analysis.py --config configs/fertility_config.yaml --type total --rank 5
 ```
 
-This reads `data/raw/nativity_analyticdata.csv`, fits one model per entry in `model.types`, and writes posterior draws + preprocessed data to `results/<type>/`.
-
-Smoke-test a single type at low rank (~1 min on a laptop):
+Full production run (4 chains × 2000 warmup × 2000 samples across 4 model types — takes hours):
 
 ```bash
-uv run scripts/run_analysis.py --config configs/nativity_config.yaml --type total --rank 5
+uv run scripts/run_analysis.py --config configs/fertility_config.yaml
 ```
+
+Both write posterior draws + preprocessed data to `results/<type>/` (and figures under `results/<type>/figs/` when `output.figures: true`).
 
 Regenerate figures from an existing draws CSV without re-running MCMC:
 

@@ -17,9 +17,10 @@ todo_plan.md
 # Type checker config (personal tool config)
 ty.toml
 
-# Raw data (large CSVs, sometimes sensitive)
+# Raw data (large CSVs, sometimes sensitive) — shipped example is allowed
 data/raw/*.csv
 !data/raw/.gitkeep
+!data/raw/fertility_data.csv
 
 # Node
 node_modules/
