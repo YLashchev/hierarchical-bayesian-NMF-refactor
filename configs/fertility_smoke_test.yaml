@@ -1,0 +1,54 @@
+# =============================================================================
+# Fertility Smoke Test — minimal MCMC settings for quick verification
+# =============================================================================
+# Single model type, rank 3, 2 chains, 200 warmup + 200 samples.
+# Runs in ~4 min on a laptop. Not for inference — only proves the pipeline works.
+
+data:
+  input_file: "data/raw/fertility_data.csv"
+  output_dir: "results"
+
+  schema:
+    unit_col: "state"
+    time_col: "time"
+    treatment_col: "exposed_births"
+    outcomes_from_prefixes:
+      outcome_prefix: "births_"
+      denominator_prefix: "pop_"
+      include:
+        - total
+
+  date_format: "%Y-%m-%d"
+  start_date: "2016-01-01"
+  end_date: "2024-01-01"
+
+  aggregation:
+    enabled: true
+    period: "bimonthly"
+
+model:
+  outcome_distribution: "NB"
+  types:
+    total:
+      groups: ["total"]
+      ranks_to_test: [3]
+  nb_disp: 1.0e-4
+  sample_disp: false
+  adjust_for_missingness: true
+  model_treated: true
+
+mcmc:
+  num_chains: 2
+  num_warmup: 200
+  num_samples: 200
+  thinning: 1
+  random_seed: 8675309
+  progress_bar: false
+
+parallel:
+  analysis_workers: 1
+
+output:
+  figures: false
+  clean: true
+  filename_pattern: "{distribution}_{outcome}_{type}_{rank}"

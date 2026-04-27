@@ -16,24 +16,29 @@ Requires Python 3.12+ and [`uv`](https://docs.astral.sh/uv/). All other dependen
 
 ## Quick Start
 
-Run the shipped nativity analysis end-to-end:
+The repo ships with `data/raw/fertility_data.csv` (state-level US birth counts 2016–2024) and two configs:
+
+- `configs/fertility_smoke_test.yaml` — 2 chains × 200+200 samples, rank 3, one model type. Runs in ~4 min on a laptop. For verifying the pipeline works, not for inference.
+- `configs/fertility_config.yaml` — 4 chains × 2000+2000 samples across 4 model types. Full production settings. Takes hours.
+
+Smoke test first:
 
 ```bash
-uv run scripts/run_analysis.py --config configs/nativity_config.yaml
+uv run scripts/run_analysis.py --config configs/fertility_smoke_test.yaml
 ```
 
-This reads `data/raw/nativity_analyticdata.csv`, fits one model per entry in `model.types`, and writes posterior draws + preprocessed data to `results/<type>/`.
-
-Smoke-test a single type at low rank (~1 min on a laptop):
+When that finishes cleanly, run the full analysis:
 
 ```bash
-uv run scripts/run_analysis.py --config configs/nativity_config.yaml --type total --rank 5
+uv run scripts/run_analysis.py --config configs/fertility_config.yaml
 ```
+
+Both write posterior draws + preprocessed data to `results/<type>/` (and figures under `results/<type>/figs/` when `output.figures: true`).
 
 Regenerate figures from an existing draws CSV without re-running MCMC:
 
 ```bash
-uv run scripts/generate_full_viz.py --results results/total/NB_births_total_5.csv
+uv run scripts/generate_full_viz.py --results results/total/NB_births_total_3.csv
 ```
 
 ## Using Your Own Data
