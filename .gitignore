@@ -1,21 +1,48 @@
 # Agent configurations
 .opencode/
+opencode.json
 AGENTS.md
 
-# Type checker config
+# pi-lens caches and local reviews
+.pi-lens/
+
+# Local pi agent state (personal, not pushed to remote)
+.pi/
+scripts/booboo_append_slop.sh
+
+# Internal planning docs (dev workflow only, not package artifacts)
+BACKLOG.md
+todo_plan.md
+
+# Type checker config (personal tool config)
 ty.toml
 
-# Raw data (large CSVs)
+# Raw data (large CSVs, sometimes sensitive)
 data/raw/*.csv
+!data/raw/.gitkeep
+
+# Node
+node_modules/
+package.json
+package-lock.json
 
 # Reference implementations (not part of package)
+# NOTE: moved up one level to ../reference_directories (Refactor_DOBBS/) to keep
+# pi-lens /lens-booboo scans fast. Kept rule below in case dir is recreated here.
 reference_directories/
 
-# R
+# R / Quarto (package is pure Python — any .R / .qmd stragglers are local-only)
+*.R
+*.r
+*.Rmd
+*.qmd
+*.Rproj
 .Rhistory
 .RData
 .Rproj.user/
 .Rlibrary/
+renv/
+renv.lock
 
 # Python
 __pycache__/
@@ -59,15 +86,9 @@ env/
 .DS_Store
 Thumbs.db
 
-# Results (generated, not source)
-results/*.csv
+# Results (generated, not source) — includes figs/ subdirs written by reporting.py
+results/**
 !results/.gitkeep
-
-# Figures (generated, not source)
-figs/*.png
-figs/*.pdf
-figs/**/*.png
-figs/**/*.pdf
 
 # Quarto/RMarkdown cache
 *_cache/

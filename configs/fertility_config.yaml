@@ -1,0 +1,80 @@
+# =============================================================================
+# Fertility Analysis Configuration
+# =============================================================================
+# Uses the schema `outcomes_from_prefixes` shortcut (new convention) instead
+# of listing every births_<label> / pop_<label> pair explicitly.
+
+data:
+  input_file: "data/raw/fertility_data.csv"
+  output_dir: "results"
+
+  schema:
+    unit_col: "state"
+    time_col: "time"
+    treatment_col: "exposed_births"
+
+    # Derive all outcomes from shared column prefixes. Labels are the suffix
+    # after the prefix, so `births_age1524` / `pop_age1524` → label "age1524".
+    outcomes_from_prefixes:
+      outcome_prefix: "births_"
+      denominator_prefix: "pop_"
+      include:
+        - total
+        - age1524
+        - age2534
+        - age3544
+        - nohs
+        - hs
+        - somecoll
+        - coll
+        - nhblack
+        - nhwhite
+        - hisp
+        - otherraceeth
+
+  date_format: "%Y-%m-%d"
+  start_date: "2016-01-01"
+  end_date: "2024-01-01"
+
+  aggregation:
+    enabled: true
+    period: "bimonthly"
+
+model:
+  outcome_distribution: "NB"
+
+  types:
+    total:
+      groups: ["total"]
+      ranks_to_test: [5]
+    age:
+      groups: ["age1524", "age2534", "age3544"]
+      ranks_to_test: [5]
+    education:
+      groups: ["nohs", "hs", "somecoll", "coll"]
+      ranks_to_test: [5]
+    race:
+      groups: ["nhblack", "nhwhite", "hisp", "otherraceeth"]
+      ranks_to_test: [5]
+
+  nb_disp: 1.0e-4
+  sample_disp: false
+  adjust_for_missingness: true
+  model_treated: true
+
+# Full production config: 4 chains x 2000 warmup x 2000 samples, thinning 5.
+mcmc:
+  num_chains: 4
+  num_warmup: 2000
+  num_samples: 2000
+  thinning: 5
+  random_seed: 8675309
+  progress_bar: true
+
+parallel:
+  analysis_workers: -1
+
+output:
+  figures: true
+  clean: false
+  filename_pattern: "{distribution}_{outcome}_{type}_{rank}"
