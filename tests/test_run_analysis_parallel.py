@@ -248,3 +248,75 @@ def test_run_model_type_without_figures_does_not_import_viz(
 
     assert (output_dir / "total" / "df_total.csv").exists()
     assert (output_dir / "total" / "total_1.csv").exists()
+
+
+def test_main_dispatches_types_to_process_pool_when_workers_gt_one(
+    monkeypatch, tmp_path: Path
+):
+    """When workers>1, main() submits every model_type to ProcessPoolExecutor.
+
+    Verifies the integration wired in scripts/run_analysis.py: the config
+    knob `parallel.analysis_workers` actually reaches the executor instead of
+    silently falling back to a sequential for-loop.
+    """
+    import yaml
+
+    config_path = tmp_path / "cfg.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "data": {
+                    "input_file": str(tmp_path / "unused.csv"),
+                    "output_dir": str(tmp_path / "results"),
+                    "schema": {
+                        "unit_col": "unit",
+                        "time_col": "time",
+                        "treatment_col": "treated",
+                        "outcomes": [{"outcome_col": "y", "label": "total"}],
+                    },
+                },
+                "model": {
+                    "types": {
+                        "a": {"groups": ["total"], "ranks_to_test": [1]},
+                        "b": {"groups": ["total"], "ranks_to_test": [1]},
+                    }
+                },
+                "mcmc": {"num_chains": 1},
+                "parallel": {"analysis_workers": 2},
+            }
+        )
+    )
+
+    # Make the parallel branch eligible: resolve_analysis_workers must return >1
+    monkeypatch.setattr(run_analysis, "resolve_analysis_workers", lambda *a, **k: 2)
+
+    submitted: list[str] = []
+
+    class FakeFuture:
+        def __init__(self, name):
+            self._name = name
+
+        def result(self):
+            submitted.append(self._name)
+            return None
+
+    class FakePool:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def submit(self, fn, **kwargs):
+            return FakeFuture(kwargs["model_type"])
+
+    monkeypatch.setattr(run_analysis, "ProcessPoolExecutor", FakePool)
+    monkeypatch.setattr(run_analysis, "as_completed", lambda futs: list(futs))
+
+    monkeypatch.setattr("sys.argv", ["run_analysis.py", "--config", str(config_path)])
+    run_analysis.main()
+
+    assert sorted(submitted) == ["a", "b"]
