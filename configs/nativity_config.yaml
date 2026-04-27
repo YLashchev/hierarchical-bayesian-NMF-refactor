@@ -47,11 +47,6 @@ data:
         denominator_col: "pop_foreign"
         label: "foreign"
     
-    additional_cols:
-      - "banned_state"
-      - "year"
-      - "month"
-  
   # Date format for the nativity data (M/D/YY)
   date_format: "%m/%d/%y"
   
@@ -73,8 +68,9 @@ model:
   # Model types matching original nativity_analysis
   types:
     total:
-      # Aggregate all births
+      # Aggregate US-born + Foreign-born (disjoint subpopulations)
       groups: ["total"]
+      total_from: ["usborn", "foreign"]
       ranks_to_test: [10]
     groups:
       # Stratified by Hispanic/Non-Hispanic and nativity
@@ -96,19 +92,6 @@ model:
   model_treated: true
 
 # -----------------------------------------------------------------------------
-# Prior Distributions
-# -----------------------------------------------------------------------------
-# Using defaults - uncomment to customize
-# priors:
-#   time_factor:
-#     distribution: "Gamma"
-#     alpha: 20.0
-#     beta: 20.0
-#   treatment_it_scale:
-#     distribution: "HalfNormal"
-#     scale: 0.1
-
-# -----------------------------------------------------------------------------
 # MCMC Settings
 # -----------------------------------------------------------------------------
 mcmc:
@@ -123,13 +106,13 @@ mcmc:
 # Parallelization
 # -----------------------------------------------------------------------------
 parallel:
-  # Set to 1 for sequential (safe), higher for parallel execution
-  num_workers: 1
+  # Set to 1 for sequential execution, or -1 to use the maximum safe count.
+  analysis_workers: 1
 
 # -----------------------------------------------------------------------------
 # Output Settings
 # -----------------------------------------------------------------------------
 output:
-  save_draws: true
-  save_summary: true
+  figures: false
+  clean: false
   filename_pattern: "{distribution}_{outcome}_{type}_{rank}"

@@ -1,84 +1,61 @@
 # Bayesian Panel NMF
 
-Python package for causal inference in panel data using Bayesian hierarchical models with low-rank matrix factorization. credit: Professor Alex Franks (UCSB, Statistics & Applied Probability)
+Estimate causal treatment effects on panel data via a Bayesian hierarchical model with low-rank factorization (JAX + NumPyro).
 
-## Overview
-
-This package provides tools for estimating treatment effects from panel data (e.g., state-time observations) using Bayesian hierarchical models. Key features:
-
-- **Flexible data format**: Works with any panel data via schema-based configuration
-- **Low-rank factorization**: Captures complex state-time interactions efficiently
-- **Treatment effect estimation**: Hierarchical treatment effects with uncertainty quantification
-- **Configurable priors**: Customize prior distributions via YAML
-- **Multiple output formats**: Full posterior draws and summary statistics
-- **Parallel execution**: Optional joblib parallelization for multiple analyses
+Works with any panel dataset that can be described by a YAML schema: one unit column, one time column, a binary treatment indicator, and one or more outcome columns (with optional denominators for rates).
 
 ## Installation
 
 ```bash
+git clone <repo-url> bayesian_panel_nmf
 cd bayesian_panel_nmf
-pip install -e .
+uv sync --all-extras --dev
 ```
 
-### Requirements
-
-- Python 3.8+
-- NumPyro >= 0.12.0
-- JAX >= 0.4.0
-- Pandas >= 1.3.0
-- NumPy >= 1.20.0
-- PyYAML >= 5.4
-- Joblib >= 1.0.0
+Requires Python 3.12+ and [`uv`](https://docs.astral.sh/uv/). All other dependencies are pinned in `pyproject.toml`.
 
 ## Quick Start
 
-### Running with the Included Nativity Data
-
-The package includes sample data and a ready-to-use configuration for testing:
+Run the shipped nativity analysis end-to-end:
 
 ```bash
-# Navigate to the package directory
-cd bayesian_panel_nmf
-
-# Install the package
-pip install -e .
-
-# Run the nativity analysis with the included config and data
-python scripts/run_analysis.py --config configs/nativity_config.yaml
+uv run scripts/run_analysis.py --config configs/nativity_config.yaml
 ```
 
-This will:
-1. Load the nativity data from `data/raw/nativity_analyticdata.csv`
-2. Run the Bayesian panel NMF model
-3. Output results to the `results/` directory
+This reads `data/raw/nativity_analyticdata.csv`, fits one model per entry in `model.types`, and writes posterior draws + preprocessed data to `results/<type>/`.
 
-For a quick test run with fewer iterations, use the test config:
+Smoke-test a single type at low rank (~1 min on a laptop):
 
 ```bash
-python scripts/run_analysis.py --config configs/test_config.yaml
+uv run scripts/run_analysis.py --config configs/nativity_config.yaml --type total --rank 5
 ```
 
----
+Regenerate figures from an existing draws CSV without re-running MCMC:
 
-### Using Your Own Data
+```bash
+uv run scripts/generate_full_viz.py --results results/total/NB_births_total_5.csv
+```
 
-### 1. Prepare Your Data
+## Using Your Own Data
 
-Your panel data should be a CSV with:
-- A **unit** column (e.g., state, firm, county)
-- A **time** column (date/timestamp)
-- A **treatment** column (0/1 indicator)
-- One or more **outcome** columns
-- Optional **denominator** columns (for rate calculations)
+### 1. Format the CSV
 
-### 2. Create a Configuration File
+Long-panel layout (one row per unit × time) with columns for:
+
+- **unit** — panel identifier (state, firm, county)
+- **time** — date/timestamp (any format pandas can parse)
+- **treatment** — `0`/`1` indicator
+- **outcome(s)** — one or more numeric columns
+- **denominator(s)** — optional, for rate models
+
+### 2. Write a config
+
+Minimal example (`configs/my_config.yaml`):
 
 ```yaml
-# my_config.yaml
 data:
-  input_file: "data/my_panel_data.csv"
+  input_file: "data/my_panel.csv"
   output_dir: "results"
-  
   schema:
     unit_col: "state"
     time_col: "date"
@@ -89,8 +66,9 @@ data:
         label: "total"
 
 model:
-  outcome_distribution: "NB"
-  rank: 10
+  outcome_distribution: "NB" # "NB" or "Poisson"
+  adjust_for_missingness: true
+  model_treated: true
   types:
     total:
       groups: ["total"]
@@ -103,216 +81,144 @@ mcmc:
   thinning: 10
 ```
 
-### 3. Run Analysis
+### 3. Run
 
 ```bash
-python scripts/run_analysis.py --config configs/my_config.yaml
+uv run scripts/run_analysis.py --config configs/my_config.yaml
 ```
 
-## Configuration Options
+See `configs/base_config.yaml` for every supported option with inline comments. `configs/nativity_config.yaml` and `configs/fertility_config.yaml` are working end-to-end examples.
 
-### Data Schema
+## Configuration Highlights
+
+### Schema: explicit or prefix-based
+
+Define outcomes one of two ways (pick one, not both):
 
 ```yaml
-data:
-  schema:
-    unit_col: "state"           # Panel unit identifier
-    time_col: "time"            # Time column
-    treatment_col: "treated"    # Treatment indicator (0/1)
-    outcomes:                   # List of outcomes to analyze
-      - outcome_col: "y1"
-        denominator_col: "pop1"  # Optional
-        label: "group1"
-    additional_cols:            # Extra columns to preserve
-      - "region"
-      - "category"
+# Option A: explicit list
+outcomes:
+  - outcome_col: "y1"
+    denominator_col: "pop1"
+    label: "group1"
+
+# Option B: prefix shortcut for many similarly-named groups
+outcomes_from_prefixes:
+  outcome_prefix: "births_"
+  denominator_prefix: "pop_"
+  include: ["nhwhite", "hisp", "nhblack"]
 ```
 
-### Temporal Aggregation
+### Temporal aggregation
 
 ```yaml
 data:
   aggregation:
     enabled: true
-    period: "bimonthly"  # monthly, bimonthly, quarterly, yearly
+    period: "bimonthly" # monthly | bimonthly | quarterly | yearly
 ```
 
-### Custom Priors
+### Synthetic `"total"` group
+
+If your config requests `groups: ["total"]` but no outcome is labelled `"total"`, declare how to build it per model type:
 
 ```yaml
-priors:
-  time_factor:
-    distribution: "Gamma"
-    alpha: 20.0
-    beta: 20.0
-  treatment_state_scale:
-    distribution: "HalfNormal"
-    scale: 1.0
+model:
+  types:
+    total:
+      groups: ["total"]
+      total_from: ["nhwhite", "hisp", "nhblack"] # sum these labels
+      # OR
+      total_all: true # sum every defined outcome
 ```
 
-Supported distributions: `Gamma`, `HalfNormal`, `Normal`, `HalfCauchy`, `Exponential`, `InverseGamma`, `Uniform`, `Beta`, `StudentT`, `Laplace`
-
-### Parallelization
+### Parallelism
 
 ```yaml
 parallel:
-  num_workers: 4  # 1 = sequential, -1 = all cores
+  analysis_workers: 1 # 1 = sequential, -1 = auto-cap
+
+mcmc:
+  num_chains: 4 # chains within one fit
 ```
 
-### Output Options
+`analysis_workers × num_chains` is capped against CPU count automatically — you won't oversubscribe the machine.
+
+### Figures + cleanup
 
 ```yaml
 output:
-  save_draws: true    # Full posterior draws (large files)
-  save_summary: true  # Summary statistics (small files)
+  figures: true # auto-generate PPC + summary plots at the end of a run
+  clean: false # wipe <output_dir>/<type>/ before writing
+  filename_pattern: "{distribution}_{type}_{rank}"
 ```
 
-## Output Format
+## Outputs
 
-### Full Draws (`*_draws.csv`)
+Per model type, under `<output_dir>/<type>/`:
 
-Tidy format compatible with R's tidybayes:
+| File                               | Contents                                                                               |
+| ---------------------------------- | -------------------------------------------------------------------------------------- |
+| `{distribution}_{type}_{rank}.csv` | Tidy posterior draws                                                                   |
+| `df_{type}.csv`                    | Preprocessed observed data (standardized columns)                                      |
+| `*_diagnostics.json`               | MCMC ESS, R-hat, divergences (when `--save-diagnostics`)                               |
+| `figs/` (subdir)                   | Fit/gap plots, PPC panels, interval plot, summary tables (when `output.figures: true`) |
 
-| .draw | .chain | category | state | time | outcome | ypred | mu | mu_treated |
-|-------|--------|----------|-------|------|---------|-------|-----|------------|
-| 1 | 1 | total | AL | 2020-01 | 1000 | 987 | 6.89 | 6.91 |
+Posterior draws schema:
 
-### Summary (`*_summary.csv`)
+| Column                                | Meaning                                                            |
+| ------------------------------------- | ------------------------------------------------------------------ |
+| `.draw`, `.chain`, `.iteration`       | Per-draw indices (compatible with arviz / tidy posterior tooling)  |
+| `unit`, `time`, `group`               | Panel coordinates                                                  |
+| `outcome`, `denominator`, `treatment` | Observed data                                                      |
+| `ypred`                               | Posterior predictive draw (counterfactual, untreated)              |
+| `mu`                                  | Log-rate under control                                             |
+| `mu_treated`                          | Log-rate under treatment (equals `mu` when `model_treated: false`) |
 
-Pre-computed statistics:
-
-| category | state | time | ypred_mean | ypred_lower | ypred_upper | te_mean | te_lower | te_upper |
-|----------|-------|------|------------|-------------|-------------|---------|----------|----------|
-| total | AL | 2020-01 | 987 | 950 | 1024 | 0.02 | -0.01 | 0.05 |
-
-## R Integration
-
-The output format is designed for seamless R integration:
-
-```r
-library(tidyverse)
-
-# Load draws
-draws_df <- read_csv("results/NB_births_total_10.csv")
-
-# Or load summary for quick plots
-summary_df <- read_csv("results/NB_births_total_10_summary.csv")
-
-# Use with tidybayes
-library(tidybayes)
-draws_df %>%
-  group_by(state, category) %>%
-  summarize(
-    mean_effect = mean(mu_treated - mu),
-    ci_lower = quantile(mu_treated - mu, 0.025),
-    ci_upper = quantile(mu_treated - mu, 0.975)
-  )
-```
-
-## Examples
-
-### Nativity Analysis (Dobbs Fertility)
-
-Original use case analyzing birth rates by nativity status:
-
-```bash
-python scripts/run_analysis.py --config configs/nativity_config.yaml
-```
-
-### Custom Analysis
+## Python API
 
 ```python
 from bayesian_panel_nmf import (
-    load_panel_data,
-    wide_to_long,
-    preprocess_pipeline,
+    load_and_prepare,
     run_mcmc_inference,
     generate_predictions,
-    merge_draws_and_data,
-    DataSchema,
-    OutcomeSpec,
-    model
+    format_draws,
+    model,
 )
 
-# Load data with custom schema
-schema = DataSchema(
-    unit_col="state",
-    time_col="date",
-    treatment_col="treated",
-    outcomes=[OutcomeSpec(outcome_col="sales", label="total", denominator_col="population")]
-)
-df_raw = load_panel_data("my_data.csv", schema=schema)
-
-# Convert to long format
-df_long = wide_to_long(df_raw, schema=schema)
-
-# Preprocess (config dict contains data/model/mcmc sections)
-data_dict = preprocess_pipeline(
-    df=df_long,
-    groups=["total"],
-    config=config,
-    outcome_col='outcome',
-    denominator_col='denominator',
-    unit_col='unit',
-    time_col='time',
-    group_col='group',
-    treatment_col='treatment'
-)
-
-# Run MCMC inference
-mcmc = run_mcmc_inference(
-    data_dict=data_dict,
-    model_fn=model,
-    rank=10,
-    outcome_dist="NB",
-    num_chains=4,
-    num_warmup=1000,
-    num_samples=2500
-)
-
-# Generate predictions
-predictions = generate_predictions(
-    mcmc=mcmc,
-    model_fn=model,
-    data_dict=data_dict,
-    rank=10,
-    outcome_dist="NB"
-)
-
-# Merge draws with observed data
-samples = mcmc.get_samples(group_by_chain=True)
-draws_df = merge_draws_and_data(
-    samples={'mu_ctrl': samples['mu_ctrl'], 'te': samples.get('te')},
-    predictions=predictions,
-    df_preprocessed=data_dict['df_preprocessed'],
-    groups=data_dict['groups'],
-    units=data_dict['units'],
-    times=data_dict['times'],
-    unit_col='unit',
-    time_col='time',
-    group_col='group',
-    outcome_col='outcome'
-)
-
-# Save results
-draws_df.to_csv("results/my_analysis.csv", index=False)
+data_dict = load_and_prepare("data/my_panel.csv", config, groups=["total"])
+mcmc = run_mcmc_inference(data_dict, model, rank=10, config=config)
+predictions = generate_predictions(mcmc, data_dict, model, rank=10, config=config)
+draws_df = format_draws(mcmc.get_samples(group_by_chain=True), predictions, data_dict)
 ```
+
+## Development
+
+```bash
+uv run pytest              # 155 regression + integration tests, ~15s
+uv run ruff check .
+uv run ruff format .
+```
+
+Current coverage is regression and integration: synthetic CSVs exercised through `load_and_prepare`, YAML config validation, and subprocess runs of `scripts/run_analysis.py`. True unit tests of individual functions (especially inside `src/bayesian_panel_nmf/models/`) are still an open roadmap item.
+
+See `CHANGELOG.md` for release history and the **Roadmap** section below for open items.
 
 ## Credits
 
-This package was developed by Alex Franks (UCSB, Statistics & Applied Probability).
+Developed by Yan Lashchev with [Alex Franks](https://afranks.com/) (UCSB, Statistics & Applied Probability). Derived from the reference implementation in [afranks86/dobbs_fertility](https://github.com/afranks86/dobbs_fertility).
 
 ## License
 
 TBD
 
----
+## Roadmap
 
-## To-Do / Roadmap
+Built-in but still being hardened:
 
-The following features are planned for future development:
-- [ ] **GPU Support**: Add GPU acceleration via JAX for faster MCMC inference on large datasets
-- [ ] **Spillover Analysis**: Implement scripts for testing potential spillover effects between treated and control units
-- [ ] **Sensitivity Analysis**: Add donor pool sensitivity tests (excluding neighboring states from control group)
-- [ ] **R Graphing Generalization**: Create generalized R plotting functions that work with any panel data schema (not hardcoded to specific column names)
-- [ ] **Unit Testing and Debugging**: Add comprehensive unit tests and debugging utilities for the package
+- [ ] **Unit test coverage** — current suite is mostly integration / regression against synthetic CSVs; add targeted unit tests for functions in `models/`, `inference.py`, and `output.py`
+- [ ] **GPU support** — JAX already runs on GPU; surface a config flag + verify chain parallelism against `numpyro.set_host_device_count`
+- [ ] **Spillover analysis** — diagnostics for contamination between treated and neighboring control units
+- [ ] **Donor-pool sensitivity** — systematic leave-one-out / leave-region-out robustness checks
+- [ ] **Additional outcome distributions** — Gaussian, Student-t for continuous outcomes
+- [ ] **Alternative latent structures** — GPLVM, linear factor model alongside the current NMF formulation

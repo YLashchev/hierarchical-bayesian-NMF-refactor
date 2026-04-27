@@ -1,14 +1,12 @@
-"""
-Unified data loading and preparation for bayesian_panel_nmf.
+"""Load, validate, and reshape panel CSVs into model arrays.
 
-This module provides a single entry point for loading panel data and
-preparing it for the Bayesian hierarchical model. All internal operations
-use FIXED standardized column names: unit, time, group, outcome, denominator, treatment.
+After loading, all operations use fixed column names: unit, time, group,
+outcome, denominator, treatment.
 """
 
 from datetime import timedelta
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -19,12 +17,11 @@ from bayesian_panel_nmf.validation import (
     validate_config,
     validate_groups,
     DataError,
+    ConfigError,
 )
 
 
-# =============================================================================
-# Standard column names (FIXED - used internally after loading)
-# =============================================================================
+# Standard column names (fixed after loading)
 UNIT_COL = "unit"
 TIME_COL = "time"
 GROUP_COL = "group"
@@ -33,15 +30,13 @@ DENOMINATOR_COL = "denominator"
 TREATMENT_COL = "treatment"
 
 
-# =============================================================================
-# Main public function
-# =============================================================================
 def load_and_prepare(
     filepath: str,
-    config: Dict[str, Any],
-    groups: List[str],
-    exclude_units: Optional[List[str]] = None
-) -> Dict[str, Any]:
+    config: dict,
+    groups: list[str],
+    exclude_units: list[str] | None = None,
+    type_config: dict | None = None,
+) -> dict:
     """
     Load CSV, standardize columns, filter, aggregate, and prepare model arrays.
 
@@ -84,107 +79,277 @@ def load_and_prepare(
     DataValidationError
         If data file is missing required columns or has invalid values
     """
-    # =========================================================================
-    # Input validation
-    # =========================================================================
-    logger.debug("Validating inputs...")
     validate_filepath(filepath)
     validate_config(config)
     validate_groups(groups)
-    logger.debug("Input validation passed")
 
     data_config = config.get("data", {})
-    
+
     logger.info(f"Loading data from: {filepath}")
     logger.debug(f"Requested groups: {groups}")
 
-    # Parse schema from config
-    schema_info = _parse_schema(config)
-    logger.debug(f"Schema parsed: unit_col={schema_info['unit_col']}, time_col={schema_info['time_col']}")
+    # Peek at CSV columns to resolve prefix-based outcomes
+    _header = pd.read_csv(filepath, nrows=0)
+    available_columns = _header.columns.tolist()
 
-    # Load and standardize column names
-    df = _load_and_standardize(filepath, schema_info, data_config.get("date_format", "auto"))
+    schema_info = _parse_schema(config, available_columns=available_columns)
+    logger.debug(
+        f"Schema parsed: unit_col={schema_info['unit_col']}, time_col={schema_info['time_col']}"
+    )
+
+    df = _load_and_standardize(
+        filepath, schema_info, data_config.get("date_format", "auto")
+    )
     logger.debug(f"Loaded {len(df)} rows, columns: {list(df.columns)}")
 
-    # Convert wide format to long format with standard columns
-    df = _wide_to_long(df, schema_info, groups)
+    total_from_labels = _validate_and_resolve_total(
+        groups, schema_info["outcomes"], type_config
+    )
+    df = _wide_to_long(df, schema_info, groups, total_from_labels=total_from_labels)
     logger.debug(f"After wide_to_long: {len(df)} rows")
 
-    # Filter time range
+    dupe_cols = [GROUP_COL, UNIT_COL, TIME_COL]
+    dupes = df[df.duplicated(subset=dupe_cols, keep=False)]
+    if not dupes.empty:
+        n_dupes = dupes.duplicated(subset=dupe_cols).sum()
+        sample_units = sorted(dupes[UNIT_COL].unique().tolist())[:3]
+        raise DataError(
+            f"duplicate group/unit/time combinations: {n_dupes} rows affected "
+            f"(e.g., units: {sample_units})"
+        )
+
     start_date = data_config.get("start_date")
     end_date = data_config.get("end_date")
     df = _filter_time_range(df, start_date, end_date)
     if start_date or end_date:
-        logger.debug(f"Filtered to date range [{start_date}, {end_date}): {len(df)} rows")
+        logger.debug(
+            f"Filtered to date range [{start_date}, {end_date}): {len(df)} rows"
+        )
 
-    # Exclude specified units
     if exclude_units:
         before_count = df[UNIT_COL].nunique()
         df = df[~df[UNIT_COL].isin(exclude_units)].reset_index(drop=True)
         after_count = df[UNIT_COL].nunique()
-        logger.info(f"Excluded units {exclude_units}: {before_count} → {after_count} units")
+        logger.info(
+            f"Excluded units {exclude_units}: {before_count} → {after_count} units"
+        )
 
-    # Aggregate temporally if configured
     agg_config = data_config.get("aggregation", {})
     if agg_config.get("enabled", False):
         period = agg_config.get("period", "bimonthly")
         df = _aggregate_temporal(df, period)
         logger.info(f"Aggregated to {period}: {len(df)} rows")
 
-    # Build model arrays
-    data_dict = _build_model_arrays(df, groups)
-    
-    K, D, N = data_dict['Y'].shape
+    allow_unbalanced = data_config.get("allow_unbalanced_panel", False)
+    data_dict = _build_model_arrays(df, groups, allow_unbalanced_panel=allow_unbalanced)
+
+    K, D, N = data_dict["Y"].shape
     logger.info(f"Model arrays built: K={K} groups, D={D} units, N={N} time periods")
     logger.debug(f"Y shape: {data_dict['Y'].shape}, dtype: {data_dict['Y'].dtype}")
     logger.debug(f"Control observations: {data_dict['control_idx_array'].sum()}")
     logger.debug(f"Missing observations: {data_dict['missing_idx_array'].sum()}")
 
-    # Include preprocessed DataFrame for output merging
+    # Preprocessed DataFrame returned for downstream output merging
     data_dict["df_preprocessed"] = df
 
     return data_dict
 
 
-# =============================================================================
-# Internal helper functions (all use FIXED column names)
-# =============================================================================
-def _parse_schema(config: Dict[str, Any]) -> Dict[str, Any]:
+def _validate_and_resolve_total(
+    groups: list[str],
+    schema_outcomes: list[dict],
+    type_config: dict | None,
+) -> list[str] | None:
     """
-    Extract column mapping from config['data']['schema'].
+    Validate synthetic 'total' configuration and return labels to sum.
 
-    Returns a dict with keys: unit_col, time_col, treatment_col, outcomes.
-    Each outcome has: outcome_col, denominator_col, label.
+    Returns list of outcome labels to aggregate for 'total', or None if
+    'total' is explicitly defined or not requested.
+
+    Raises
+    ------
+    ConfigError
+        If 'total' is requested but not properly configured.
     """
-    schema_cfg = config["data"]["schema"]
+    defined_labels = [o["label"] for o in schema_outcomes]
+
+    # If total is not requested or is explicitly defined, no synthetic aggregation needed
+    if "total" not in groups or "total" in defined_labels:
+        return None
+
+    # Total is requested but not defined — need synthetic aggregation
+    if type_config is None:
+        raise ConfigError(
+            "'total' is not defined as an outcome label in the schema. "
+            "Provide type_config with 'total_from' or 'total_all' to create it."
+        )
+
+    total_from = type_config.get("total_from")
+    total_all = type_config.get("total_all", False)
+
+    if total_from is not None:
+        # Validate total_from labels
+        if len(total_from) != len(set(total_from)):
+            raise ConfigError(f"total_from contains duplicate labels: {total_from}")
+        undefined = [lbl for lbl in total_from if lbl not in defined_labels]
+        if undefined:
+            raise ConfigError(
+                f"total_from references undefined outcome labels: {undefined}"
+            )
+        return total_from
+    if total_all:
+        return defined_labels
+    raise ConfigError(
+        "'total' is not defined as an outcome label in the schema. "
+        "Provide type_config with 'total_from' or 'total_all' to create it."
+    )
+
+
+def _resolve_outcomes_from_prefixes(
+    prefix_cfg: dict, available_columns: list[str]
+) -> list[dict[str, str | None]]:
+    if available_columns is None:
+        raise DataError(
+            "available_columns must be provided when using outcomes_from_prefixes"
+        )
+
+    outcome_prefix = prefix_cfg["outcome_prefix"]
+    denominator_prefix = prefix_cfg.get("denominator_prefix")
+    include = set(prefix_cfg.get("include") or [])
+
+    outcome_cols = [c for c in available_columns if c.startswith(outcome_prefix)]
+    if not outcome_cols:
+        raise DataError(f"No columns found with outcome prefix '{outcome_prefix}'")
+
+    outcome_labels = {
+        c[len(outcome_prefix) :] for c in outcome_cols if c[len(outcome_prefix) :]
+    }
+
+    if include:
+        if missing := include - outcome_labels:
+            raise DataError(
+                f"Missing outcome columns for include labels: {list(missing)}"
+            )
+        outcome_cols = [c for c in outcome_cols if c[len(outcome_prefix) :] in include]
 
     outcomes = []
-    for o in schema_cfg["outcomes"]:
-        outcomes.append({
-            "outcome_col": o["outcome_col"],
-            "denominator_col": o.get("denominator_col"),
-            "label": o["label"]
-        })
+    for col in outcome_cols:
+        label = col[len(outcome_prefix) :]
+        if not label:
+            continue
 
+        denom_col = f"{denominator_prefix}{label}" if denominator_prefix else None
+        if denom_col and denom_col not in available_columns:
+            raise DataError(f"Missing denominator columns for labels: ['{label}']")
+
+        outcomes.append(
+            {
+                "outcome_col": col,
+                "denominator_col": denom_col,
+                "label": label,
+            }
+        )
+
+    if not outcomes:
+        raise DataError(f"No outcome groups found with prefix '{outcome_prefix}'")
+
+    return outcomes
+
+
+def _resolve_outcomes(
+    schema_cfg: dict, available_columns: list[str] | None
+) -> list[dict[str, str | None]]:
+    if schema_cfg.get("outcomes") is not None:
+        outcomes = [
+            {
+                "outcome_col": outcome["outcome_col"],
+                "denominator_col": outcome.get("denominator_col"),
+                "label": outcome["label"],
+            }
+            for outcome in schema_cfg["outcomes"]
+        ]
+    else:
+        if available_columns is None:
+            raise DataError(
+                "outcomes_from_prefixes requires available_columns from the CSV header"
+            )
+        outcomes = _resolve_outcomes_from_prefixes(
+            schema_cfg["outcomes_from_prefixes"],
+            available_columns,
+        )
+
+    labels = [outcome["label"] for outcome in outcomes]
+    if len(labels) != len(set(labels)):
+        raise ConfigError(f"duplicate outcome labels: {sorted(labels)}")
+
+    return outcomes
+
+
+def _parse_schema(
+    config: dict,
+    available_columns: list[str] | None = None,
+) -> dict:
+    """Extract schema configuration from config dict."""
+    schema_cfg = config["data"]["schema"]
+    outcomes = _resolve_outcomes(schema_cfg, available_columns)
     return {
         "unit_col": schema_cfg["unit_col"],
         "time_col": schema_cfg["time_col"],
         "treatment_col": schema_cfg["treatment_col"],
         "outcomes": outcomes,
-        "additional_cols": schema_cfg.get("additional_cols", [])
     }
 
 
+def _validate_schema_cols_in_df(
+    df: pd.DataFrame, schema_info: dict
+) -> tuple[str, str, str]:
+    time_col = schema_info["time_col"]
+    unit_col = schema_info["unit_col"]
+    treatment_col = schema_info["treatment_col"]
+
+    required = [
+        unit_col,
+        time_col,
+        treatment_col,
+        *[o["outcome_col"] for o in schema_info["outcomes"]],
+        *[
+            o["denominator_col"]
+            for o in schema_info["outcomes"]
+            if o["denominator_col"]
+        ],
+    ]
+
+    missing = set(required) - set(df.columns)
+    if missing:
+        raise DataError(f"Missing columns: {sorted(missing)}")
+
+    _validate_denominators(df, schema_info, unit_col)
+    return time_col, unit_col, treatment_col
+
+
+def _validate_denominators(df: pd.DataFrame, schema_info: dict, unit_col: str) -> None:
+    for o in schema_info["outcomes"]:
+        denom_col = o.get("denominator_col")
+        if denom_col and denom_col in df.columns:
+            bad_mask = df[denom_col].isna() | (df[denom_col] <= 0)
+            if bad_mask.any():
+                bad_rows = df[bad_mask]
+                bad_units = bad_rows[unit_col].unique().tolist()
+                n_bad = bad_mask.sum()
+                raise DataError(
+                    f"NaN or non-positive denominator in column '{denom_col}': "
+                    f"{n_bad} rows affected (units: {bad_units})"
+                )
+
+
 def _load_and_standardize(
-    filepath: str,
-    schema_info: Dict[str, Any],
-    date_format: str = "auto"
+    filepath: str, schema_info: dict, date_format: str = "auto"
 ) -> pd.DataFrame:
     """
     Load CSV and parse time column.
 
     Does NOT rename columns yet - that happens in _wide_to_long.
-    
+
     Raises
     ------
     DataValidationError
@@ -198,25 +363,7 @@ def _load_and_standardize(
     df = pd.read_csv(path)
     logger.debug(f"CSV loaded: {len(df)} rows, {len(df.columns)} columns")
 
-    # Extract column names from schema
-    time_col = schema_info["time_col"]
-    unit_col = schema_info["unit_col"]
-    treatment_col = schema_info["treatment_col"]
-
-    # Build list of required columns
-    required = [unit_col, time_col, treatment_col]
-    outcome_cols = []
-    for o in schema_info["outcomes"]:
-        required.append(o["outcome_col"])
-        outcome_cols.append(o["outcome_col"])
-        if o["denominator_col"]:
-            required.append(o["denominator_col"])
-
-    # Check required columns exist
-    missing = set(required) - set(df.columns)
-    if missing:
-        raise DataError(f"Missing columns: {sorted(missing)}")
-    logger.debug(f"All required columns present: {required}")
+    time_col, unit_col, treatment_col = _validate_schema_cols_in_df(df, schema_info)
 
     # Parse time column
     if date_format == "auto":
@@ -226,7 +373,9 @@ def _load_and_standardize(
             try:
                 df[time_col] = pd.to_datetime(df[time_col], format=fmt)
                 parsed = True
-                logger.debug(f"Time column parsed with format: {fmt or 'auto-detected'}")
+                logger.debug(
+                    f"Time column parsed with format: {fmt or 'auto-detected'}"
+                )
                 break
             except (ValueError, TypeError):
                 continue
@@ -242,10 +391,43 @@ def _load_and_standardize(
     return df
 
 
+def _build_long_subset(
+    outcome: dict, df: pd.DataFrame, unit_col: str, time_col: str, treatment_col: str
+) -> pd.DataFrame:
+    """Build a long-format subset for one outcome group."""
+    subset = df[[unit_col, time_col, treatment_col, outcome["outcome_col"]]].copy()
+    subset[GROUP_COL] = outcome["label"]
+    subset = subset.rename(columns={outcome["outcome_col"]: OUTCOME_COL})
+    if outcome["denominator_col"] and outcome["denominator_col"] in df.columns:
+        subset[DENOMINATOR_COL] = df[outcome["denominator_col"]]
+    return subset
+
+
+def _build_long_dfs(
+    df: pd.DataFrame, schema_info: dict, groups: list[str], total_labels: list[str]
+) -> list[pd.DataFrame]:
+    unit_col = schema_info["unit_col"]
+    time_col = schema_info["time_col"]
+    treatment_col = schema_info["treatment_col"]
+
+    long_dfs = [
+        _build_long_subset(o, df, unit_col, time_col, treatment_col)
+        for o in schema_info["outcomes"]
+        if o["label"] in groups or o["label"] in total_labels
+    ]
+
+    if not long_dfs:
+        logger.error(f"No matching outcomes found for groups: {groups}")
+        raise ValueError(f"No matching outcomes found for groups: {groups}")
+
+    return long_dfs
+
+
 def _wide_to_long(
     df: pd.DataFrame,
-    schema_info: Dict[str, Any],
-    groups: List[str]
+    schema_info: dict,
+    groups: list[str],
+    total_from_labels: list[str] | None = None,
 ) -> pd.DataFrame:
     """
     Convert wide format to long format with standard column names.
@@ -253,52 +435,47 @@ def _wide_to_long(
     Handles "total" group by summing all outcomes/denominators.
     Output columns: unit, time, group, outcome, denominator, treatment.
     """
-    unit_col = schema_info["unit_col"]
-    time_col = schema_info["time_col"]
-    treatment_col = schema_info["treatment_col"]
-    outcomes = schema_info["outcomes"]
-
     # Check if "total" is requested but not defined
-    defined_labels = [o["label"] for o in outcomes]
+    defined_labels = [o["label"] for o in schema_info["outcomes"]]
     needs_total = "total" in groups and "total" not in defined_labels
 
-    long_dfs = []
+    # Determine which labels to sum for synthetic total
+    if needs_total and total_from_labels is None:
+        raise ConfigError(
+            "'total' is not defined as an outcome label in the schema. "
+            "Provide type_config with 'total_from' or 'total_all' to create it."
+        )
+    total_labels: list[str] = (
+        total_from_labels if needs_total and total_from_labels else []
+    )
 
-    for o in outcomes:
-        label = o["label"]
-        # Skip if not in requested groups (unless we need it for total)
-        if label not in groups and not needs_total:
-            continue
-
-        subset = df[[unit_col, time_col, treatment_col, o["outcome_col"]]].copy()
-        subset[GROUP_COL] = label
-        subset = subset.rename(columns={o["outcome_col"]: OUTCOME_COL})
-
-        if o["denominator_col"] and o["denominator_col"] in df.columns:
-            subset[DENOMINATOR_COL] = df[o["denominator_col"]]
-
-        long_dfs.append(subset)
-
-    if not long_dfs:
-        logger.error(f"No matching outcomes found for groups: {groups}")
-        raise ValueError(f"No matching outcomes found for groups: {groups}")
+    long_dfs = _build_long_dfs(df, schema_info, groups, total_labels)
 
     df_long = pd.concat(long_dfs, ignore_index=True)
 
     # Rename ID columns to standard names
-    df_long = df_long.rename(columns={
-        unit_col: UNIT_COL,
-        time_col: TIME_COL,
-        treatment_col: TREATMENT_COL
-    })
+    df_long = df_long.rename(
+        columns={
+            schema_info["unit_col"]: UNIT_COL,
+            schema_info["time_col"]: TIME_COL,
+            schema_info["treatment_col"]: TREATMENT_COL,
+        }
+    )
 
-    # Handle "total" group by aggregating all outcomes
-    if needs_total:
-        df_total = df_long.groupby([UNIT_COL, TIME_COL, TREATMENT_COL], as_index=False).agg({
-            OUTCOME_COL: "sum",
-            DENOMINATOR_COL: "sum" if DENOMINATOR_COL in df_long.columns else "first"
-        })
+    # Handle "total" group by aggregating specified subgroups
+    if needs_total and total_labels:
+        # Filter to only the labels we need to sum
+        df_for_total = df_long[df_long[GROUP_COL].isin(total_labels)]
+        agg_dict: dict[str, str] = {OUTCOME_COL: "sum"}
+        has_denom = DENOMINATOR_COL in df_for_total.columns
+        if has_denom:
+            agg_dict[DENOMINATOR_COL] = "sum"
+        df_total = df_for_total.groupby(
+            [UNIT_COL, TIME_COL, TREATMENT_COL], as_index=False
+        ).agg(agg_dict)
         df_total[GROUP_COL] = "total"
+        if not has_denom:
+            df_total[DENOMINATOR_COL] = 1
 
         # Filter to only requested groups
         df_long = df_long[df_long[GROUP_COL].isin(groups)]
@@ -308,15 +485,15 @@ def _wide_to_long(
         df_long = df_long[df_long[GROUP_COL].isin(groups)]
 
     # Sort for consistency
-    df_long = df_long.sort_values([UNIT_COL, TIME_COL, GROUP_COL]).reset_index(drop=True)
+    df_long = df_long.sort_values([UNIT_COL, TIME_COL, GROUP_COL]).reset_index(
+        drop=True
+    )
 
     return df_long
 
 
 def _filter_time_range(
-    df: pd.DataFrame,
-    start_date: Optional[str],
-    end_date: Optional[str]
+    df: pd.DataFrame, start_date: str | None, end_date: str | None
 ) -> pd.DataFrame:
     """Filter DataFrame by date range using fixed TIME_COL."""
     if start_date is not None:
@@ -343,12 +520,14 @@ def _aggregate_temporal(df: pd.DataFrame, period: str) -> pd.DataFrame:
         "monthly": (1, lambda m: m),
         "bimonthly": (2, lambda m: ((m - 1) // 2) + 1),
         "quarterly": (3, lambda m: ((m - 1) // 3) + 1),
-        "yearly": (12, lambda m: 1)
+        "yearly": (12, lambda m: 1),
     }
 
     if period not in period_map:
         logger.error(f"Unknown aggregation period: {period}")
-        raise ValueError(f"Unknown period: {period}. Use: monthly, bimonthly, quarterly, yearly")
+        raise ValueError(
+            f"Unknown period: {period}. Use: monthly, bimonthly, quarterly, yearly"
+        )
 
     months_per_period, period_func = period_map[period]
     df["_period"] = df["_month"].apply(period_func)
@@ -356,7 +535,7 @@ def _aggregate_temporal(df: pd.DataFrame, period: str) -> pd.DataFrame:
     # Define aggregation
     agg_dict = {
         OUTCOME_COL: "sum",
-        TREATMENT_COL: "max"  # Treated if any sub-period is treated
+        TREATMENT_COL: "max",  # Treated if any sub-period is treated
     }
     if DENOMINATOR_COL in df.columns:
         agg_dict[DENOMINATOR_COL] = "mean"
@@ -372,7 +551,9 @@ def _aggregate_temporal(df: pd.DataFrame, period: str) -> pd.DataFrame:
 
     # Add period boundaries for reference
     df_agg["start_date"] = df_agg[TIME_COL]
-    df_agg["end_date"] = df_agg[TIME_COL] + pd.DateOffset(months=months_per_period) - timedelta(days=1)
+    df_agg["end_date"] = (
+        df_agg[TIME_COL] + pd.DateOffset(months=months_per_period) - timedelta(days=1)
+    )
 
     # Clean up
     df_agg = df_agg.drop(columns=["_year", "_period"])
@@ -383,9 +564,10 @@ def _aggregate_temporal(df: pd.DataFrame, period: str) -> pd.DataFrame:
 
 def _build_model_arrays(
     df: pd.DataFrame,
-    groups: List[str],
-    denominator_scale: float = 1e4
-) -> Dict[str, Any]:
+    groups: list[str],
+    denominator_scale: float = 1e4,
+    allow_unbalanced_panel: bool = False,
+) -> dict[str, Any]:
     """
     Convert long-format DataFrame to K×D×N arrays for the model.
 
@@ -409,7 +591,7 @@ def _build_model_arrays(
     df = df[df[GROUP_COL].isin(groups)].copy()
     df = df.sort_values([UNIT_COL, TIME_COL, GROUP_COL]).reset_index(drop=True)
 
-    # Get dimensions
+    # Get dimensions — use FULL set of units/times across all data
     units = sorted(df[UNIT_COL].unique())
     times = sorted(df[TIME_COL].unique())
     K, D, N = len(groups), len(units), len(times)
@@ -419,6 +601,7 @@ def _build_model_arrays(
     denominators = np.ones((K, D, N))  # Default to 1 for count modeling
     control_idx = np.ones((K, D, N), dtype=bool)
     missing_idx = np.zeros((K, D, N), dtype=bool)
+    filled = np.zeros((K, D, N), dtype=bool)  # Track which cells have data
 
     # Create index mappings
     group_to_k = {g: i for i, g in enumerate(groups)}
@@ -448,7 +631,25 @@ def _build_model_arrays(
                 denominators[k, d, n] = denom_val / denominator_scale
 
         # Control status (treatment=0 means control)
-        control_idx[k, d, n] = (row[TREATMENT_COL] == 0)
+        control_idx[k, d, n] = row[TREATMENT_COL] == 0
+        filled[k, d, n] = True
+
+    # Check for structurally absent cells (no row in data)
+    absent_mask = ~filled
+    n_absent = int(absent_mask.sum())
+    n_total = K * D * N
+
+    if n_absent > 0:
+        if not allow_unbalanced_panel:
+            raise DataError(
+                f"Unbalanced panel: {n_absent} of {n_total} cells are missing. "
+                "Set allow_unbalanced_panel=True in config to allow."
+            )
+        # Mark absent cells as missing
+        missing_idx = missing_idx | absent_mask
+        logger.warning(
+            f"Unbalanced panel: {n_absent} of {n_total} cells are structurally absent (marked as missing)"
+        )
 
     return {
         "Y": Y,
@@ -457,5 +658,5 @@ def _build_model_arrays(
         "missing_idx_array": missing_idx,
         "groups": groups,
         "units": units,
-        "times": times
+        "times": times,
     }
