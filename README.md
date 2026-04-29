@@ -220,7 +220,7 @@ TBD
 ## Roadmap
 
 Built-in but still being hardened:
-
+- [ ] **Add MCMC diagnostics** - trace plots (log postperior), ESS, Rhats
 - [ ] **Unit test coverage** — current suite is mostly integration / regression against synthetic CSVs; add targeted unit tests for functions in `models/`, `inference.py`, and `output.py`
 - [ ] **GPU support** — JAX already runs on GPU; surface a config flag + verify chain parallelism against `numpyro.set_host_device_count`
 - [ ] **Spillover analysis** — diagnostics for contamination between treated and neighboring control units
