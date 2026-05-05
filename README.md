@@ -19,7 +19,7 @@ Requires Python 3.12+ and [`uv`](https://docs.astral.sh/uv/). All other dependen
 The repo ships with `data/raw/fertility_data.csv` (state-level US birth counts 2016–2024) and two configs:
 
 - `configs/fertility_smoke_test.yaml` — 2 chains × 200+200 samples, rank 3, one model type. Runs in ~4 min on a laptop. For verifying the pipeline works, not for inference.
-- `configs/fertility_config.yaml` — 4 chains × 2000+2000 samples across 4 model types. Full production settings. Takes hours.
+- `configs/fertility_config.yaml` — 4 chains × 2000+2000 samples across 4 model types. Full production settings. Takes hours and writes large CSVs (hundreds of MB to ~1 GB per multi-group type).
 
 Smoke test first:
 
@@ -33,12 +33,27 @@ When that finishes cleanly, run the full analysis:
 uv run scripts/run_analysis.py --config configs/fertility_config.yaml
 ```
 
+Full fertility runs default to `parallel.analysis_workers: 1` so progress remains visible and only one large draws/reporting job sits in memory at a time. You can set it to `-1` to auto-cap model-type workers against `mcmc.num_chains` and CPU count. Progress bars are disabled for multi-model parallel runs so subprocess output does not interleave; the parent process prints a heartbeat every `output.progress_interval_seconds` seconds showing how many model types have completed and which are still running.
+
 Both write posterior draws + preprocessed data to `results/<type>/` (and figures under `results/<type>/figs/` when `output.figures: true`).
 
 Regenerate figures from an existing draws CSV without re-running MCMC:
 
 ```bash
 uv run scripts/generate_full_viz.py --results results/total/NB_births_total_3.csv
+```
+
+Diagnostics are off by default. Enable them only for targeted runs:
+
+```bash
+uv run scripts/run_analysis.py --config configs/fertility_config.yaml --type total --save-diagnostics
+uv run python scripts/check_diagnostics.py results/total/*_diagnostics.json
+```
+
+To compute limited post-hoc diagnostics from saved draws (mu / mu_treated / ypred only):
+
+```bash
+uv run python scripts/compute_posthoc_diagnostics.py results/total/NB_births_total_5.csv --param-filter mu
 ```
 
 ## Using Your Own Data
@@ -147,16 +162,40 @@ mcmc:
   num_chains: 4 # chains within one fit
 ```
 
-`analysis_workers × num_chains` is capped against CPU count automatically — you won't oversubscribe the machine.
+`analysis_workers × num_chains` is capped against CPU count automatically. With `analysis_workers: -1`, the runner uses the largest safe model-type worker count. For easier progress visibility or lower memory/disk pressure, set `analysis_workers: 1`. Parallel runs disable worker progress bars and print a parent-process heartbeat every `output.progress_interval_seconds` seconds so you can see which model types are still running.
 
-### Figures + cleanup
+### Figures, diagnostics + cleanup
 
 ```yaml
 output:
   figures: true # auto-generate PPC + summary plots at the end of a run
   clean: false # wipe <output_dir>/<type>/ before writing
+  save_diagnostics: false # ESS/R-hat diagnostics; prefer --save-diagnostics per type
+  progress_interval_seconds: 60 # parent heartbeat for parallel runs
   filename_pattern: "{distribution}_{type}_{rank}"
 ```
+
+### Reporting-only aggregate units and PPC selection
+
+Aggregate units are created after model fitting, only for reporting/PPC. They are not added to model input.
+
+```yaml
+output:
+  aggregate_units:
+    - unit: "Treated units excluding Texas" # dataset-specific name example
+      include_treated_units: true
+      exclude_units: ["Texas"]
+
+  ppc_units:
+    - "Texas"
+    - "Treated units excluding Texas"
+
+  ppc_acf_lags: [6, 3, 1]
+  ppc_unit_corr_max_time: "2022-04-01" # optional time < cutoff for unit-correlation PPC
+  ppc_exclude_units: [] # default: do not silently exclude aggregate units
+```
+
+Selectors are generic: use exactly one of `include_treated_units: true`, `include_all_units: true`, or `include_units: [...]`; add optional `exclude_units`, `strict`, or `overwrite` per aggregate spec.
 
 ## Outputs
 
@@ -223,6 +262,8 @@ Built-in but still being hardened:
 - [ ] **Add MCMC diagnostics** - trace plots (log postperior), ESS, Rhats
 - [ ] **Unit test coverage** — current suite is mostly integration / regression against synthetic CSVs; add targeted unit tests for functions in `models/`, `inference.py`, and `output.py`
 - [ ] **GPU support** — JAX already runs on GPU; surface a config flag + verify chain parallelism against `numpyro.set_host_device_count`
+- [ ] **Server/HPC parallel profiles** — add config profiles for laptop vs server runs, and optional reference-style task granularity (`model_type × rank`) so server runs can parallelize many independent fits safely. Guard cleanup/output races, keep diagnostics off for full parallel runs, and cap `analysis_workers × mcmc.num_chains` by CPU/RAM.
+- [ ] **Reference-style post-hoc diagnostics** — optionally save selected latent draws (`te`, treatment effects, `unit_weight`, `time_fac`, `disp`) so R-hat/ESS can be computed after a run without calling NumPyro `summary()` during production. Prefer Parquet or compact sidecar files over widening the main CSV; keep full-run diagnostics off by default.
 - [ ] **Spillover analysis** — diagnostics for contamination between treated and neighboring control units
 - [ ] **Donor-pool sensitivity** — systematic leave-one-out / leave-region-out robustness checks
 - [ ] **Additional outcome distributions** — Gaussian, Student-t for continuous outcomes
