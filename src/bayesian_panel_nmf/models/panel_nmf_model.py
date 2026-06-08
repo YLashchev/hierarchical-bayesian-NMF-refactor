@@ -42,6 +42,61 @@ def _define_time_factors_and_fe(K, D, rank, N, time_fac_alpha):
     return state_fe, time_fe, time_factor
 
 
+def _define_treatment_effects(control_idx_array):
+    """Hierarchical treatment-effect block.
+
+    Returns the ``te`` tensor of shape (K, D, N), non-zero only on treated
+    cells. Depends only on the control/treated mask (not on the factor model),
+    so it is shared between the joint ``model`` and the Stage-2
+    ``treatment_effect_model``.
+    """
+    K, D, N = control_idx_array.shape
+    num_treated = (~control_idx_array).sum()
+
+    treatment_it_scale = numpyro.sample(
+        "treatment_it_scale", dist.HalfNormal(scale=0.1)
+    )
+    treatment_state_scale = numpyro.sample(
+        "treatment_state_scale", dist.HalfNormal(scale=1)
+    )
+    treatment_category_scale = numpyro.sample(
+        "treatment_category_scale", dist.HalfNormal(scale=1)
+    )
+    state_category_scale = numpyro.sample(
+        "state_category_scale", dist.HalfNormal(scale=1)
+    )
+
+    with numpyro.plate("num_treated", num_treated):
+        treatment_kt = numpyro.sample(
+            "treatment_kt", dist.Normal(scale=treatment_it_scale)
+        )
+    with numpyro.plate("num_states", D):
+        state_treatment_effect = numpyro.sample(
+            "state_treatment_effect", dist.Normal(scale=treatment_state_scale)
+        )
+        with numpyro.plate("num_cats", K):
+            state_category_te = numpyro.sample(
+                "state_category_te", dist.Normal(scale=state_category_scale)
+            )
+    with numpyro.plate("num_cats", K):
+        category_treatment_effect = numpyro.sample(
+            "category_treatment_effect", dist.Normal(scale=treatment_category_scale)
+        )
+
+    te = numpyro.deterministic(
+        "te",
+        jnp.zeros_like(control_idx_array, dtype=float)
+        .at[~control_idx_array]
+        .add(treatment_kt)
+        + (
+            (~control_idx_array) * state_treatment_effect[None, :, None]
+            + (~control_idx_array) * category_treatment_effect[:, None, None]
+            + (~control_idx_array) * state_category_te[:, :, None]
+        ),
+    )
+    return te
+
+
 def model(
     denominators,
     control_idx_array,
@@ -70,10 +125,8 @@ def model(
     # Set the masking arrays to just be a vacuous "True" if not set
     if control_idx_array is None:
         control_idx = np.ones_like(denominators, dtype=np.bool_).reshape(-1)
-        num_treated = 0
     else:
         control_idx = control_idx_array.reshape(-1)
-        num_treated = (~control_idx_array).sum()
 
     if missing_idx_array is None:
         missing_idx = np.zeros_like(denominators, dtype=np.bool_).reshape(-1)
@@ -100,53 +153,8 @@ def model(
     if model_treated:
         # Help static analysis know control_idx_array is not None in this path
         assert control_idx_array is not None
-
-        treatment_it_scale = numpyro.sample(
-            "treatment_it_scale", dist.HalfNormal(scale=0.1)
-        )
-        treatment_state_scale = numpyro.sample(
-            "treatment_state_scale", dist.HalfNormal(scale=1)
-        )
-        treatment_category_scale = numpyro.sample(
-            "treatment_category_scale", dist.HalfNormal(scale=1)
-        )
-        state_category_scale = numpyro.sample(
-            "state_category_scale", dist.HalfNormal(scale=1)
-        )
-
-        with numpyro.plate("num_treated", num_treated):
-            treatment_kt = numpyro.sample(
-                "treatment_kt", dist.Normal(scale=treatment_it_scale)
-            )
-        with numpyro.plate("num_states", D):
-            state_treatment_effect = numpyro.sample(
-                "state_treatment_effect", dist.Normal(scale=treatment_state_scale)
-            )
-            with numpyro.plate("num_cats", K):
-                state_category_te = numpyro.sample(
-                    "state_category_te", dist.Normal(scale=state_category_scale)
-                )
-        with numpyro.plate("num_cats", K):
-            category_treatment_effect = numpyro.sample(
-                "category_treatment_effect", dist.Normal(scale=treatment_category_scale)
-            )
-
-        # treatment_kt_tensor = numpyro.deterministic('tkt', jnp.zeros_like(control_idx_array))
-        # treatment_kt_tensor[~control_idx_array] = treatment_kt
-        # print(treatment_kt_tensor.shape)
-        te = numpyro.deterministic(
-            "te",
-            jnp.zeros_like(control_idx_array, dtype=float)
-            .at[~control_idx_array]
-            .add(treatment_kt)
-            + (
-                (~control_idx_array) * state_treatment_effect[None, :, None]
-                + (~control_idx_array) * category_treatment_effect[:, None, None]
-                + (~control_idx_array) * state_category_te[:, :, None]
-            ),
-        )
+        te = _define_treatment_effects(control_idx_array)
         mu = numpyro.deterministic("mu", f_all + te)
-        # mu = numpyro.deterministic('mu', f_all.at[~control_idx_array].add(treatment_kt) + (~control_idx_array) * state_treatment_effect[None, :, None] + (~control_idx_array) * category_treatment_effect[:, None, None])
     else:
         mu = numpyro.deterministic("mu", f_all)
 
@@ -219,6 +227,92 @@ def model(
         else:
             disp_obs = disp_broadcast.reshape(-1)
 
+        numpyro.sample(
+            "y_obs",
+            dist.NegativeBinomial2(jnp.exp(f), disp_obs),
+            obs=y_obs,
+        )
+
+
+def treatment_effect_model(
+    mu_ctrl_offset,
+    control_idx_array,
+    missing_idx_array=None,
+    y=None,
+    outcome_dist="NB",
+    dispersion=None,
+    adjust_for_missingness=False,
+):
+    """Stage 2 of the two-stage ("cut") model.
+
+    Estimates only the hierarchical treatment-effect block, fit to the
+    post-treatment treated cells, with a single Stage-1 posterior draw of the
+    counterfactual log-rate (``mu_ctrl_offset``) plugged in as a fixed offset.
+    ``mu_ctrl_offset`` already includes ``log(denominators)``, so it is used
+    directly. No factor model is sampled, so post-treatment data cannot feed
+    back into the counterfactual.
+
+    Parameters
+    ----------
+    mu_ctrl_offset : array, shape (K, D, N)
+        One posterior draw of ``mu_ctrl`` from Stage 1, held fixed.
+    control_idx_array : bool array, shape (K, D, N)
+        True for control cells; the likelihood is evaluated on the treated
+        (``~control_idx_array``) post-treatment cells only.
+    dispersion : array, shape (D,), optional
+        NegativeBinomial2 concentration per unit (required for ``outcome_dist='NB'``).
+        Typically carried from the matched Stage-1 draw or derived from a fixed
+        ``nb_disp``.
+    """
+    if control_idx_array is None:
+        raise ValueError(
+            "treatment_effect_model requires control_idx_array to identify "
+            "treated cells."
+        )
+
+    control_idx = control_idx_array.reshape(-1)
+    treated_idx = ~control_idx
+
+    if missing_idx_array is None:
+        missing_idx = np.zeros_like(control_idx_array, dtype=np.bool_).reshape(-1)
+    else:
+        missing_idx = missing_idx_array.reshape(-1)
+
+    f_all = numpyro.deterministic("mu_ctrl", jnp.asarray(mu_ctrl_offset))
+    te = _define_treatment_effects(control_idx_array)
+    mu = numpyro.deterministic("mu", f_all + te)
+
+    if outcome_dist == "NB":
+        if dispersion is None:
+            raise ValueError("outcome_dist='NB' requires a dispersion argument.")
+        disp_broadcast = jnp.asarray(dispersion)[None, :, None] * jnp.ones_like(mu)
+    else:
+        disp_broadcast = None
+
+    # Stage 2 fits the treated post-treatment cells only.
+    if adjust_for_missingness:
+        scope(missingness_adjustment, "low_births")(
+            mu,
+            missing_idx,
+            treated_idx,
+            jnp.array([1, 2, 3, 4, 5, 6, 7, 8, 9]),
+            outcome_dist,
+            dispersion=disp_broadcast,
+        )
+
+    if y is not None:
+        mask = ~missing_idx & treated_idx
+        y_obs = y.reshape(-1)[mask]
+    else:
+        mask = treated_idx
+        y_obs = None
+
+    f = mu.reshape(-1)[mask]
+
+    if outcome_dist == "Poisson":
+        numpyro.sample("y_obs", dist.Poisson(rate=jnp.exp(f)), obs=y_obs)
+    else:
+        disp_obs = disp_broadcast.reshape(-1)[mask]
         numpyro.sample(
             "y_obs",
             dist.NegativeBinomial2(jnp.exp(f), disp_obs),

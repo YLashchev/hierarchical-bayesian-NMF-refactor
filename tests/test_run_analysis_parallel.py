@@ -231,7 +231,12 @@ def test_run_model_type_without_figures_does_not_import_viz(
 
     config = {
         "data": {"input_file": "unused.csv", "output_dir": str(output_dir)},
-        "model": {"types": {"total": {"groups": ["total"], "ranks_to_test": [1]}}},
+        "model": {
+            # Exercise the (mocked) single-fit path; this test targets viz-import
+            # behavior, not the two-stage default.
+            "treatment_mode": "joint",
+            "types": {"total": {"groups": ["total"], "ranks_to_test": [1]}},
+        },
         "output": {"figures": False, "filename_pattern": "{type}_{rank}"},
     }
 

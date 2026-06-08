@@ -123,6 +123,31 @@ def _validate_config_boolean_flags(
         _require_bool(output_cfg.get(flag), f"output.{flag}")
 
 
+def _validate_treatment_mode_and_stage2(config: dict, model_cfg: dict) -> None:
+    """Validate the two-stage ("cut") settings, if present."""
+    treatment_mode = model_cfg.get("treatment_mode")
+    if treatment_mode is not None and treatment_mode not in ("two_stage", "joint"):
+        raise ConfigError(
+            f"config['model']['treatment_mode'] must be 'two_stage' or 'joint', "
+            f"got {treatment_mode!r}"
+        )
+
+    stage2_cfg = config.get("stage2")
+    if stage2_cfg is None:
+        return
+    if not isinstance(stage2_cfg, dict):
+        raise ConfigError(
+            f"config['stage2'] must be dict, got {type(stage2_cfg).__name__}"
+        )
+
+    for key in ("n_imputations", "num_warmup", "num_samples", "thinning"):
+        value = stage2_cfg.get(key)
+        if value is not None and (not isinstance(value, int) or value < 1):
+            raise ConfigError(
+                f"config['stage2']['{key}'] must be a positive integer, got {value!r}"
+            )
+
+
 def _validate_data_schema(config: dict) -> tuple[dict, dict]:
     if "data" not in config:
         raise ConfigError("config missing 'data' section")
@@ -167,6 +192,7 @@ def validate_config(config: dict) -> None:
 
     _validate_schema_outcomes(schema)
     _validate_config_boolean_flags(config, data_config, config.get("model", {}) or {})
+    _validate_treatment_mode_and_stage2(config, config.get("model", {}) or {})
 
 
 def validate_filepath(filepath: str) -> Path:

@@ -28,6 +28,7 @@ from bayesian_panel_nmf.data import load_and_prepare
 from bayesian_panel_nmf.output import format_draws
 from bayesian_panel_nmf.inference import (
     run_mcmc_inference,
+    run_two_stage_inference,
     generate_predictions,
     extract_diagnostics,
     check_convergence,
@@ -141,11 +142,21 @@ def run_model_type(
     df_preprocessed = data_dict["df_preprocessed"]
     df_preprocessed.to_csv(type_output_dir / f"df_{model_type}.csv", index=False)
 
-    for rank in ranks:
-        mcmc = run_mcmc_inference(data_dict, model, rank, config)
+    treatment_mode = config.get("model", {}).get("treatment_mode", "two_stage")
 
-        diagnostics = extract_diagnostics(mcmc)
-        check_convergence(diagnostics)
+    for rank in ranks:
+        if treatment_mode == "two_stage":
+            # Stage 1 (control-only factors) + Stage 2 (per-imputation treatment
+            # effect) with the counterfactual fixed as an offset; cuts feedback.
+            samples, predictions, diagnostics = run_two_stage_inference(
+                data_dict, model, rank, config
+            )
+        else:
+            mcmc = run_mcmc_inference(data_dict, model, rank, config)
+            diagnostics = extract_diagnostics(mcmc)
+            check_convergence(diagnostics)
+            predictions = generate_predictions(mcmc, data_dict, model, rank, config)
+            samples = mcmc.get_samples(group_by_chain=True)
 
         if save_diagnostics:
             dist = config["model"].get("outcome_distribution", "NB")
@@ -167,9 +178,6 @@ def run_model_type(
             with open(diagnostics_file, "w") as f:
                 json.dump(diag_output, f, indent=2)
 
-        predictions = generate_predictions(mcmc, data_dict, model, rank, config)
-
-        samples = mcmc.get_samples(group_by_chain=True)
         draws_df = format_draws(samples, predictions, data_dict)
 
         dist = config["model"].get("outcome_distribution", "NB")

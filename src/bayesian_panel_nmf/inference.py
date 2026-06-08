@@ -13,6 +13,7 @@ from numpyro.diagnostics import summary
 import numpyro
 from loguru import logger
 
+from bayesian_panel_nmf.models import treatment_effect_model
 from bayesian_panel_nmf.validation import (
     validate_data_dict,
     validate_rank,
@@ -398,3 +399,170 @@ def generate_predictions(
     logger.debug(f"  Prediction shape: {pred_mat.shape}")
 
     return pred_mat
+
+
+def run_two_stage_inference(
+    data_dict: dict[str, np.ndarray], model_fn: Callable, rank: int, config: dict
+) -> tuple[dict[str, np.ndarray], np.ndarray, dict[str, Any]]:
+    """Two-stage ("cut") inference that decouples the counterfactual from the effect.
+
+    Stage 1 fits the factor model to **control data only** (``model_treated=False``)
+    to obtain the counterfactual log-rate ``mu_ctrl``. Stage 2 draws
+    ``stage2.n_imputations`` posterior samples of ``mu_ctrl`` and, for each, runs a
+    separate MCMC that estimates **only** the hierarchical treatment-effect block on
+    the treated post-treatment cells, with that draw plugged in as a fixed offset.
+    Pooling the runs (multiple-imputation style) propagates Stage-1 uncertainty while
+    cutting feedback from post-treatment data into the counterfactual.
+
+    The 10 imputations run sequentially (v1) but are surfaced as the ``C`` chains of
+    the returned arrays, so downstream ``format_draws``/reporting are unchanged.
+
+    Parameters
+    ----------
+    data_dict : dict
+        Output of ``load_and_prepare`` (Y, denominators, control_idx_array, ...).
+    model_fn : callable
+        The joint NumPyro ``model`` (used for Stage 1 + counterfactual prediction).
+    rank : int
+        Factorization rank for Stage 1.
+    config : dict
+        Full config; reads ``model``, ``mcmc`` and ``stage2`` sections.
+
+    Returns
+    -------
+    samples : dict
+        ``{'mu_ctrl': (C,S,K,D,N), 'te': (C,S,K,D,N)}`` with ``C = n_imputations``.
+    predictions : np.ndarray
+        Counterfactual posterior predictive, shape ``(C,S,K,D,N)``.
+    diagnostics : dict
+        Stage-1 convergence diagnostics (counterfactual fit quality).
+    """
+    validate_data_dict(data_dict)
+    rank = validate_rank(rank)
+
+    model_config = config.get("model", {})
+    outcome_dist = model_config.get("outcome_distribution", "NB")
+    nb_disp = model_config.get("nb_disp", 1e-4)
+    sample_disp = model_config.get("sample_disp", False)
+    adjust_for_missingness = model_config.get("adjust_for_missingness", True)
+
+    stage2_config = config.get("stage2", {})
+    n_imputations = int(stage2_config.get("n_imputations", 10))
+    s2_warmup = int(stage2_config.get("num_warmup", 1000))
+    s2_samples = int(stage2_config.get("num_samples", 2500))
+    s2_thinning = int(stage2_config.get("thinning", 10))
+    s2_seed = int(stage2_config.get("random_seed", 8675309))
+    progress_bar = config.get("mcmc", {}).get("progress_bar", True)
+
+    Y = data_dict["Y"]
+    K, D, N = Y.shape
+    control_idx_array = data_dict["control_idx_array"]
+    missing_idx_array = data_dict["missing_idx_array"]
+
+    # ---- Stage 1: factor model fit to control cells only ----
+    logger.info("Two-stage inference: Stage 1 (control-only factor model)")
+    stage1_config = {**config, "model": {**model_config, "model_treated": False}}
+    mcmc1 = run_mcmc_inference(data_dict, model_fn, rank, stage1_config)
+    diagnostics = extract_diagnostics(mcmc1)
+
+    predictions = generate_predictions(mcmc1, data_dict, model_fn, rank, config)
+
+    stage1_samples = mcmc1.get_samples(group_by_chain=False)
+    mu_ctrl_all = np.asarray(stage1_samples["mu_ctrl"])  # (total, K, D, N)
+    total_draws = mu_ctrl_all.shape[0]
+    # generate_predictions reshapes from get_samples(group_by_chain=False), so the
+    # flat ordering matches mu_ctrl_all draw-for-draw.
+    pred_flat = np.asarray(predictions).reshape(total_draws, K, D, N)
+
+    disp_all = (
+        np.asarray(stage1_samples["disp"])
+        if sample_disp and "disp" in stage1_samples
+        else None
+    )
+
+    num_treated = int((~control_idx_array).sum())
+    if num_treated == 0:
+        logger.warning(
+            "No treated cells found; skipping Stage 2 and returning control-only "
+            "fit (treatment effect = 0)."
+        )
+        return mcmc1.get_samples(group_by_chain=True), predictions, diagnostics
+
+    # ---- Select Stage-1 draws of mu_ctrl to propagate ----
+    if n_imputations > total_draws:
+        logger.warning(
+            f"stage2.n_imputations={n_imputations} > available Stage-1 draws "
+            f"({total_draws}); clamping to {total_draws}."
+        )
+        n_imputations = total_draws
+    rng = np.random.default_rng(s2_seed)
+    selected = rng.choice(total_draws, size=n_imputations, replace=False)
+    keys = random.split(random.PRNGKey(s2_seed), n_imputations)
+
+    logger.info(
+        f"Two-stage inference: Stage 2 ({n_imputations} imputations, sequential)"
+    )
+
+    # ---- Stage 2: one treatment-effect MCMC per mu_ctrl draw ----
+    mu_ctrl_blocks: list[np.ndarray] = []
+    te_blocks: list[np.ndarray] = []
+    pred_blocks: list[np.ndarray] = []
+    for i, j in enumerate(selected):
+        offset_j = mu_ctrl_all[j]  # (K, D, N) fixed counterfactual offset
+        ypred_j = pred_flat[j]  # (K, D, N) counterfactual predictive
+
+        if outcome_dist == "NB":
+            dispersion_j = (
+                1.0 / disp_all[j] if disp_all is not None else np.ones(D) / nb_disp
+            )
+        else:
+            dispersion_j = None
+
+        logger.info(
+            f"  Stage 2 imputation {i + 1}/{n_imputations} (Stage-1 draw {int(j)})"
+        )
+        mcmc2 = MCMC(
+            NUTS(treatment_effect_model),
+            num_warmup=s2_warmup,
+            num_samples=s2_samples,
+            num_chains=1,
+            thinning=s2_thinning,
+            progress_bar=progress_bar,
+        )
+        mcmc2.run(
+            keys[i],
+            mu_ctrl_offset=offset_j,
+            control_idx_array=control_idx_array,
+            missing_idx_array=missing_idx_array,
+            y=Y,
+            outcome_dist=outcome_dist,
+            dispersion=dispersion_j,
+            adjust_for_missingness=adjust_for_missingness,
+        )
+
+        s2_diag = extract_diagnostics(mcmc2)
+        logger.info(
+            f"    diagnostics: min_ESS={s2_diag['n_eff_min']:.0f}, "
+            f"max_Rhat={s2_diag['rhat_max']:.4f}, divergences={s2_diag['divergences']}"
+        )
+        if not s2_diag["converged"]:
+            logger.warning(f"    Stage 2 imputation {i + 1} flagged for convergence.")
+
+        te_j = np.asarray(mcmc2.get_samples()["te"])  # (S, K, D, N)
+        s = te_j.shape[0]
+        mu_ctrl_blocks.append(np.broadcast_to(offset_j, (s, K, D, N)))
+        te_blocks.append(te_j)
+        pred_blocks.append(np.broadcast_to(ypred_j, (s, K, D, N)))
+
+    samples = {
+        "mu_ctrl": np.stack(mu_ctrl_blocks, axis=0),  # (C, S, K, D, N)
+        "te": np.stack(te_blocks, axis=0),  # (C, S, K, D, N)
+    }
+    predictions_out = np.stack(pred_blocks, axis=0)  # (C, S, K, D, N)
+
+    C, S = samples["te"].shape[:2]
+    logger.info(
+        f"Two-stage inference complete: pooled {C} imputations x {S} draws "
+        f"= {C * S} total draws."
+    )
+    return samples, predictions_out, diagnostics

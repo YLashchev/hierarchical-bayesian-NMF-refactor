@@ -106,6 +106,15 @@ model:
   # Set to false for control-only model (counterfactual estimation)
   model_treated: true
 
+  # How treatment effects are estimated:
+  #   "two_stage" (default) — "cut" model: Stage 1 fits the factor model to
+  #       control data only to get the counterfactual; Stage 2 estimates the
+  #       hierarchical treatment effect on treated cells with that counterfactual
+  #       held fixed as an offset (see the `stage2` section). Prevents
+  #       post-treatment data from polluting the factors / attenuating the effect.
+  #   "joint" — original single fit where treated cells also inform the factors.
+  treatment_mode: "two_stage"
+
 # -----------------------------------------------------------------------------
 # MCMC Settings
 # -----------------------------------------------------------------------------
@@ -128,6 +137,21 @@ mcmc:
   
   # Show progress bar during sampling
   progress_bar: true
+
+# -----------------------------------------------------------------------------
+# Stage 2 Settings (only used when model.treatment_mode == "two_stage")
+# -----------------------------------------------------------------------------
+stage2:
+  # Number of Stage-1 mu_ctrl posterior draws to propagate. Each is a separate
+  # MCMC run (a "chain" in the pooled output) fit to the treated cells with that
+  # draw as a fixed offset. More imputations = better Stage-1 uncertainty coverage.
+  n_imputations: 10
+
+  # Per-imputation NUTS settings (independent of the Stage-1 `mcmc` block above).
+  num_warmup: 1000
+  num_samples: 2500
+  thinning: 10
+  random_seed: 8675309
 
 # -----------------------------------------------------------------------------
 # Parallelization Settings

@@ -47,20 +47,24 @@ model:
     total:
       groups: ["total"]
       ranks_to_test: [5]
-    age:
-      groups: ["age1524", "age2534", "age3544"]
-      ranks_to_test: [5]
-    education:
-      groups: ["nohs", "hs", "somecoll", "coll"]
-      ranks_to_test: [5]
-    race:
-      groups: ["nhblack", "nhwhite", "hisp", "otherraceeth"]
-      ranks_to_test: [5]
+    # age:
+    #   groups: ["age1524", "age2534", "age3544"]
+    #   ranks_to_test: [5]
+    # education:
+    #   groups: ["nohs", "hs", "somecoll", "coll"]
+    #   ranks_to_test: [5]
+    # race:
+    #   groups: ["nhblack", "nhwhite", "hisp", "otherraceeth"]
+    #   ranks_to_test: [5]
 
   nb_disp: 1.0e-4
   sample_disp: false
   adjust_for_missingness: true
   model_treated: true
+
+  # Two-stage "cut" estimation (Stage 1 control-only factors; Stage 2 treatment
+  # effect with the counterfactual held fixed as an offset). See `stage2` below.
+  treatment_mode: "two_stage"
 
 # Full production config: 4 chains x 2000 warmup x 2000 samples, thinning 5.
 mcmc:
@@ -71,8 +75,16 @@ mcmc:
   random_seed: 8675309
   progress_bar: true
 
+# Stage 2 (treatment-effect) sampling for treatment_mode: two_stage.
+stage2:
+  n_imputations: 10
+  num_warmup: 1000
+  num_samples: 2000
+  thinning: 5
+  random_seed: 8675309
+
 parallel:
-  analysis_workers: -1
+  analysis_workers: 4
 
 output:
   figures: true
