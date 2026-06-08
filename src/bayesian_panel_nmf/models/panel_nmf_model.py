@@ -17,11 +17,13 @@ def _define_time_factors_and_fe(K, D, rank, N, time_fac_alpha):
                         "time_fac", dist.Gamma(time_fac_alpha, time_fac_alpha)
                     )
                 )
+        state_fe_mu = numpyro.sample(
+            "state_fe_mu", dist.ImproperUniform(constraints.real, (), ())
+        )
+        state_fe_sigma = numpyro.sample("state_fe_sigma", dist.HalfNormal(0.5))
         with numpyro.plate("D", D):
-            state_fe_sample = numpyro.sample(
-                "state_fe", dist.ImproperUniform(constraints.positive, (), ())
-            )
-            state_fe = jnp.log(state_fe_sample).T
+            state_fe_z = numpyro.sample("state_fe_z", dist.Normal(0, 1))
+        state_fe = (state_fe_mu + state_fe_sigma * state_fe_z).T
 
         with numpyro.plate("N", N):
             time_fe_sample = numpyro.sample("time_fe", dist.Gamma(1, 1))
