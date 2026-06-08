@@ -70,6 +70,42 @@ def _slug(s: str) -> str:
     return s.replace(" ", "_").lower()
 
 
+def _aggregate_treated_draws(draws_df: pd.DataFrame) -> pd.DataFrame:
+    """Create an 'All treated states' synthetic unit summing over (unit, time) pairs
+    where treatment == 1.
+
+    With staggered adoption the number of included units varies by time period.
+    outcome, ypred, denominator are summed (count data).
+    mu and mu_treated are log-sum-exp'd so exp(mu_agg) == sum_units(exp(mu)).
+    """
+    tx = draws_df[draws_df["treatment"] == 1].copy()
+    if tx.empty:
+        return pd.DataFrame()
+
+    def _logsumexp(x: np.ndarray) -> float:
+        m = float(np.max(x))
+        return m + float(np.log(np.sum(np.exp(x - m))))
+
+    draw_cols = [c for c in [".draw", ".chain", ".iteration"] if c in tx.columns]
+    group_cols = draw_cols + ["time", "group"]
+
+    def _agg(g: pd.DataFrame) -> pd.Series:
+        return pd.Series(
+            {
+                "outcome": g["outcome"].sum(),
+                "ypred": g["ypred"].sum(),
+                "denominator": g["denominator"].sum(),
+                "treatment": 1,
+                "mu": _logsumexp(g["mu"].values),
+                "mu_treated": _logsumexp(g["mu_treated"].values),
+            }
+        )
+
+    agg = tx.groupby(group_cols, sort=False).apply(_agg).reset_index()
+    agg["unit"] = "All treated states"
+    return agg
+
+
 # -----------------------------------------------------------------------------
 # Main entry point
 # -----------------------------------------------------------------------------
@@ -119,9 +155,7 @@ def generate_reports(
     figs_dir.mkdir(parents=True, exist_ok=True)
 
     if target_unit is None:
-        target_unit = _auto_detect_target(draws_df)
-    if target_unit is None:
-        raise ValueError("No treated units in draws_df and no target_unit specified.")
+        target_unit = "All treated states"
 
     all_groups = list(pd.unique(draws_df["group"]))
     if groups is None:
@@ -138,7 +172,14 @@ def generate_reports(
         f"output_dir={output_dir}"
     )
 
-    quantiles_df = _compute_quantiles(draws_df)
+    agg_draws = _aggregate_treated_draws(draws_df)
+    draws_df_aug = (
+        pd.concat([draws_df, agg_draws], ignore_index=True)
+        if not agg_draws.empty
+        else draws_df
+    )
+
+    quantiles_df = _compute_quantiles(draws_df_aug)
     quantiles_df["treated_unit"] = quantiles_df["unit"] == target_unit
     if not pd.api.types.is_datetime64_any_dtype(quantiles_df["time"]):
         quantiles_df["time"] = pd.to_datetime(quantiles_df["time"])
@@ -171,7 +212,7 @@ def generate_reports(
     # ---- Cross-group figures (interval, comparison, PPC) ---------------------
     logger.debug("  interval (percent change)")
     fig, ax = make_interval_plot(
-        draws_df, group_var="unit", estimand="ratio", method="mu"
+        draws_df_aug, group_var="unit", estimand="ratio", method="mu"
     )
     ax.set_xlabel("Percent Change (%)", fontsize=12)
     fig.savefig(figs_dir / "interval.png", dpi=150, bbox_inches="tight")
@@ -188,7 +229,7 @@ def generate_reports(
     make_all_ppc_plots(draws_df, output_dir=str(ppc_dir))
 
     # ---- Tables ---------------------------------------------------------------
-    summary = make_summary_table(draws_df, target_unit)
+    summary = make_summary_table(draws_df_aug, target_unit)
     summary.to_csv(figs_dir / "summary_table.csv", index=False)
 
     detail = quantiles_df.rename(
@@ -238,7 +279,7 @@ def generate_reports(
     per_unit.to_csv(figs_dir / "post_treatment_summary.csv", index=False)
 
     if print_tables:
-        _print_rich_tables(summary, per_unit, draws_df, target_unit)
+        _print_rich_tables(summary, per_unit, draws_df_aug, target_unit)
 
     return {
         "summary": summary,
@@ -274,7 +315,12 @@ def _print_rich_tables(
         t.add_row(*[str(v) for v in row.tolist()])
     console.print(t)
 
-    # Per-unit post-treatment totals
+    # Per-unit post-treatment totals — "All treated states" pinned to top
+    _AGG = "All treated states"
+    agg_rows = per_unit[per_unit["unit"] == _AGG]
+    other_rows = per_unit[per_unit["unit"] != _AGG]
+    per_unit_ordered = pd.concat([agg_rows, other_rows], ignore_index=True)
+
     t = Table(
         title="Post-treatment totals by unit (ranked by % excess)",
         show_lines=False,
@@ -285,7 +331,7 @@ def _print_rich_tables(
     t.add_column("Expected (95% CI)", justify="right")
     t.add_column("Excess", justify="right")
     t.add_column("Excess %", justify="right")
-    for _, r in per_unit.iterrows():
+    for i, (_, r) in enumerate(per_unit_ordered.iterrows()):
         style = "bold green" if r["unit"] == target_unit else None
         exp_ci = (
             f"{r['expected_mean']:,.0f} "
@@ -300,6 +346,8 @@ def _print_rich_tables(
             f"{r['excess_pct']:+.2f}%",
             style=style,
         )
+        if i == len(agg_rows) - 1 and not agg_rows.empty:
+            t.add_section()
     console.print(t)
 
     # Headline draws-based effect

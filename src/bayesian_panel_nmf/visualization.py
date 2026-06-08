@@ -1358,9 +1358,9 @@ def make_unit_fit_plot(
             ax=ax,
         )
 
-    # Treatment line
+    # Treatment line — only draw when there is a pre-treatment period to mark
     if "treated_unit" in df_plot.columns and df_plot["treated_unit"].iloc[0]:
-        if "treatment" in df_plot.columns:
+        if "treatment" in df_plot.columns and df_plot["treatment"].min() < 1:
             treated_times = df_plot[df_plot["treatment"] == 1]["time"]
             if not treated_times.empty:
                 t_date = treated_times.iloc[0]
@@ -1454,10 +1454,10 @@ def make_unit_gap_plot(
         ax.text(0.5, 0.5, "No valid data points", ha="center", va="center")
         return fig, ax
 
-    # Treatment Date
+    # Treatment Date — only mark when there is a pre-treatment period to contrast
     t_date = None
     if "treated_unit" in df_plot.columns and df_plot["treated_unit"].iloc[0]:
-        if "treatment" in df_plot.columns:
+        if "treatment" in df_plot.columns and df_plot["treatment"].min() < 1:
             treated_times = df_plot[df_plot["treatment"] == 1]["time"]
             if not treated_times.empty:
                 t_date = treated_times.iloc[0]
@@ -1657,15 +1657,28 @@ def make_interval_plot(
         .reset_index()
     )
 
-    # Sort
+    # Sort — pin "All treated states" to the top regardless of its median
+    _AGG = "All treated states"
     sort_order = plot_df.groupby(x_var)["median"].median().sort_values().index
+    others = [u for u in sort_order if u != _AGG]
+    sort_order = pd.Index(others + ([_AGG] if _AGG in sort_order else []))
     plot_df[x_var] = pd.Categorical(plot_df[x_var], categories=sort_order, ordered=True)
     plot_df = plot_df.sort_values(x_var)
 
     fig, ax = plt.subplots(figsize=figsize)
     y_positions = np.arange(len(sort_order))
     ax.set_yticks(y_positions)
-    ax.set_yticklabels(sort_order)
+    tick_labels = [
+        f"$\\bf{{{u.replace(' ', '\\ ')}}}$" if u == _AGG else u for u in sort_order
+    ]
+    ax.set_yticklabels(tick_labels)
+
+    # Separator between individual units and the aggregate row
+    if _AGG in sort_order and len(sort_order) > 1:
+        sep_y = len(others) - 0.5
+        ax.axhline(sep_y, color="gray", linewidth=0.8, linestyle="--", alpha=0.6)
+
+    _agg_color = "#333333"  # charcoal for "All treated states" rows
 
     if color_group in effect_df.columns and color_group != x_var:
         color_cats = plot_df[color_group].unique()
@@ -1676,61 +1689,30 @@ def make_interval_plot(
             c_data = plot_df[plot_df[color_group] == c]
             y_locs = [sort_order.get_loc(v) for v in c_data[x_var]]
             dodged_y = np.array(y_locs) + offsets[i]
-
-            ax.hlines(
-                dodged_y,
-                c_data["lower_95"],
-                c_data["upper_95"],
-                color=palette[i],
-                alpha=0.4,
-                linewidth=2,
-            )
-            ax.hlines(
-                dodged_y,
-                c_data["lower_67"],
-                c_data["upper_67"],
-                color=palette[i],
-                alpha=0.9,
-                linewidth=4,
-            )
-            ax.plot(
-                c_data["median"],
-                dodged_y,
-                "o",
-                color="white",
-                markersize=6,
-                markeredgecolor=palette[i],
-                markeredgewidth=2,
-                label=c,
-            )
+            colors = [
+                _agg_color if v == _AGG else palette[i] for v in c_data[x_var]
+            ]
+            for j, (y_j, row) in enumerate(zip(dodged_y, c_data.itertuples())):
+                clr = colors[j]
+                is_agg = getattr(row, x_var) == _AGG
+                lw_thin = 3 if is_agg else 2
+                lw_thick = 6 if is_agg else 4
+                ax.hlines(y_j, row.lower_95, row.upper_95, color=clr, alpha=0.4, linewidth=lw_thin)
+                ax.hlines(y_j, row.lower_67, row.upper_67, color=clr, alpha=0.9, linewidth=lw_thick)
+                ax.plot(row.median, y_j, "o", color="white", markersize=6 if not is_agg else 8,
+                        markeredgecolor=clr, markeredgewidth=2)
         ax.legend(title=color_group, loc="best")
     else:
         color = sns.color_palette("deep")[0]
-        ax.hlines(
-            y_positions,
-            plot_df["lower_95"],
-            plot_df["upper_95"],
-            color=color,
-            alpha=0.4,
-            linewidth=2,
-        )
-        ax.hlines(
-            y_positions,
-            plot_df["lower_67"],
-            plot_df["upper_67"],
-            color=color,
-            alpha=0.9,
-            linewidth=4,
-        )
-        ax.plot(
-            plot_df["median"],
-            y_positions,
-            "o",
-            color="white",
-            markersize=6,
-            markeredgecolor=color,
-            markeredgewidth=2,
-        )
+        for y_pos, row in zip(y_positions, plot_df.itertuples()):
+            clr = _agg_color if getattr(row, x_var) == _AGG else color
+            lw_thin = 3 if getattr(row, x_var) == _AGG else 2
+            lw_thick = 6 if getattr(row, x_var) == _AGG else 4
+            ax.hlines(y_pos, row.lower_95, row.upper_95, color=clr, alpha=0.4, linewidth=lw_thin)
+            ax.hlines(y_pos, row.lower_67, row.upper_67, color=clr, alpha=0.9, linewidth=lw_thick)
+            ax.plot(row.median, y_pos, "o", color="white",
+                    markersize=6 if getattr(row, x_var) != _AGG else 8,
+                    markeredgecolor=clr, markeredgewidth=2)
 
     ax.axvline(
         x=0 if estimand == "diff" else (0 if method == "mu" else 1),
