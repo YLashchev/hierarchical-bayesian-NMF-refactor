@@ -18,6 +18,14 @@ from loguru import logger
 _state: dict[str, list[int]] = {"owned_handler_ids": []}
 
 
+def _remove_default_handler() -> None:
+    """Remove Loguru's built-in stderr handler if still present."""
+    try:
+        logger.remove(0)
+    except ValueError:
+        pass
+
+
 def setup_logging(level: str = "INFO", log_file: Optional[str] = None) -> None:
     """
     Configure logging for bayesian_panel_nmf.
@@ -38,6 +46,8 @@ def setup_logging(level: str = "INFO", log_file: Optional[str] = None) -> None:
     >>> setup_logging(level="DEBUG")  # Verbose output
     >>> setup_logging(log_file="logs/run.log")  # Also save to file
     """
+    _remove_default_handler()
+
     # Remove only handlers we previously added
     for hid in _state["owned_handler_ids"]:
         try:

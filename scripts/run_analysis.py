@@ -4,8 +4,12 @@ Main script for running the Bayesian Panel NMF analysis pipeline.
 This script:
 1. Loads and preprocesses panel data using schema-based configuration
 2. Runs Bayesian inference for specified model types and ranks
-3. Extracts and saves MCMC diagnostics (ESS, R-hat, divergences)
-4. Saves results in tidy format with standardized column names
+3. Saves results in tidy format with standardized column names
+4. Optionally extracts and saves MCMC diagnostics (ESS, R-hat, divergences)
+
+Diagnostics are skipped by default because FFT-based ESS computation is
+expensive for models with many parameters. Enable via --save-diagnostics or
+output.save_diagnostics: true in the config.
 
 Usage:
     python scripts/run_analysis.py --config configs/nativity_config.yaml
@@ -18,8 +22,10 @@ Usage:
 import argparse
 import json
 import shutil
-import yaml
-from concurrent.futures import ProcessPoolExecutor, as_completed
+import time
+import yaml  # type: ignore[import-untyped]
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+from multiprocessing import Manager
 from pathlib import Path
 
 from loguru import logger
@@ -33,7 +39,7 @@ from bayesian_panel_nmf.inference import (
     check_convergence,
 )
 from bayesian_panel_nmf.models import model
-from bayesian_panel_nmf.validation import ConfigError
+from bayesian_panel_nmf.validation import ConfigError, validate_config
 from bayesian_panel_nmf.logging_config import setup_logging
 from bayesian_panel_nmf.parallel import (
     get_requested_analysis_workers,
@@ -42,9 +48,10 @@ from bayesian_panel_nmf.parallel import (
 
 
 def _validate_run_analysis_config(config: dict) -> None:
-    """Validate that config has required sections for run_analysis."""
+    """Validate generic schema plus sections required by run_analysis."""
     if "model" not in config:
         raise ConfigError("config missing 'model' section")
+    validate_config(config)
     if "types" not in config.get("model", {}):
         raise ConfigError("config['model'] missing 'types' section")
 
@@ -79,6 +86,79 @@ def _safe_rmtree(path: Path, allowed_parent: Path) -> None:
     shutil.rmtree(path, ignore_errors=True)
 
 
+def _format_elapsed(seconds: float) -> str:
+    minutes, secs = divmod(int(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h {minutes}m {secs}s"
+    if minutes:
+        return f"{minutes}m {secs}s"
+    return f"{secs}s"
+
+
+def _get_progress_interval_seconds(config: dict) -> int:
+    return int(config.get("output", {}).get("progress_interval_seconds", 60))
+
+
+def _get_outcome_name(config: dict) -> str:
+    """Derive outcome name for filename placeholder from config.
+
+    Priority:
+    1. Explicit ``data.outcome`` if set.
+    2. Strip trailing underscore from ``outcomes_from_prefixes.outcome_prefix``.
+    3. Fall back to ``"births"`` for backward compatibility.
+    """
+    data_cfg = config.get("data", {})
+    explicit = data_cfg.get("outcome")
+    if explicit:
+        return str(explicit)
+
+    schema = data_cfg.get("schema", {})
+    prefixes = schema.get("outcomes_from_prefixes")
+    if prefixes:
+        prefix = prefixes.get("outcome_prefix", "")
+        if prefix.endswith("_"):
+            return prefix[:-1]
+        return prefix or "births"
+
+    return "births"
+
+
+def _wait_for_completed_futures(pending, timeout: int):
+    return wait(pending, timeout=timeout, return_when=FIRST_COMPLETED)
+
+
+def _set_progress(progress_state, model_type: str, status: str) -> None:
+    if progress_state is not None:
+        progress_state[model_type] = status
+
+
+def _format_progress_details(pending, futures: dict, progress_state) -> str:
+    details = []
+    for fut in pending:
+        model_type = futures[fut]
+        status = (
+            progress_state.get(model_type, "queued") if progress_state else "queued"
+        )
+        details.append(f"{model_type}={status}")
+    return "; ".join(sorted(details))
+
+
+def _log_parallel_heartbeat(
+    pending,
+    futures: dict,
+    completed_count: int,
+    total_count: int,
+    started_at: float,
+    progress_state=None,
+) -> None:
+    running = _format_progress_details(pending, futures, progress_state)
+    logger.info(
+        f"Still running after {_format_elapsed(time.monotonic() - started_at)}: "
+        f"{completed_count}/{total_count} complete; {running}"
+    )
+
+
 def _run_reporting(
     draws_df,
     output_dir,
@@ -93,6 +173,12 @@ def _run_reporting(
         target_unit=output_config.get("target_unit"),
         groups=output_config.get("report_groups"),
         print_tables=output_config.get("print_tables", True),
+        print_target_table=output_config.get("print_target_table", True),
+        aggregate_units=output_config.get("aggregate_units"),
+        ppc_units=output_config.get("ppc_units"),
+        ppc_acf_lags=output_config.get("ppc_acf_lags", [6]),
+        ppc_unit_corr_max_time=output_config.get("ppc_unit_corr_max_time"),
+        ppc_exclude_units=output_config.get("ppc_exclude_units"),
     )
 
 
@@ -102,17 +188,25 @@ def run_model_type(
     config: dict,
     rank_override: int | None = None,
     save_diagnostics: bool = False,
+    save_traces: bool = False,
     log_level: str = "INFO",
     configure_logging: bool = True,
     disable_progress_bar: bool = False,
+    progress_state=None,
 ) -> None:
     """Run analysis for a single model type across specified ranks."""
     if configure_logging:
         setup_logging(level=log_level)
 
     if disable_progress_bar:
-        # Mutate a shallow copy so parallel workers don't race on shared state
-        config = {**config, "mcmc": {**config.get("mcmc", {}), "progress_bar": False}}
+        # Mutate shallow copies so parallel workers don't race on shared state.
+        # Suppress lower-level data/inference logs; run_model_type emits per-model
+        # stage logs and parent process emits heartbeat/progress.
+        config = {
+            **config,
+            "mcmc": {**config.get("mcmc", {}), "progress_bar": False},
+            "output": {**config.get("output", {}), "worker_log_level": "WARNING"},
+        }
 
     base_output_dir = Path(config["data"]["output_dir"])
     output_config = config.get("output", {})
@@ -129,7 +223,15 @@ def run_model_type(
     ranks = [rank_override] if rank_override else type_config.get("ranks_to_test", [10])
     exclude_units = type_config.get("exclude_units")
 
-    # Load and prepare data
+    model_started_at = time.monotonic()
+    _set_progress(progress_state, model_type, "starting")
+    logger.info(
+        f"{model_type}: starting groups={groups}, ranks={ranks}, output={type_output_dir}"
+    )
+
+    _set_progress(progress_state, model_type, "loading data")
+    logger.info(f"{model_type}: loading and preparing data")
+    load_started_at = time.monotonic()
     data_dict = load_and_prepare(
         filepath=config["data"]["input_file"],
         config=config,
@@ -138,22 +240,41 @@ def run_model_type(
         type_config=type_config,
     )
 
+    _set_progress(progress_state, model_type, "data ready")
+    logger.info(
+        f"{model_type}: data ready in "
+        f"{_format_elapsed(time.monotonic() - load_started_at)} "
+        f"(K={len(data_dict['groups'])}, D={len(data_dict['units'])}, "
+        f"N={len(data_dict['times'])})"
+    )
+
     df_preprocessed = data_dict["df_preprocessed"]
-    df_preprocessed.to_csv(type_output_dir / f"df_{model_type}.csv", index=False)
+    preprocessed_file = type_output_dir / f"df_{model_type}.csv"
+    df_preprocessed.to_csv(preprocessed_file, index=False)
+    logger.info(f"{model_type}: wrote preprocessed data to {preprocessed_file}")
 
     for rank in ranks:
+        _set_progress(progress_state, model_type, f"MCMC rank {rank}")
+        logger.info(f"{model_type} rank {rank}: MCMC starting")
         mcmc = run_mcmc_inference(data_dict, model, rank, config)
-
-        diagnostics = extract_diagnostics(mcmc)
-        check_convergence(diagnostics)
+        _set_progress(progress_state, model_type, f"MCMC rank {rank} finished")
+        logger.info(f"{model_type} rank {rank}: MCMC finished")
 
         if save_diagnostics:
+            _set_progress(progress_state, model_type, f"diagnostics rank {rank}")
+            logger.info(f"{model_type} rank {rank}: diagnostics starting")
+            diagnostics = extract_diagnostics(mcmc)
+            check_convergence(diagnostics)
+
             dist = config["model"].get("outcome_distribution", "NB")
             pattern = output_config.get(
                 "filename_pattern", "{distribution}_{type}_{rank}"
             )
             diag_filename = pattern.format(
-                distribution=dist, outcome="births", type=model_type, rank=rank
+                distribution=dist,
+                outcome=_get_outcome_name(config),
+                type=model_type,
+                rank=rank,
             )
             diagnostics_file = type_output_dir / f"{diag_filename}_diagnostics.json"
             diag_output = {
@@ -166,18 +287,68 @@ def run_model_type(
             }
             with open(diagnostics_file, "w") as f:
                 json.dump(diag_output, f, indent=2)
+            logger.info(
+                f"{model_type} rank {rank}: wrote diagnostics to {diagnostics_file}"
+            )
 
+        if save_traces:
+            import arviz as az
+
+            _set_progress(progress_state, model_type, f"traces rank {rank}")
+            logger.info(f"{model_type} rank {rank}: saving trace sidecar (NetCDF)")
+            dist = config["model"].get("outcome_distribution", "NB")
+            pattern = output_config.get(
+                "filename_pattern", "{distribution}_{type}_{rank}"
+            )
+            traces_filename = pattern.format(
+                distribution=dist,
+                outcome=_get_outcome_name(config),
+                type=model_type,
+                rank=rank,
+            )
+            traces_file = type_output_dir / f"{traces_filename}_traces.nc"
+            # Filter out samples whose names contain '/' (from numpyro.handlers.scope)
+            # as xarray DataTree rejects '/' in variable names (path-separator conflict).
+            raw_samples = mcmc.get_samples(group_by_chain=True)
+            clean_samples = {k: v for k, v in raw_samples.items() if "/" not in k}
+            if len(clean_samples) < len(raw_samples):
+                dropped = set(raw_samples) - set(clean_samples)
+                logger.debug(
+                    f"{model_type} rank {rank}: excluded {len(dropped)} scoped "
+                    f"sample keys from trace sidecar: {sorted(dropped)}"
+                )
+            idata = az.from_dict({"posterior": clean_samples})
+            idata.to_netcdf(str(traces_file), engine="h5netcdf")
+            size_mb = traces_file.stat().st_size / 1024**2
+            logger.info(
+                f"{model_type} rank {rank}: wrote trace sidecar to {traces_file} "
+                f"({size_mb:.1f} MB)"
+            )
+
+        _set_progress(progress_state, model_type, f"posterior prediction rank {rank}")
+        logger.info(f"{model_type} rank {rank}: posterior prediction starting")
         predictions = generate_predictions(mcmc, data_dict, model, rank, config)
+        logger.info(f"{model_type} rank {rank}: posterior prediction finished")
 
+        _set_progress(progress_state, model_type, f"formatting draws rank {rank}")
+        logger.info(f"{model_type} rank {rank}: formatting draws")
         samples = mcmc.get_samples(group_by_chain=True)
         draws_df = format_draws(samples, predictions, data_dict)
 
         dist = config["model"].get("outcome_distribution", "NB")
         pattern = output_config.get("filename_pattern", "{distribution}_{type}_{rank}")
         filename = pattern.format(
-            distribution=dist, outcome="births", type=model_type, rank=rank
+            distribution=dist,
+            outcome=_get_outcome_name(config),
+            type=model_type,
+            rank=rank,
         )
-        draws_df.to_csv(type_output_dir / f"{filename}.csv", index=False)
+        draws_file = type_output_dir / f"{filename}.csv"
+        _set_progress(progress_state, model_type, f"writing draws rank {rank}")
+        logger.info(f"{model_type} rank {rank}: writing draws to {draws_file}")
+        draws_df.to_csv(draws_file, index=False)
+        size_mb = draws_file.stat().st_size / 1024**2
+        logger.info(f"{model_type} rank {rank}: wrote draws ({size_mb:.1f} MB)")
 
         # Multi-rank runs nest under rank_<rank>/ so figs don't collide
         report_dir = (
@@ -186,7 +357,15 @@ def run_model_type(
         report_dir.mkdir(parents=True, exist_ok=True)
 
         if output_config.get("figures", False):
+            _set_progress(progress_state, model_type, f"reporting/figures rank {rank}")
+            logger.info(f"{model_type} rank {rank}: reporting/figures starting")
             _run_reporting(draws_df, report_dir, output_config)
+            logger.info(f"{model_type} rank {rank}: reporting/figures finished")
+
+    _set_progress(progress_state, model_type, "complete")
+    logger.info(
+        f"{model_type}: complete in {_format_elapsed(time.monotonic() - model_started_at)}"
+    )
 
 
 def load_config(config_path: str) -> dict:
@@ -233,14 +412,26 @@ def main():
         action="store_true",
         help="Save MCMC diagnostics to JSON file",
     )
+    parser.add_argument(
+        "--save-traces",
+        action="store_true",
+        help="Save full posterior draws as NetCDF sidecar (arviz InferenceData)",
+    )
+    parser.add_argument(
+        "--progress-interval-seconds",
+        type=int,
+        default=None,
+        help="Parallel-run heartbeat interval (default: output.progress_interval_seconds or 60)",
+    )
     args = parser.parse_args()
 
     # Setup logging
     log_level = "DEBUG" if args.verbose else "INFO"
     setup_logging(level=log_level, log_file=args.log_file)
 
-    # Load configuration
+    # Load and validate configuration
     config = load_config(args.config)
+    _validate_run_analysis_config(config)
     logger.info("=" * 60)
     logger.info("BAYESIAN PANEL NMF ANALYSIS")
     logger.info("=" * 60)
@@ -274,6 +465,18 @@ def main():
     else:
         types_to_run = all_types
 
+    # Resolve save_diagnostics: CLI flag overrides config
+    save_diagnostics = args.save_diagnostics or config.get("output", {}).get(
+        "save_diagnostics", False
+    )
+    if save_diagnostics:
+        logger.info("Diagnostics enabled (ESS/R-hat will be computed)")
+
+    # Resolve save_traces: CLI flag overrides config
+    save_traces = args.save_traces or config.get("output", {}).get("save_traces", False)
+    if save_traces:
+        logger.info("Trace sidecar enabled (NetCDF will be written per rank)")
+
     # Resolve analysis-level parallelism against num_chains and CPU count
     num_chains = int(config.get("mcmc", {}).get("num_chains", 4))
     requested_workers = get_requested_analysis_workers(config)
@@ -286,49 +489,105 @@ def main():
         f"Running {len(types_to_run)} model type(s) with {workers} worker(s) "
         f"(requested={requested_workers}, num_chains={num_chains})"
     )
+    progress_interval_seconds = (
+        args.progress_interval_seconds
+        if args.progress_interval_seconds is not None
+        else _get_progress_interval_seconds(config)
+    )
+    progress_interval_seconds = max(1, progress_interval_seconds)
+
+    if workers > 1:
+        logger.info(
+            "Parallel model run: worker progress bars disabled; "
+            f"status heartbeat every {progress_interval_seconds}s."
+        )
 
     # Sequential path (preserves rich logging for single-type or workers=1)
     if workers == 1:
-        for model_type, type_config in types_to_run.items():
+        total_count = len(types_to_run)
+        for index, (model_type, type_config) in enumerate(
+            types_to_run.items(), start=1
+        ):
             logger.info("")
             logger.info("=" * 60)
-            logger.info(f"RUNNING MODEL TYPE: {model_type.upper()}")
+            logger.info(
+                f"RUNNING MODEL TYPE: {model_type.upper()} ({index}/{total_count})"
+            )
             logger.info("=" * 60)
             run_model_type(
                 model_type=model_type,
                 type_config=type_config,
                 config=config,
                 rank_override=args.rank,
-                save_diagnostics=args.save_diagnostics,
+                save_diagnostics=save_diagnostics,
+                save_traces=save_traces,
                 log_level=log_level,
                 configure_logging=False,
             )
     else:
         # Parallel path: each worker reconfigures its own logger + progress bars disabled
         # to keep stdout readable when N>1 subprocesses print concurrently.
-        with ProcessPoolExecutor(max_workers=workers) as pool:
-            futures = {
-                pool.submit(
-                    run_model_type,
-                    model_type=model_type,
-                    type_config=type_config,
-                    config=config,
-                    rank_override=args.rank,
-                    save_diagnostics=args.save_diagnostics,
-                    log_level=log_level,
-                    configure_logging=True,
-                    disable_progress_bar=True,
-                ): model_type
-                for model_type, type_config in types_to_run.items()
-            }
-            for fut in as_completed(futures):
-                mt = futures[fut]
-                try:
-                    fut.result()
-                    logger.info(f"✓ {mt} finished")
-                except Exception as e:
-                    logger.error(f"✗ {mt} failed: {e}")
-                    raise
+        with Manager() as manager:
+            progress_state = manager.dict(
+                {model_type: "queued" for model_type in types_to_run}
+            )
+            with ProcessPoolExecutor(max_workers=workers) as pool:
+                futures = {
+                    pool.submit(
+                        run_model_type,
+                        model_type=model_type,
+                        type_config=type_config,
+                        config=config,
+                        rank_override=args.rank,
+                        save_diagnostics=save_diagnostics,
+                        save_traces=save_traces,
+                        log_level=log_level,
+                        configure_logging=True,
+                        disable_progress_bar=True,
+                        progress_state=progress_state,
+                    ): model_type
+                    for model_type, type_config in types_to_run.items()
+                }
+                pending = set(futures)
+                completed_count = 0
+                total_count = len(futures)
+                parallel_started_at = time.monotonic()
+                while pending:
+                    done, pending = _wait_for_completed_futures(
+                        pending, progress_interval_seconds
+                    )
+                    if not done:
+                        _log_parallel_heartbeat(
+                            pending,
+                            futures,
+                            completed_count,
+                            total_count,
+                            parallel_started_at,
+                            progress_state,
+                        )
+                        continue
+
+                    for fut in done:
+                        mt = futures[fut]
+                        try:
+                            fut.result()
+                            completed_count += 1
+                            logger.info(
+                                f"✓ {mt} finished ({completed_count}/{total_count})"
+                            )
+                        except Exception as e:
+                            progress_state[mt] = "failed"
+                            logger.error(f"✗ {mt} failed: {e}")
+                            raise
+
+                    if pending:
+                        remaining = _format_progress_details(
+                            pending, futures, progress_state
+                        )
+                        logger.info(
+                            f"Progress: {completed_count}/{total_count} complete; "
+                            f"still running: {remaining}"
+                        )
 
     logger.info("")
     logger.info("=" * 60)

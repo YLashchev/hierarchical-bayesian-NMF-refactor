@@ -1,7 +1,7 @@
 # =============================================================================
 # Bayesian Panel NMF - Base Configuration
 # =============================================================================
-# 
+#
 # This is the generic configuration template for bayesian_panel_nmf.
 # Copy this file and modify for your specific analysis.
 #
@@ -16,26 +16,26 @@
 data:
   input_file: "data/panel_data.csv"
   output_dir: "results"
-  
+
   # Schema: Define how to interpret your data columns
   # This allows the package to work with any panel data format
   schema:
     # Panel unit identifier (e.g., state, firm, county, individual)
     unit_col: "state"
-    
+
     # Time column (will be parsed as datetime)
     time_col: "time"
-    
+
     # Treatment indicator column (0 = control, 1 = treated)
     treatment_col: "treated"
-    
+
     # Choose exactly one schema style:
     # 1) explicit outcomes (shown below), or
     # 2) outcomes_from_prefixes for many similarly named groups
     outcomes:
       - outcome_col: "outcome"
         label: "total"
-        denominator_col: "population"  # Optional: set to null if not applicable
+        denominator_col: "population" # Optional: set to null if not applicable
 
     # Shortcut for many groups with shared suffixes.
     # Use this instead of `outcomes`, not together with it.
@@ -43,18 +43,17 @@ data:
     #   outcome_prefix: "births_"
     #   denominator_prefix: "pop_"
     #   include: ["nhwhite", "hisp", "nhblack", "otherraceeth"]
-    
 
   # Date format for parsing time column
   # Use "auto" for automatic detection, or specify format string
   # Examples: "%Y-%m-%d", "%m/%d/%y", "%d-%b-%Y"
   date_format: "auto"
-  
+
   # Time period filtering (optional)
   # Set to null to use all available data
   start_date: null
   end_date: null
-  
+
   # Temporal aggregation
   aggregation:
     enabled: false
@@ -89,19 +88,19 @@ model:
       #                                      # (only if subgroups are disjoint)
       groups: ["total"]
       ranks_to_test: [10]
-  
+
   # Negative Binomial dispersion parameter
   # Lower = more overdispersion; 1e-4 approximates Poisson
   nb_disp: 1.0e-4
-  
+
   # Whether to sample dispersion as a parameter
   # If false, uses fixed nb_disp value
   sample_disp: false
-  
+
   # Adjustment for missing/suppressed data
   # Set to true if your data has censored low counts
   adjust_for_missingness: false
-  
+
   # Whether to model treatment effects
   # Set to false for control-only model (counterfactual estimation)
   model_treated: true
@@ -112,20 +111,20 @@ model:
 mcmc:
   # Number of parallel chains
   num_chains: 4
-  
+
   # Warmup iterations (burn-in)
   num_warmup: 1000
-  
+
   # Sampling iterations per chain
   num_samples: 2500
-  
+
   # Thinning interval (keep every Nth sample)
   # Reduces output size: effective samples = num_samples / thinning
   thinning: 10
-  
+
   # Random seed for reproducibility
   random_seed: 8675309
-  
+
   # Show progress bar during sampling
   progress_bar: true
 
@@ -144,4 +143,8 @@ parallel:
 output:
   figures: false
   clean: false
+  save_diagnostics: false
+  save_traces: false
+  # Parent-process heartbeat for parallel runs (workers > 1).
+  progress_interval_seconds: 60
   filename_pattern: "{distribution}_{type}_{rank}"

@@ -49,6 +49,10 @@ parallel:
   analysis_workers: 1
 
 output:
-  figures: false
+  figures: true
   clean: true
+  save_diagnostics: false
+  save_traces: true
+  print_tables: true
+  print_target_table: true
   filename_pattern: "{distribution}_{outcome}_{type}_{rank}"

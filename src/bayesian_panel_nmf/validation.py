@@ -119,8 +119,50 @@ def _validate_config_boolean_flags(
     _require_bool(mcmc_cfg.get("progress_bar"), "mcmc.progress_bar")
 
     output_cfg = config.get("output", {}) or {}
-    for flag in ("figures", "clean"):
+    for flag in (
+        "figures",
+        "clean",
+        "save_diagnostics",
+        "save_traces",
+        "print_tables",
+        "print_target_table",
+    ):
         _require_bool(output_cfg.get(flag), f"output.{flag}")
+
+    aggregate_units = output_cfg.get("aggregate_units")
+    if aggregate_units is not None:
+        if not isinstance(aggregate_units, list):
+            raise ConfigError("config['output.aggregate_units'] must be a list")
+        for i, spec in enumerate(aggregate_units):
+            if isinstance(spec, dict):
+                _require_bool(
+                    spec.get("include_treated_units"),
+                    f"output.aggregate_units.{i}.include_treated_units",
+                )
+                _require_bool(
+                    spec.get("include_all_units"),
+                    f"output.aggregate_units.{i}.include_all_units",
+                )
+                _require_bool(spec.get("strict"), f"output.aggregate_units.{i}.strict")
+                _require_bool(
+                    spec.get("overwrite"), f"output.aggregate_units.{i}.overwrite"
+                )
+
+    ppc_acf_lags = output_cfg.get("ppc_acf_lags")
+    if ppc_acf_lags is not None:
+        if not isinstance(ppc_acf_lags, list) or not ppc_acf_lags:
+            raise ConfigError("config['output.ppc_acf_lags'] must be a non-empty list")
+        if not all(isinstance(lag, int) and lag > 0 for lag in ppc_acf_lags):
+            raise ConfigError(
+                "config['output.ppc_acf_lags'] must contain positive integers"
+            )
+
+    progress_interval = output_cfg.get("progress_interval_seconds")
+    if progress_interval is not None:
+        if not isinstance(progress_interval, int) or progress_interval <= 0:
+            raise ConfigError(
+                "config['output.progress_interval_seconds'] must be a positive integer"
+            )
 
 
 def _validate_data_schema(config: dict) -> tuple[dict, dict]:

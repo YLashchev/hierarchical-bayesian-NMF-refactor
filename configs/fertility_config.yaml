@@ -64,7 +64,7 @@ model:
 
 # Full production config: 4 chains x 2000 warmup x 2000 samples, thinning 5.
 mcmc:
-  num_chains: 4
+  num_chains: 2
   num_warmup: 2000
   num_samples: 2000
   thinning: 5
@@ -76,5 +76,21 @@ parallel:
 
 output:
   figures: true
-  clean: false
+  clean: true
   filename_pattern: "{distribution}_{outcome}_{type}_{rank}"
+  save_diagnostics: false
+  progress_interval_seconds: 60
+
+  # Optional reporting-only aggregate/PPC example. Names and dates below are
+  # dataset-specific examples of generic mechanisms; aggregate units are not
+  # added to model training input.
+  # aggregate_units:
+  #   - unit: "Treated units excluding Texas"
+  #     include_treated_units: true
+  #     exclude_units: ["Texas"]
+  # ppc_units:
+  #   - "Texas"
+  #   - "Treated units excluding Texas"
+  # ppc_acf_lags: [6, 3, 1]
+  # ppc_unit_corr_max_time: "2022-04-01"
+  # ppc_exclude_units: []

@@ -1,6 +1,7 @@
 import importlib.util
 import sys
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from loguru import logger
@@ -148,7 +149,7 @@ def test_generate_predictions_raises_when_samples_not_divisible_by_chains(monkey
 
     with pytest.raises(DataError, match="not evenly divisible"):
         generate_predictions(
-            DummyMCMC(),
+            cast(Any, DummyMCMC()),
             data_dict={"denominators": __import__("numpy").ones((1, 1, 1))},
             model_fn=model,
             rank=1,
@@ -183,6 +184,11 @@ def test_setup_logging_preserves_foreign_handler():
     assert any("second-message" in msg for msg in messages)
 
 
+def test_setup_logging_removes_default_handler():
+    setup_logging(level="INFO")
+    assert 0 not in getattr(logger, "_core").handlers
+
+
 def test_run_model_type_without_figures_does_not_import_viz(
     monkeypatch, tmp_path: Path
 ):
@@ -196,6 +202,9 @@ def test_run_model_type_without_figures_does_not_import_viz(
             "denominators": __import__("numpy").ones((1, 1, 1)),
             "control_idx_array": __import__("numpy").ones((1, 1, 1), dtype=bool),
             "missing_idx_array": __import__("numpy").zeros((1, 1, 1), dtype=bool),
+            "groups": ["total"],
+            "units": ["A"],
+            "times": ["2020-01-01"],
             "df_preprocessed": __import__("pandas").DataFrame(
                 [{"unit": "A", "time": "2020-01-01", "group": "total", "outcome": 1}]
             ),
@@ -229,15 +238,16 @@ def test_run_model_type_without_figures_does_not_import_viz(
         ),
     )
 
+    type_config = {"groups": ["total"], "ranks_to_test": [1]}
     config = {
         "data": {"input_file": "unused.csv", "output_dir": str(output_dir)},
-        "model": {"types": {"total": {"groups": ["total"], "ranks_to_test": [1]}}},
+        "model": {"types": {"total": type_config}},
         "output": {"figures": False, "filename_pattern": "{type}_{rank}"},
     }
 
     run_analysis.run_model_type(
         model_type="total",
-        type_config=config["model"]["types"]["total"],
+        type_config=type_config,
         config=config,
         rank_override=None,
         save_diagnostics=False,
@@ -250,6 +260,282 @@ def test_run_model_type_without_figures_does_not_import_viz(
     assert (output_dir / "total" / "total_1.csv").exists()
 
 
+def _patch_minimal_run_model_type(monkeypatch):
+    monkeypatch.setattr(
+        run_analysis,
+        "load_and_prepare",
+        lambda *args, **kwargs: {
+            "Y": __import__("numpy").ones((1, 1, 1)),
+            "denominators": __import__("numpy").ones((1, 1, 1)),
+            "control_idx_array": __import__("numpy").ones((1, 1, 1), dtype=bool),
+            "missing_idx_array": __import__("numpy").zeros((1, 1, 1), dtype=bool),
+            "groups": ["total"],
+            "units": ["A"],
+            "times": ["2020-01-01"],
+            "df_preprocessed": __import__("pandas").DataFrame(
+                [{"unit": "A", "time": "2020-01-01", "group": "total", "outcome": 1}]
+            ),
+        },
+    )
+
+    class DummyMCMC:
+        def get_samples(self, group_by_chain=True):
+            return {"mu": __import__("numpy").zeros((1, 1, 1, 1))}
+
+    monkeypatch.setattr(run_analysis, "run_mcmc_inference", lambda *a, **k: DummyMCMC())
+    monkeypatch.setattr(
+        run_analysis,
+        "generate_predictions",
+        lambda *a, **k: __import__("numpy").zeros((1, 1, 1, 1, 1)),
+    )
+    monkeypatch.setattr(
+        run_analysis,
+        "format_draws",
+        lambda *a, **k: __import__("pandas").DataFrame([{"ok": 1}]),
+    )
+
+
+def test_run_model_type_skips_diagnostics_by_default(monkeypatch, tmp_path: Path):
+    output_dir = tmp_path / "results"
+    _patch_minimal_run_model_type(monkeypatch)
+    monkeypatch.setattr(
+        run_analysis,
+        "extract_diagnostics",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("diagnostics should be skipped")
+        ),
+    )
+
+    run_analysis.run_model_type(
+        model_type="total",
+        type_config={"groups": ["total"], "ranks_to_test": [1]},
+        config={
+            "data": {"input_file": "unused.csv", "output_dir": str(output_dir)},
+            "model": {"types": {"total": {"groups": ["total"]}}},
+            "output": {"filename_pattern": "{type}_{rank}"},
+        },
+        save_diagnostics=False,
+        configure_logging=False,
+        disable_progress_bar=True,
+    )
+
+    assert not list((output_dir / "total").glob("*_diagnostics.json"))
+
+
+def test_run_model_type_writes_diagnostics_when_enabled(monkeypatch, tmp_path: Path):
+    output_dir = tmp_path / "results"
+    _patch_minimal_run_model_type(monkeypatch)
+
+    diag = {
+        "n_eff_min": 500.0,
+        "n_eff_mean": 600.0,
+        "rhat_max": 1.0,
+        "rhat_mean": 1.0,
+        "divergences": 0,
+        "converged": True,
+    }
+    convergence_checked = []
+
+    def fake_check_convergence(diagnostics):
+        convergence_checked.append(diagnostics)
+        return True
+
+    monkeypatch.setattr(run_analysis, "extract_diagnostics", lambda *a, **k: diag)
+    monkeypatch.setattr(run_analysis, "check_convergence", fake_check_convergence)
+
+    run_analysis.run_model_type(
+        model_type="total",
+        type_config={"groups": ["total"], "ranks_to_test": [1]},
+        config={
+            "data": {
+                "input_file": "unused.csv",
+                "output_dir": str(output_dir),
+                "outcome": "births",
+            },
+            "model": {
+                "outcome_distribution": "NB",
+                "types": {"total": {"groups": ["total"]}},
+            },
+            "output": {"filename_pattern": "{distribution}_{outcome}_{type}_{rank}"},
+        },
+        save_diagnostics=True,
+        configure_logging=False,
+        disable_progress_bar=True,
+    )
+
+    diagnostics_files = list((output_dir / "total").glob("*_diagnostics.json"))
+    assert [p.name for p in diagnostics_files] == ["NB_births_total_1_diagnostics.json"]
+    assert convergence_checked == [diag]
+
+
+def test_main_uses_configured_save_diagnostics(monkeypatch, tmp_path: Path):
+    import yaml  # type: ignore[import-untyped]
+
+    config_path = tmp_path / "cfg.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "data": {
+                    "input_file": str(tmp_path / "unused.csv"),
+                    "output_dir": str(tmp_path / "results"),
+                    "schema": {
+                        "unit_col": "unit",
+                        "time_col": "time",
+                        "treatment_col": "treated",
+                        "outcomes": [{"outcome_col": "y", "label": "total"}],
+                    },
+                },
+                "model": {
+                    "types": {"total": {"groups": ["total"], "ranks_to_test": [1]}}
+                },
+                "mcmc": {"num_chains": 1},
+                "output": {"save_diagnostics": True},
+                "parallel": {"analysis_workers": 1},
+            }
+        )
+    )
+
+    seen = []
+
+    def fake_run_model_type(**kwargs):
+        seen.append(kwargs["save_diagnostics"])
+
+    monkeypatch.setattr(run_analysis, "run_model_type", fake_run_model_type)
+    monkeypatch.setattr("sys.argv", ["run_analysis.py", "--config", str(config_path)])
+
+    run_analysis.main()
+
+    assert seen == [True]
+
+
+def test_main_parallel_branch_disables_worker_progress_bars_and_emits_heartbeat(
+    monkeypatch, tmp_path: Path
+):
+    import yaml  # type: ignore[import-untyped]
+
+    config_path = tmp_path / "cfg.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "data": {
+                    "input_file": str(tmp_path / "unused.csv"),
+                    "output_dir": str(tmp_path / "results"),
+                    "schema": {
+                        "unit_col": "unit",
+                        "time_col": "time",
+                        "treatment_col": "treated",
+                        "outcomes": [{"outcome_col": "y", "label": "total"}],
+                    },
+                },
+                "model": {
+                    "types": {
+                        "a": {"groups": ["total"], "ranks_to_test": [1]},
+                        "b": {"groups": ["total"], "ranks_to_test": [1]},
+                    }
+                },
+                "mcmc": {"num_chains": 1},
+                "parallel": {"analysis_workers": 2},
+                "output": {"progress_interval_seconds": 3},
+            }
+        )
+    )
+
+    monkeypatch.setattr(run_analysis, "resolve_analysis_workers", lambda *a, **k: 2)
+
+    progress_flags = []
+    progress_states = []
+    pending_future = None
+    done_future = None
+
+    class FakeFuture:
+        def __init__(self, name):
+            self.name = name
+
+        def result(self):
+            return None
+
+    class FakePool:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def submit(self, fn, **kwargs):
+            nonlocal pending_future, done_future
+            progress_flags.append(kwargs["disable_progress_bar"])
+            progress_states.append(kwargs["progress_state"])
+            future = FakeFuture(kwargs["model_type"])
+            if pending_future is None:
+                pending_future = future
+            else:
+                done_future = future
+            return future
+
+    wait_calls = []
+
+    def fake_wait_for_completed_futures(pending, timeout):
+        wait_calls.append(timeout)
+        if len(wait_calls) == 1:
+            return set(), pending
+        return {done_future, pending_future}, set()
+
+    class FakeManager:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def dict(self, initial):
+            return dict(initial)
+
+    heartbeats = []
+    monkeypatch.setattr(run_analysis, "Manager", FakeManager)
+    monkeypatch.setattr(run_analysis, "ProcessPoolExecutor", FakePool)
+    monkeypatch.setattr(
+        run_analysis, "_wait_for_completed_futures", fake_wait_for_completed_futures
+    )
+
+    def fake_log_parallel_heartbeat(
+        pending, futures, completed_count, total_count, started_at, progress_state=None
+    ):
+        assert progress_state is not None
+        heartbeats.append(
+            (len(pending), completed_count, total_count, dict(progress_state))
+        )
+
+    monkeypatch.setattr(
+        run_analysis, "_log_parallel_heartbeat", fake_log_parallel_heartbeat
+    )
+    monkeypatch.setattr("sys.argv", ["run_analysis.py", "--config", str(config_path)])
+
+    run_analysis.main()
+
+    assert progress_flags == [True, True]
+    assert wait_calls == [3, 3]
+    assert progress_states[0] is progress_states[1]
+    assert heartbeats == [(2, 0, 2, {"a": "queued", "b": "queued"})]
+
+
+def test_format_progress_details_includes_current_stage():
+    class Future:
+        pass
+
+    age = Future()
+    total = Future()
+    details = run_analysis._format_progress_details(
+        {age, total},
+        {age: "age", total: "total"},
+        {"age": "MCMC rank 5", "total": "writing draws rank 5"},
+    )
+
+    assert details == "age=MCMC rank 5; total=writing draws rank 5"
+
+
 def test_main_dispatches_types_to_process_pool_when_workers_gt_one(
     monkeypatch, tmp_path: Path
 ):
@@ -259,7 +545,7 @@ def test_main_dispatches_types_to_process_pool_when_workers_gt_one(
     knob `parallel.analysis_workers` actually reaches the executor instead of
     silently falling back to a sequential for-loop.
     """
-    import yaml
+    import yaml  # type: ignore[import-untyped]
 
     config_path = tmp_path / "cfg.yaml"
     config_path.write_text(
@@ -314,9 +600,46 @@ def test_main_dispatches_types_to_process_pool_when_workers_gt_one(
             return FakeFuture(kwargs["model_type"])
 
     monkeypatch.setattr(run_analysis, "ProcessPoolExecutor", FakePool)
-    monkeypatch.setattr(run_analysis, "as_completed", lambda futs: list(futs))
+    monkeypatch.setattr(
+        run_analysis,
+        "_wait_for_completed_futures",
+        lambda pending, timeout: (set(pending), set()),
+    )
 
     monkeypatch.setattr("sys.argv", ["run_analysis.py", "--config", str(config_path)])
     run_analysis.main()
 
     assert sorted(submitted) == ["a", "b"]
+
+
+# ---------------------------------------------------------------------------
+# _get_outcome_name
+# ---------------------------------------------------------------------------
+
+
+def test_get_outcome_name_explicit_override():
+    assert run_analysis._get_outcome_name({"data": {"outcome": "deaths"}}) == "deaths"
+
+
+def test_get_outcome_name_derives_from_prefix_with_underscore():
+    config = {
+        "data": {"schema": {"outcomes_from_prefixes": {"outcome_prefix": "births_"}}}
+    }
+    assert run_analysis._get_outcome_name(config) == "births"
+
+
+def test_get_outcome_name_derives_from_prefix_without_underscore():
+    config = {
+        "data": {"schema": {"outcomes_from_prefixes": {"outcome_prefix": "deaths"}}}
+    }
+    assert run_analysis._get_outcome_name(config) == "deaths"
+
+
+def test_get_outcome_name_fallback_when_neither_set():
+    assert run_analysis._get_outcome_name({"data": {}}) == "births"
+    assert run_analysis._get_outcome_name({}) == "births"
+
+
+def test_get_outcome_name_empty_prefix_falls_back():
+    config = {"data": {"schema": {"outcomes_from_prefixes": {"outcome_prefix": ""}}}}
+    assert run_analysis._get_outcome_name(config) == "births"

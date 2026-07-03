@@ -7,7 +7,7 @@ import time
 from typing import Any, Callable
 
 import numpy as np
-from jax import random
+from jax import block_until_ready, random
 from numpyro.infer import MCMC, NUTS, Predictive
 from numpyro.diagnostics import summary
 import numpyro
@@ -210,13 +210,9 @@ def run_mcmc_inference(
 
     Notes
     -----
-    After MCMC completes, this function:
-    1. Extracts convergence diagnostics (ESS, R-hat, divergences)
-    2. Logs key diagnostic statistics
-    3. Warns if convergence issues are detected
-
-    Use extract_diagnostics(mcmc) and check_convergence(diagnostics)
-    for programmatic access to diagnostic information.
+    JAX dispatch is asynchronous, so runtime logging blocks until posterior
+    samples are ready. Use extract_diagnostics(mcmc) and
+    check_convergence(diagnostics) explicitly when diagnostics are needed.
     """
     validate_data_dict(data_dict)
     rank = validate_rank(rank)
@@ -255,16 +251,20 @@ def run_mcmc_inference(
         thinning=thinning,
     )
 
-    logger.info("Starting MCMC inference")
-    logger.info(f"  Rank: {rank}")
-    logger.info(f"  Distribution: {outcome_dist}")
-    logger.info(f"  Chains: {num_chains}")
-    logger.info(f"  Warmup: {num_warmup}, Samples: {num_samples}, Thinning: {thinning}")
-    logger.debug(f"  Data shape: {data_dict['Y'].shape}")
-    logger.debug(
-        f"  Model options: adjust_missingness={adjust_for_missingness}, "
-        f"model_treated={model_treated}, nb_disp={nb_disp}, sample_disp={sample_disp}"
-    )
+    worker_log_level = config.get("output", {}).get("worker_log_level")
+    if worker_log_level != "WARNING":
+        logger.info("Starting MCMC inference")
+        logger.info(f"  Rank: {rank}")
+        logger.info(f"  Distribution: {outcome_dist}")
+        logger.info(f"  Chains: {num_chains}")
+        logger.info(
+            f"  Warmup: {num_warmup}, Samples: {num_samples}, Thinning: {thinning}"
+        )
+        logger.debug(f"  Data shape: {data_dict['Y'].shape}")
+        logger.debug(
+            f"  Model options: adjust_missingness={adjust_for_missingness}, "
+            f"model_treated={model_treated}, nb_disp={nb_disp}, sample_disp={sample_disp}"
+        )
 
     start_time = time.time()
     mcmc.run(
@@ -280,25 +280,16 @@ def run_mcmc_inference(
         sample_disp=sample_disp,
         model_treated=model_treated,
     )
+    # JAX dispatch is asynchronous; force samples ready before logging runtime.
+    block_until_ready(mcmc.get_samples(group_by_chain=False))
     elapsed = time.time() - start_time
-    logger.info(f"MCMC completed in {elapsed:.1f}s ({elapsed / 60:.1f} min)")
+    if worker_log_level != "WARNING":
+        logger.info(f"MCMC completed in {elapsed:.1f}s ({elapsed / 60:.1f} min)")
 
-    mcmc.print_summary()
-
-    diagnostics = extract_diagnostics(mcmc)
-
-    logger.info(
-        f"Diagnostics: min_ESS={diagnostics['n_eff_min']:.0f}, "
-        f"max_Rhat={diagnostics['rhat_max']:.4f}, "
-        f"divergences={diagnostics['divergences']}"
-    )
-
-    if not check_convergence(diagnostics):
-        logger.warning(
-            "MCMC may not have converged. Consider increasing num_samples or num_warmup."
-        )
-    else:
-        logger.success("All convergence checks passed.")
+    # Divergences and ESS/R-hat are expensive to compute (numpyro
+    # `_get_states_flat()` reshapes all model parameters).  Skipped
+    # here by default.  Use extract_diagnostics() explicitly when
+    # save_diagnostics=True.
 
     return mcmc
 
@@ -361,8 +352,10 @@ def generate_predictions(
     rng_key = random.PRNGKey(random_seed + 1)
     rng_key, rng_key_ = random.split(rng_key)
 
-    logger.info("Generating posterior predictive samples")
-    logger.debug(f"  Using {outcome_dist} distribution with nb_disp={nb_disp}")
+    worker_log_level = config.get("output", {}).get("worker_log_level")
+    if worker_log_level != "WARNING":
+        logger.info("Generating posterior predictive samples")
+        logger.debug(f"  Using {outcome_dist} distribution with nb_disp={nb_disp}")
 
     predictive = Predictive(model_fn, mcmc.get_samples(group_by_chain=False))
 
@@ -379,8 +372,10 @@ def generate_predictions(
         sample_disp=sample_disp,
         model_treated=False,
     )["y_obs"]
+    predictions = block_until_ready(predictions)
     elapsed = time.time() - start_time
-    logger.debug(f"  Predictions generated in {elapsed:.1f}s")
+    if worker_log_level != "WARNING":
+        logger.debug(f"  Predictions generated in {elapsed:.1f}s")
 
     K, D, N = data_dict["denominators"].shape
     num_chains = mcmc.num_chains

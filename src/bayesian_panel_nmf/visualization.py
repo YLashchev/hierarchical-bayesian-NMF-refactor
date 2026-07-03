@@ -6,12 +6,14 @@ D=units, N=time periods.
 """
 
 from pathlib import Path
-from typing import Optional, List, Tuple, Dict
+from typing import Optional, List, Tuple, Dict, cast
 import warnings
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 import seaborn as sns
 from loguru import logger
 
@@ -79,14 +81,52 @@ def _identify_treated_units(df: pd.DataFrame) -> List[str]:
     """
     if "treated_unit" in df.columns:
         # Legacy column was renamed
-        return df[df["treated_unit"] == 1]["unit"].unique().tolist()
+        treated_mask = cast(pd.Series, df["treated_unit"]) == 1
+        units = cast(pd.Series, df.loc[treated_mask, "unit"])
+        return units.drop_duplicates().tolist()
     elif "treatment" in df.columns:
         # Infer from treatment column
-        treated = df[df["treatment"] == 1]["unit"].unique().tolist()
-        return treated
+        treated_mask = cast(pd.Series, df["treatment"]) == 1
+        units = cast(pd.Series, df.loc[treated_mask, "unit"])
+        return units.drop_duplicates().tolist()
     else:
         # No treatment column - return all units
-        return df["unit"].unique().tolist()
+        units = cast(pd.Series, df["unit"])
+        return units.drop_duplicates().tolist()
+
+
+def _filter_ppc_units(
+    df: pd.DataFrame,
+    treated_units: list[str],
+    ppc_units: Optional[List[str]] = None,
+    ppc_exclude_units: Optional[List[str]] = None,
+) -> pd.DataFrame:
+    """Filter DataFrame to units selected for PPC."""
+    unit_values = set(cast(pd.Series, df["unit"]).drop_duplicates().tolist())
+    if ppc_units is not None:
+        if len(ppc_units) == 0:
+            warnings.warn(
+                "ppc_units is an empty list; no units will be included in PPC.",
+                stacklevel=3,
+            )
+        selected = [u for u in ppc_units if u in unit_values]
+        missing = [u for u in ppc_units if u not in unit_values]
+        if missing:
+            warnings.warn(
+                f"ppc_units missing from draws: {missing}",
+                stacklevel=3,
+            )
+        mask = cast(pd.Series, df["unit"]).isin(selected)
+        df = cast(pd.DataFrame, df.loc[mask].copy())
+    else:
+        mask = cast(pd.Series, df["unit"]).isin(treated_units)
+        df = cast(pd.DataFrame, df.loc[mask].copy())
+
+    if ppc_exclude_units is not None:
+        mask = ~cast(pd.Series, df["unit"]).isin(ppc_exclude_units)
+        df = cast(pd.DataFrame, df.loc[mask].copy())
+
+    return df
 
 
 def _compute_autocorrelation(x: np.ndarray, lag: int) -> float:
@@ -152,7 +192,7 @@ def _create_faceted_histograms(
     facet_cols: List[str],
     figsize: Tuple[int, int],
     ncol: int = 3,
-) -> plt.Figure:
+) -> Figure:
     """
     Create faceted histogram plot with p-value annotations.
 
@@ -263,7 +303,7 @@ def _create_faceted_histograms(
         ax.set_ylabel("")
 
     # Hide unused axes
-    for j in range(i + 1, len(axes)):
+    for j in range(n_facets, len(axes)):
         axes[j].set_visible(False)
 
     # Set common labels
@@ -281,7 +321,9 @@ def make_abs_ppc_plot(
     outcome_col: str = "outcome",
     categories: Optional[List[str]] = None,
     figsize: Tuple[int, int] = (12, 8),
-) -> Tuple[plt.Figure, pd.DataFrame]:
+    ppc_units: Optional[List[str]] = None,
+    ppc_exclude_units: Optional[List[str]] = None,
+) -> Tuple[Figure, pd.DataFrame]:
     """
     Posterior Predictive Check: Maximum Absolute Residual.
 
@@ -352,13 +394,13 @@ def make_abs_ppc_plot(
     # Filter to control period only
     df_control = df[df["treatment"] == 0].copy()
 
-    # Filter to treated units only
-    df_control = df_control[df_control["unit"].isin(treated_units)]
-
-    # Exclude aggregate units if present (e.g., "Ban States")
-    df_control = df_control[
-        ~df_control["unit"].str.contains("Ban States", case=False, na=False)
-    ]
+    # Filter to configured units or default treated units.
+    df_control = _filter_ppc_units(
+        df_control,
+        treated_units,
+        ppc_units=ppc_units,
+        ppc_exclude_units=ppc_exclude_units,
+    )
 
     # Compute residuals
     df_control["pred_diff"] = df_control["ypred"] - np.exp(df_control["mu"])
@@ -383,13 +425,14 @@ def make_abs_ppc_plot(
         .reset_index()
     )
 
-    # Filter pvals to categories and treated units
+    # Filter pvals to categories and selected units
+    selected_units = df_control["unit"].unique().tolist()
     pvals_df = pvals_df[pvals_df["group"].isin(categories)]
-    pvals_df = pvals_df[pvals_df["unit"].isin(treated_units)]
+    pvals_df = pvals_df[pvals_df["unit"].isin(selected_units)]
 
     # Create faceted plot
     fig = _create_faceted_histograms(
-        stats_df=max_stats[max_stats["unit"].isin(treated_units)],
+        stats_df=max_stats[max_stats["unit"].isin(selected_units)],
         pvals_df=pvals_df,
         x_col="diff_in_diff",
         title="Difference in Maximum Absolute Predicted Residual",
@@ -407,7 +450,9 @@ def make_acf_ppc_plot(
     outcome_col: str = "outcome",
     categories: Optional[List[str]] = None,
     figsize: Tuple[int, int] = (12, 8),
-) -> Tuple[plt.Figure, pd.DataFrame]:
+    ppc_units: Optional[List[str]] = None,
+    ppc_exclude_units: Optional[List[str]] = None,
+) -> Tuple[Figure, pd.DataFrame]:
     """
     Posterior Predictive Check: Autocorrelation of Residuals.
 
@@ -466,12 +511,14 @@ def make_acf_ppc_plot(
     # Identify treated units
     treated_units = _identify_treated_units(df)
 
-    # Filter to control period and treated units
+    # Filter to control period and configured/default units
     df_control = df[df["treatment"] == 0].copy()
-    df_control = df_control[df_control["unit"].isin(treated_units)]
-    df_control = df_control[
-        ~df_control["unit"].str.contains("Ban States", case=False, na=False)
-    ]
+    df_control = _filter_ppc_units(
+        df_control,
+        treated_units,
+        ppc_units=ppc_units,
+        ppc_exclude_units=ppc_exclude_units,
+    )
 
     # Compute residuals
     df_control["pred_diff"] = df_control["ypred"] - np.exp(df_control["mu"])
@@ -509,12 +556,13 @@ def make_acf_ppc_plot(
         .reset_index()
     )
 
+    selected_units = df_control["unit"].unique().tolist()
     pvals_df = pvals_df[pvals_df["group"].isin(categories)]
-    pvals_df = pvals_df[pvals_df["unit"].isin(treated_units)]
+    pvals_df = pvals_df[pvals_df["unit"].isin(selected_units)]
 
     # Create faceted plot
     fig = _create_faceted_histograms(
-        stats_df=acf_stats,
+        stats_df=acf_stats[acf_stats["unit"].isin(selected_units)],
         pvals_df=pvals_df,
         x_col="diff_in_ac",
         title=f"Difference in Residual Autocorrelation (Lag {lag})",
@@ -531,7 +579,9 @@ def make_rmse_ppc_plot(
     outcome_col: str = "outcome",
     categories: Optional[List[str]] = None,
     figsize: Tuple[int, int] = (12, 8),
-) -> Tuple[plt.Figure, pd.DataFrame]:
+    ppc_units: Optional[List[str]] = None,
+    ppc_exclude_units: Optional[List[str]] = None,
+) -> Tuple[Figure, pd.DataFrame]:
     """
     Posterior Predictive Check: RMSE of Residuals.
 
@@ -588,8 +638,14 @@ def make_rmse_ppc_plot(
     # Identify treated units
     treated_units = _identify_treated_units(df)
 
-    # Filter to control period (all units, not just treated, per R code)
+    # Filter to control period and configured/default units.
     df_control = df[df["treatment"] == 0].copy()
+    df_control = _filter_ppc_units(
+        df_control,
+        treated_units,
+        ppc_units=ppc_units,
+        ppc_exclude_units=ppc_exclude_units,
+    )
 
     # Compute residuals
     df_control["pred_diff"] = df_control["ypred"] - np.exp(df_control["mu"])
@@ -616,11 +672,12 @@ def make_rmse_ppc_plot(
         .reset_index()
     )
 
+    selected_units = df_control["unit"].unique().tolist()
     pvals_df = pvals_df[pvals_df["group"].isin(categories)]
-    pvals_df = pvals_df[pvals_df["unit"].isin(treated_units)]
+    pvals_df = pvals_df[pvals_df["unit"].isin(selected_units)]
 
-    # Filter stats to treated units for plotting
-    rmse_stats_plot = rmse_stats[rmse_stats["unit"].isin(treated_units)]
+    # Filter stats to selected units for plotting
+    rmse_stats_plot = rmse_stats[rmse_stats["unit"].isin(selected_units)]
     rmse_stats_plot = rmse_stats_plot[rmse_stats_plot["group"].isin(categories)]
 
     # Create faceted plot
@@ -644,7 +701,9 @@ def make_unit_corr_ppc_plot(
     categories: Optional[List[str]] = None,
     ndraws: int = 1000,
     figsize: Tuple[int, int] = (10, 6),
-) -> Tuple[plt.Figure, pd.DataFrame]:
+    ppc_units: Optional[List[str]] = None,
+    ppc_exclude_units: Optional[List[str]] = None,
+) -> Tuple[Figure, pd.DataFrame]:
     """
     Posterior Predictive Check: Cross-Unit Correlation (Spectral Norm).
 
@@ -703,6 +762,15 @@ def make_unit_corr_ppc_plot(
 
     # Filter to categories
     df = df[df["group"].isin(categories)]
+
+    if ppc_units is not None or ppc_exclude_units is not None:
+        all_units = cast(pd.Series, df["unit"]).drop_duplicates().tolist()
+        df = _filter_ppc_units(
+            df,
+            treated_units=all_units,
+            ppc_units=ppc_units,
+            ppc_exclude_units=ppc_exclude_units,
+        )
 
     # Filter by max_treat_date if provided
     if max_treat_date is not None and "time" in df.columns:
@@ -854,7 +922,7 @@ def make_raw_rate_plot(
     smooth_window: Optional[int] = None,
     plot_type: str = "rate",  # 'rate' or 'count'
     figsize: Tuple[int, int] = (10, 6),
-) -> Tuple[plt.Figure, plt.Axes]:
+) -> Tuple[Figure, Axes]:
     """
     Create a time series plot showing rates by treatment group.
 
@@ -920,13 +988,19 @@ def make_raw_rate_plot(
     _setup_plot_style()
 
     # Handle backward compatibility for separate_texas
-    if separate_texas and separate_unit is None:
-        separate_unit = "Texas"
+    if separate_texas:
         warnings.warn(
-            "separate_texas is deprecated. Use separate_unit='Texas' instead.",
+            "separate_texas is deprecated and has been removed. "
+            "Pass separate_unit='<your_unit_name>' explicitly instead.",
             DeprecationWarning,
             stacklevel=2,
         )
+        if separate_unit is None:
+            raise TypeError(
+                "separate_texas=True requires passing the unit name explicitly via "
+                "separate_unit='<your_unit_name>'. The deprecated alias no longer "
+                "infers a dataset-specific default."
+            )
 
     # Standardize column names
     df = _standardize_columns(df)
@@ -1083,7 +1157,7 @@ def make_group_comparison_plot(
     treatment_dates: Optional[Dict[str, str]] = None,
     plot_type: str = "rate",  # 'rate' or 'count'
     figsize: Tuple[int, int] = (12, 8),
-) -> Tuple[plt.Figure, np.ndarray]:
+) -> Tuple[Figure, np.ndarray]:
     """
     Create a faceted plot comparing rates across different outcome groups.
 
@@ -1267,7 +1341,7 @@ def make_unit_fit_plot(
     group: str = "total",
     outcome_col: str = "outcome",
     figsize: Tuple[int, int] = (10, 6),
-) -> Tuple[plt.Figure, plt.Axes]:
+) -> Tuple[Figure, Axes]:
     """
     Make fit plot showing observed vs predicted over time for a specific unit.
 
@@ -1390,7 +1464,7 @@ def make_unit_gap_plot(
     group: str = "total",
     outcome_col: str = "outcome",
     figsize: Tuple[int, int] = (10, 6),
-) -> Tuple[plt.Figure, plt.Axes]:
+) -> Tuple[Figure, Axes]:
     """
     Make gap plot showing difference between observed and predicted relative to prediction
     for a specific unit.
@@ -1526,7 +1600,7 @@ def make_interval_plot(
     x_var: str = "unit",
     color_group: Optional[str] = None,
     figsize: Tuple[int, int] = (12, 10),
-) -> Tuple[plt.Figure, plt.Axes]:
+) -> Tuple[Figure, Axes]:
     """
     Generate interval plots showing causal effects with credible intervals using seaborn aesthetics.
 
@@ -1888,8 +1962,11 @@ def make_all_ppc_plots(
     categories: Optional[List[str]] = None,
     figsize: Tuple[int, int] = (12, 8),
     acf_lag: int = 6,
+    acf_lags: Optional[List[int]] = None,
     max_treat_date: Optional[str] = None,
     ndraws: int = 1000,
+    ppc_units: Optional[List[str]] = None,
+    ppc_exclude_units: Optional[List[str]] = None,
 ) -> Dict[str, Dict]:
     """
     Generate all PPC plots and optionally save to files.
@@ -1926,27 +2003,46 @@ def make_all_ppc_plots(
     # Maximum absolute residual
     logger.info("  - Maximum absolute residual plot...")
     fig_abs, pvals_abs = make_abs_ppc_plot(
-        draws_df, outcome_col=outcome_col, categories=categories, figsize=figsize
+        draws_df,
+        outcome_col=outcome_col,
+        categories=categories,
+        figsize=figsize,
+        ppc_units=ppc_units,
+        ppc_exclude_units=ppc_exclude_units,
     )
     results["abs"] = {"fig": fig_abs, "pvals": pvals_abs}
     logger.debug(f"    Generated {len(pvals_abs)} p-values for abs residual check")
 
     # ACF
-    logger.info(f"  - ACF plot (lag={acf_lag})...")
-    fig_acf, pvals_acf = make_acf_ppc_plot(
-        draws_df,
-        lag=acf_lag,
-        outcome_col=outcome_col,
-        categories=categories,
-        figsize=figsize,
-    )
-    results["acf"] = {"fig": fig_acf, "pvals": pvals_acf}
-    logger.debug(f"    Generated {len(pvals_acf)} p-values for ACF check")
+    resolved_acf_lags = acf_lags if acf_lags is not None else [acf_lag]
+    acf_results = {}
+    for lag in resolved_acf_lags:
+        logger.info(f"  - ACF plot (lag={lag})...")
+        fig_acf, pvals_acf = make_acf_ppc_plot(
+            draws_df,
+            lag=lag,
+            outcome_col=outcome_col,
+            categories=categories,
+            figsize=figsize,
+            ppc_units=ppc_units,
+            ppc_exclude_units=ppc_exclude_units,
+        )
+        acf_key = f"acf_lag{lag}"
+        results[acf_key] = {"fig": fig_acf, "pvals": pvals_acf, "lag": lag}
+        acf_results[acf_key] = results[acf_key]
+        logger.debug(f"    Generated {len(pvals_acf)} p-values for ACF check")
+    if len(resolved_acf_lags) == 1:
+        results["acf"] = next(iter(acf_results.values()))
 
     # RMSE
     logger.info("  - RMSE plot...")
     fig_rmse, pvals_rmse = make_rmse_ppc_plot(
-        draws_df, outcome_col=outcome_col, categories=categories, figsize=figsize
+        draws_df,
+        outcome_col=outcome_col,
+        categories=categories,
+        figsize=figsize,
+        ppc_units=ppc_units,
+        ppc_exclude_units=ppc_exclude_units,
     )
     results["rmse"] = {"fig": fig_rmse, "pvals": pvals_rmse}
     logger.debug(f"    Generated {len(pvals_rmse)} p-values for RMSE check")
@@ -1960,6 +2056,8 @@ def make_all_ppc_plots(
         categories=categories,
         ndraws=ndraws,
         figsize=(10, 6),
+        ppc_units=ppc_units,
+        ppc_exclude_units=ppc_exclude_units,
     )
     results["unit_corr"] = {"fig": fig_corr, "pvals": pvals_corr}
     logger.debug(f"    Generated {len(pvals_corr)} p-values for unit correlation check")
@@ -1973,7 +2071,11 @@ def make_all_ppc_plots(
         fig_abs.savefig(
             output_path / "ppc_abs_residual.png", dpi=150, bbox_inches="tight"
         )
-        fig_acf.savefig(output_path / "ppc_acf.png", dpi=150, bbox_inches="tight")
+        for lag in resolved_acf_lags:
+            acf_key = f"acf_lag{lag}"
+            results[acf_key]["fig"].savefig(
+                output_path / f"ppc_acf_lag{lag}.png", dpi=150, bbox_inches="tight"
+            )
         fig_rmse.savefig(output_path / "ppc_rmse.png", dpi=150, bbox_inches="tight")
         fig_corr.savefig(
             output_path / "ppc_unit_corr.png", dpi=150, bbox_inches="tight"
@@ -1983,6 +2085,8 @@ def make_all_ppc_plots(
         # Save p-values to CSV
         all_pvals = []
         for name, data in results.items():
+            if name == "acf":
+                continue
             pvals = data["pvals"].copy()
             pvals["check_type"] = name
             all_pvals.append(pvals)
