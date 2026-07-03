@@ -16,10 +16,17 @@ from pathlib import Path
 import arviz as az
 from loguru import logger
 
+
 def main():
-    parser = argparse.ArgumentParser(description="Compute diagnostics natively via ArviZ NetCDF.")
-    parser.add_argument("nc_path", type=Path, help="Path to NetCDF traces file (e.g. ..._traces.nc)")
-    parser.add_argument("--param-filter", help="Comma-separated list of parameter prefixes")
+    parser = argparse.ArgumentParser(
+        description="Compute diagnostics natively via ArviZ NetCDF."
+    )
+    parser.add_argument(
+        "nc_path", type=Path, help="Path to NetCDF traces file (e.g. ..._traces.nc)"
+    )
+    parser.add_argument(
+        "--param-filter", help="Comma-separated list of parameter prefixes"
+    )
     args = parser.parse_args()
 
     if not args.nc_path.exists():
@@ -32,22 +39,28 @@ def main():
     var_names = None
     if args.param_filter:
         prefixes = args.param_filter.split(",")
-        var_names = [v for v in idata.posterior.data_vars if any(v.startswith(p) for p in prefixes)]
+        var_names = [
+            v
+            for v in idata.posterior.data_vars
+            if any(v.startswith(p) for p in prefixes)
+        ]
         if not var_names:
             logger.error("No parameters matched --param-filter.")
             sys.exit(1)
 
     logger.info("Computing metrics via ArviZ...")
-    
+
     summary_df = az.summary(idata, var_names=var_names, filter_vars="like")
 
-    summary_df['base_param'] = summary_df.index.to_series().apply(lambda x: x.split('[')[0])
-    
+    summary_df["base_param"] = summary_df.index.to_series().apply(
+        lambda x: x.split("[")[0]
+    )
+
     all_ok = True
-    
-    for name, group in summary_df.groupby('base_param'):
-        rhat = float(group['r_hat'].max())
-        ess = float(group['ess_bulk'].min())
+
+    for name, group in summary_df.groupby("base_param"):
+        rhat = float(group["r_hat"].max())
+        ess = float(group["ess_bulk"].min())
 
         status = "PASS" if rhat < 1.01 and ess > 400 else "WARN"
         if rhat >= 1.01 or ess < 100:
@@ -59,6 +72,7 @@ def main():
         print(f"  min ESS:   {ess:.0f}")
 
     sys.exit(0 if all_ok else 1)
+
 
 if __name__ == "__main__":
     main()
