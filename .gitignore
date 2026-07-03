@@ -109,3 +109,15 @@ htmlcov/
 
 # mypy
 .mypy_cache/
+
+# Scratch / subagent review artifacts (local-only, not package source)
+progress.md
+context.md
+research.md
+reporting_review.md
+review-outcome-derivation.md
+review_*.md
+oracle_pyright_review.md
+jama_supplement_analysis.md
+pyrightconfig.json
+page*.png
