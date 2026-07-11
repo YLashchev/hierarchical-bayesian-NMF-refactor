@@ -78,7 +78,6 @@ output:
   figures: true
   clean: true
   filename_pattern: "{distribution}_{outcome}_{type}_{rank}"
-  save_diagnostics: false
   progress_interval_seconds: 60
 
   # Optional reporting-only aggregate/PPC example. Names and dates below are

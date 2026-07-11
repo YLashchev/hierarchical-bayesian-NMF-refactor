@@ -215,11 +215,21 @@ def test_run_model_type_without_figures_does_not_import_viz(
         def get_samples(self, group_by_chain=True):
             return {"mu": __import__("numpy").zeros((1, 1, 1, 1))}
 
+        def get_extra_fields(self):
+            return {}
+
     monkeypatch.setattr(run_analysis, "run_mcmc_inference", lambda *a, **k: DummyMCMC())
     monkeypatch.setattr(
-        run_analysis, "extract_diagnostics", lambda *a, **k: {"converged": True}
+        run_analysis,
+        "convergence_summary",
+        lambda idata: {
+            "rhat_max": 1.0,
+            "ess_bulk_min": 1000.0,
+            "ess_tail_min": 1000.0,
+            "divergences": 0,
+            "converged": True,
+        },
     )
-    monkeypatch.setattr(run_analysis, "check_convergence", lambda *a, **k: True)
     monkeypatch.setattr(
         run_analysis,
         "generate_predictions",
@@ -250,7 +260,6 @@ def test_run_model_type_without_figures_does_not_import_viz(
         type_config=type_config,
         config=config,
         rank_override=None,
-        save_diagnostics=False,
         log_level="INFO",
         configure_logging=False,
         disable_progress_bar=True,
@@ -259,153 +268,6 @@ def test_run_model_type_without_figures_does_not_import_viz(
     assert (output_dir / "total" / "df_total.csv").exists()
     assert (output_dir / "total" / "total_1.csv").exists()
 
-
-def _patch_minimal_run_model_type(monkeypatch):
-    monkeypatch.setattr(
-        run_analysis,
-        "load_and_prepare",
-        lambda *args, **kwargs: {
-            "Y": __import__("numpy").ones((1, 1, 1)),
-            "denominators": __import__("numpy").ones((1, 1, 1)),
-            "control_idx_array": __import__("numpy").ones((1, 1, 1), dtype=bool),
-            "missing_idx_array": __import__("numpy").zeros((1, 1, 1), dtype=bool),
-            "groups": ["total"],
-            "units": ["A"],
-            "times": ["2020-01-01"],
-            "df_preprocessed": __import__("pandas").DataFrame(
-                [{"unit": "A", "time": "2020-01-01", "group": "total", "outcome": 1}]
-            ),
-        },
-    )
-
-    class DummyMCMC:
-        def get_samples(self, group_by_chain=True):
-            return {"mu": __import__("numpy").zeros((1, 1, 1, 1))}
-
-    monkeypatch.setattr(run_analysis, "run_mcmc_inference", lambda *a, **k: DummyMCMC())
-    monkeypatch.setattr(
-        run_analysis,
-        "generate_predictions",
-        lambda *a, **k: __import__("numpy").zeros((1, 1, 1, 1, 1)),
-    )
-    monkeypatch.setattr(
-        run_analysis,
-        "format_draws",
-        lambda *a, **k: __import__("pandas").DataFrame([{"ok": 1}]),
-    )
-
-
-def test_run_model_type_skips_diagnostics_by_default(monkeypatch, tmp_path: Path):
-    output_dir = tmp_path / "results"
-    _patch_minimal_run_model_type(monkeypatch)
-    monkeypatch.setattr(
-        run_analysis,
-        "extract_diagnostics",
-        lambda *a, **k: (_ for _ in ()).throw(
-            AssertionError("diagnostics should be skipped")
-        ),
-    )
-
-    run_analysis.run_model_type(
-        model_type="total",
-        type_config={"groups": ["total"], "ranks_to_test": [1]},
-        config={
-            "data": {"input_file": "unused.csv", "output_dir": str(output_dir)},
-            "model": {"types": {"total": {"groups": ["total"]}}},
-            "output": {"filename_pattern": "{type}_{rank}"},
-        },
-        save_diagnostics=False,
-        configure_logging=False,
-        disable_progress_bar=True,
-    )
-
-    assert not list((output_dir / "total").glob("*_diagnostics.json"))
-
-
-def test_run_model_type_writes_diagnostics_when_enabled(monkeypatch, tmp_path: Path):
-    output_dir = tmp_path / "results"
-    _patch_minimal_run_model_type(monkeypatch)
-
-    diag = {
-        "n_eff_min": 500.0,
-        "n_eff_mean": 600.0,
-        "rhat_max": 1.0,
-        "rhat_mean": 1.0,
-        "divergences": 0,
-        "converged": True,
-    }
-    convergence_checked = []
-
-    def fake_check_convergence(diagnostics):
-        convergence_checked.append(diagnostics)
-        return True
-
-    monkeypatch.setattr(run_analysis, "extract_diagnostics", lambda *a, **k: diag)
-    monkeypatch.setattr(run_analysis, "check_convergence", fake_check_convergence)
-
-    run_analysis.run_model_type(
-        model_type="total",
-        type_config={"groups": ["total"], "ranks_to_test": [1]},
-        config={
-            "data": {
-                "input_file": "unused.csv",
-                "output_dir": str(output_dir),
-                "outcome": "births",
-            },
-            "model": {
-                "outcome_distribution": "NB",
-                "types": {"total": {"groups": ["total"]}},
-            },
-            "output": {"filename_pattern": "{distribution}_{outcome}_{type}_{rank}"},
-        },
-        save_diagnostics=True,
-        configure_logging=False,
-        disable_progress_bar=True,
-    )
-
-    diagnostics_files = list((output_dir / "total").glob("*_diagnostics.json"))
-    assert [p.name for p in diagnostics_files] == ["NB_births_total_1_diagnostics.json"]
-    assert convergence_checked == [diag]
-
-
-def test_main_uses_configured_save_diagnostics(monkeypatch, tmp_path: Path):
-    import yaml  # type: ignore[import-untyped]
-
-    config_path = tmp_path / "cfg.yaml"
-    config_path.write_text(
-        yaml.safe_dump(
-            {
-                "data": {
-                    "input_file": str(tmp_path / "unused.csv"),
-                    "output_dir": str(tmp_path / "results"),
-                    "schema": {
-                        "unit_col": "unit",
-                        "time_col": "time",
-                        "treatment_col": "treated",
-                        "outcomes": [{"outcome_col": "y", "label": "total"}],
-                    },
-                },
-                "model": {
-                    "types": {"total": {"groups": ["total"], "ranks_to_test": [1]}}
-                },
-                "mcmc": {"num_chains": 1},
-                "output": {"save_diagnostics": True},
-                "parallel": {"analysis_workers": 1},
-            }
-        )
-    )
-
-    seen = []
-
-    def fake_run_model_type(**kwargs):
-        seen.append(kwargs["save_diagnostics"])
-
-    monkeypatch.setattr(run_analysis, "run_model_type", fake_run_model_type)
-    monkeypatch.setattr("sys.argv", ["run_analysis.py", "--config", str(config_path)])
-
-    run_analysis.main()
-
-    assert seen == [True]
 
 
 def test_main_parallel_branch_disables_worker_progress_bars_and_emits_heartbeat(

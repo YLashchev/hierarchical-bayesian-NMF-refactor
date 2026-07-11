@@ -119,7 +119,6 @@ output:
   # --- File generation ---
   figures: false # Auto-generate fit/gap/interval/ppc plots
   clean: false # Delete <output_dir>/<type>/ before writing
-  save_diagnostics: false # Save MCMC convergence JSON (ESS/R-hat/divergences)
   save_traces: false # Save full posterior draws as NetCDF sidecar (arviz InferenceData)
   filename_pattern: "{distribution}_{type}_{rank}"
 

@@ -21,8 +21,7 @@ from bayesian_panel_nmf.data import load_and_prepare
 from bayesian_panel_nmf.inference import (
     run_mcmc_inference,
     generate_predictions,
-    extract_diagnostics,
-    check_convergence,
+    convergence_summary,
 )
 from bayesian_panel_nmf.output import format_draws
 from bayesian_panel_nmf.parallel import (
@@ -72,8 +71,7 @@ __all__ = [
     # Inference
     "run_mcmc_inference",
     "generate_predictions",
-    "extract_diagnostics",
-    "check_convergence",
+    "convergence_summary",
     # Output
     "format_draws",
     # Parallel

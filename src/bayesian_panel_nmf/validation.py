@@ -122,7 +122,6 @@ def _validate_config_boolean_flags(
     for flag in (
         "figures",
         "clean",
-        "save_diagnostics",
         "save_traces",
         "print_tables",
         "print_target_table",

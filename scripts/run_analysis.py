@@ -5,24 +5,21 @@ This script:
 1. Loads and preprocesses panel data using schema-based configuration
 2. Runs Bayesian inference for specified model types and ranks
 3. Saves results in tidy format with standardized column names
-4. Optionally extracts and saves MCMC diagnostics (ESS, R-hat, divergences)
-
-Diagnostics are skipped by default because FFT-based ESS computation is
-expensive for models with many parameters. Enable via --save-diagnostics or
-output.save_diagnostics: true in the config.
+4. Always computes and saves an ArviZ-based convergence gate (ESS, R-hat,
+   divergences) next to the draws CSV
 
 Usage:
     python scripts/run_analysis.py --config configs/nativity_config.yaml
     python scripts/run_analysis.py --config configs/nativity_config.yaml --type groups --rank 10
     python scripts/run_analysis.py --config configs/nativity_config.yaml --verbose
     python scripts/run_analysis.py --config configs/nativity_config.yaml --log-file logs/analysis.log
-    python scripts/run_analysis.py --config configs/nativity_config.yaml --save-diagnostics
 """
 
 import argparse
 import json
 import shutil
 import time
+import arviz as az
 import yaml  # type: ignore[import-untyped]
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from multiprocessing import Manager
@@ -35,8 +32,7 @@ from bayesian_panel_nmf.output import format_draws
 from bayesian_panel_nmf.inference import (
     run_mcmc_inference,
     generate_predictions,
-    extract_diagnostics,
-    check_convergence,
+    convergence_summary,
 )
 from bayesian_panel_nmf.models import model
 from bayesian_panel_nmf.validation import ConfigError, validate_config
@@ -159,6 +155,24 @@ def _log_parallel_heartbeat(
     )
 
 
+def _clean_scoped_samples(mcmc, model_type: str, rank: int) -> dict:
+    """Drop sample keys containing '/' (from numpyro.handlers.scope).
+
+    xarray DataTree rejects '/' in variable names (path-separator conflict),
+    so both the convergence gate and the trace sidecar need this filter
+    before handing samples to az.from_dict.
+    """
+    raw_samples = mcmc.get_samples(group_by_chain=True)
+    clean_samples = {k: v for k, v in raw_samples.items() if "/" not in k}
+    if len(clean_samples) < len(raw_samples):
+        dropped = set(raw_samples) - set(clean_samples)
+        logger.debug(
+            f"{model_type} rank {rank}: excluded {len(dropped)} scoped "
+            f"sample keys: {sorted(dropped)}"
+        )
+    return clean_samples
+
+
 def _run_reporting(
     draws_df,
     output_dir,
@@ -187,7 +201,6 @@ def run_model_type(
     type_config: dict,
     config: dict,
     rank_override: int | None = None,
-    save_diagnostics: bool = False,
     save_traces: bool = False,
     log_level: str = "INFO",
     configure_logging: bool = True,
@@ -254,71 +267,51 @@ def run_model_type(
     logger.info(f"{model_type}: wrote preprocessed data to {preprocessed_file}")
 
     for rank in ranks:
+        dist = config["model"].get("outcome_distribution", "NB")
+        pattern = output_config.get("filename_pattern", "{distribution}_{type}_{rank}")
+        filename = pattern.format(
+            distribution=dist,
+            outcome=_get_outcome_name(config),
+            type=model_type,
+            rank=rank,
+        )
+
         _set_progress(progress_state, model_type, f"MCMC rank {rank}")
         logger.info(f"{model_type} rank {rank}: MCMC starting")
         mcmc = run_mcmc_inference(data_dict, model, rank, config)
         _set_progress(progress_state, model_type, f"MCMC rank {rank} finished")
         logger.info(f"{model_type} rank {rank}: MCMC finished")
 
-        if save_diagnostics:
-            _set_progress(progress_state, model_type, f"diagnostics rank {rank}")
-            logger.info(f"{model_type} rank {rank}: diagnostics starting")
-            diagnostics = extract_diagnostics(mcmc)
-            check_convergence(diagnostics)
-
-            dist = config["model"].get("outcome_distribution", "NB")
-            pattern = output_config.get(
-                "filename_pattern", "{distribution}_{type}_{rank}"
+        clean_samples = _clean_scoped_samples(mcmc, model_type, rank)
+        extra_fields = mcmc.get_extra_fields()
+        idata_dict = {"posterior": clean_samples}
+        if "diverging" in extra_fields:
+            # get_extra_fields() is flat (chains*samples,); reshape to match the
+            # (chain, draw) samples returned by get_samples(group_by_chain=True).
+            diverging = extra_fields["diverging"].reshape(mcmc.num_chains, -1)
+            idata_dict["sample_stats"] = {"diverging": diverging}
+        idata = az.from_dict(idata_dict)
+        gate = convergence_summary(idata)
+        if not gate["converged"]:
+            logger.warning(
+                f"{model_type} rank {rank}: convergence gate FAILED — "
+                f"max R-hat={gate['rhat_max']:.4f}, min bulk ESS={gate['ess_bulk_min']:.0f}, "
+                f"min tail ESS={gate['ess_tail_min']:.0f}, divergences={gate['divergences']}"
             )
-            diag_filename = pattern.format(
-                distribution=dist,
-                outcome=_get_outcome_name(config),
-                type=model_type,
-                rank=rank,
-            )
-            diagnostics_file = type_output_dir / f"{diag_filename}_diagnostics.json"
-            diag_output = {
-                "n_eff_min": diagnostics["n_eff_min"],
-                "n_eff_mean": diagnostics["n_eff_mean"],
-                "rhat_max": diagnostics["rhat_max"],
-                "rhat_mean": diagnostics["rhat_mean"],
-                "divergences": diagnostics["divergences"],
-                "converged": diagnostics["converged"],
-            }
-            with open(diagnostics_file, "w") as f:
-                json.dump(diag_output, f, indent=2)
-            logger.info(
-                f"{model_type} rank {rank}: wrote diagnostics to {diagnostics_file}"
-            )
+        convergence_file = type_output_dir / f"{filename}_convergence.json"
+        with open(convergence_file, "w") as f:
+            json.dump(gate, f, indent=2)
+        logger.info(
+            f"{model_type} rank {rank}: wrote convergence gate to {convergence_file}"
+        )
 
         if save_traces:
-            import arviz as az
-
             _set_progress(progress_state, model_type, f"traces rank {rank}")
             logger.info(f"{model_type} rank {rank}: saving trace sidecar (NetCDF)")
-            dist = config["model"].get("outcome_distribution", "NB")
-            pattern = output_config.get(
-                "filename_pattern", "{distribution}_{type}_{rank}"
-            )
-            traces_filename = pattern.format(
-                distribution=dist,
-                outcome=_get_outcome_name(config),
-                type=model_type,
-                rank=rank,
-            )
-            traces_file = type_output_dir / f"{traces_filename}_traces.nc"
-            # Filter out samples whose names contain '/' (from numpyro.handlers.scope)
-            # as xarray DataTree rejects '/' in variable names (path-separator conflict).
-            raw_samples = mcmc.get_samples(group_by_chain=True)
-            clean_samples = {k: v for k, v in raw_samples.items() if "/" not in k}
-            if len(clean_samples) < len(raw_samples):
-                dropped = set(raw_samples) - set(clean_samples)
-                logger.debug(
-                    f"{model_type} rank {rank}: excluded {len(dropped)} scoped "
-                    f"sample keys from trace sidecar: {sorted(dropped)}"
-                )
-            idata = az.from_dict({"posterior": clean_samples})
-            idata.to_netcdf(str(traces_file), engine="h5netcdf")
+            traces_file = type_output_dir / f"{filename}_traces.nc"
+            trace_clean_samples = _clean_scoped_samples(mcmc, model_type, rank)
+            trace_idata = az.from_dict({"posterior": trace_clean_samples})
+            trace_idata.to_netcdf(str(traces_file), engine="h5netcdf")
             size_mb = traces_file.stat().st_size / 1024**2
             logger.info(
                 f"{model_type} rank {rank}: wrote trace sidecar to {traces_file} "
@@ -335,14 +328,6 @@ def run_model_type(
         samples = mcmc.get_samples(group_by_chain=True)
         draws_df = format_draws(samples, predictions, data_dict)
 
-        dist = config["model"].get("outcome_distribution", "NB")
-        pattern = output_config.get("filename_pattern", "{distribution}_{type}_{rank}")
-        filename = pattern.format(
-            distribution=dist,
-            outcome=_get_outcome_name(config),
-            type=model_type,
-            rank=rank,
-        )
         draws_file = type_output_dir / f"{filename}.csv"
         _set_progress(progress_state, model_type, f"writing draws rank {rank}")
         logger.info(f"{model_type} rank {rank}: writing draws to {draws_file}")
@@ -408,11 +393,6 @@ def main():
         help="Path to log file (enables file logging)",
     )
     parser.add_argument(
-        "--save-diagnostics",
-        action="store_true",
-        help="Save MCMC diagnostics to JSON file",
-    )
-    parser.add_argument(
         "--save-traces",
         action="store_true",
         help="Save full posterior draws as NetCDF sidecar (arviz InferenceData)",
@@ -465,13 +445,6 @@ def main():
     else:
         types_to_run = all_types
 
-    # Resolve save_diagnostics: CLI flag overrides config
-    save_diagnostics = args.save_diagnostics or config.get("output", {}).get(
-        "save_diagnostics", False
-    )
-    if save_diagnostics:
-        logger.info("Diagnostics enabled (ESS/R-hat will be computed)")
-
     # Resolve save_traces: CLI flag overrides config
     save_traces = args.save_traces or config.get("output", {}).get("save_traces", False)
     if save_traces:
@@ -519,7 +492,6 @@ def main():
                 type_config=type_config,
                 config=config,
                 rank_override=args.rank,
-                save_diagnostics=save_diagnostics,
                 save_traces=save_traces,
                 log_level=log_level,
                 configure_logging=False,
@@ -539,7 +511,6 @@ def main():
                         type_config=type_config,
                         config=config,
                         rank_override=args.rank,
-                        save_diagnostics=save_diagnostics,
                         save_traces=save_traces,
                         log_level=log_level,
                         configure_logging=True,

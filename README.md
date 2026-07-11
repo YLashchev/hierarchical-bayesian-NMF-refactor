@@ -43,14 +43,12 @@ Regenerate figures from an existing draws CSV without re-running MCMC:
 uv run scripts/generate_full_viz.py --results results/total/NB_births_total_3.csv
 ```
 
-Diagnostics are off by default. Enable them only for targeted runs:
+An ArviZ-based convergence gate (rank-normalized R-hat, bulk/tail ESS,
+divergences) always runs after MCMC and is written to `*_convergence.json`
+next to the draws CSV.
 
-```bash
-uv run scripts/run_analysis.py --config configs/fertility_config.yaml --type total --save-diagnostics
-uv run python scripts/check_diagnostics.py results/total/*_diagnostics.json
-```
-
-To compute limited post-hoc diagnostics from saved draws (mu / mu_treated / ypred only):
+To compute full post-hoc diagnostics from saved trace sidecars (all latent
+parameters), or limited diagnostics from saved draws (mu / mu_treated / ypred only):
 
 ```bash
 uv run python scripts/compute_posthoc_diagnostics.py results/total/NB_births_total_5.csv --param-filter mu
@@ -170,7 +168,6 @@ mcmc:
 output:
   figures: true # auto-generate PPC + summary plots at the end of a run
   clean: false # wipe <output_dir>/<type>/ before writing
-  save_diagnostics: false # ESS/R-hat diagnostics; prefer --save-diagnostics per type
   progress_interval_seconds: 60 # parent heartbeat for parallel runs
   filename_pattern: "{distribution}_{type}_{rank}"
 ```
@@ -205,7 +202,7 @@ Per model type, under `<output_dir>/<type>/`:
 | ---------------------------------- | -------------------------------------------------------------------------------------- |
 | `{distribution}_{type}_{rank}.csv` | Tidy posterior draws                                                                   |
 | `df_{type}.csv`                    | Preprocessed observed data (standardized columns)                                      |
-| `*_diagnostics.json`               | MCMC ESS, R-hat, divergences (when `--save-diagnostics`)                               |
+| `*_convergence.json`               | Always-on ArviZ convergence gate: R-hat, bulk/tail ESS, divergences                     |
 | `figs/` (subdir)                   | Fit/gap plots, PPC panels, interval plot, summary tables (when `output.figures: true`) |
 
 Posterior draws schema:

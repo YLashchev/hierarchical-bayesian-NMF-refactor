@@ -18,7 +18,6 @@ BOOL_PATHS = [
     ("mcmc", "progress_bar"),
     ("output", "figures"),
     ("output", "clean"),
-    ("output", "save_diagnostics"),
 ]
 
 

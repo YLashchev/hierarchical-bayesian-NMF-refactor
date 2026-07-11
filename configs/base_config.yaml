@@ -143,7 +143,6 @@ parallel:
 output:
   figures: false
   clean: false
-  save_diagnostics: false
   save_traces: false
   # Parent-process heartbeat for parallel runs (workers > 1).
   progress_interval_seconds: 60
