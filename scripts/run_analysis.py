@@ -126,6 +126,12 @@ def _get_outcome_name(config: dict) -> str:
     return "births"
 
 
+def _draws_filename(config: dict, model_type: str, rank: int) -> str:
+    """Fixed scheme: {distribution}_{outcome}_{type}_{rank}."""
+    dist = config.get("model", {}).get("outcome_distribution", "NB")
+    return f"{dist}_{_get_outcome_name(config)}_{model_type}_{rank}"
+
+
 def _clean_scoped_samples(mcmc, model_type: str, rank: int) -> dict:
     """Drop sample keys containing '/' (from numpyro.handlers.scope).
 
@@ -229,14 +235,7 @@ def run_model_type(
     df_preprocessed.to_csv(preprocessed_file, index=False)
 
     for rank in ranks:
-        dist = config["model"].get("outcome_distribution", "NB")
-        pattern = output_config.get("filename_pattern", "{distribution}_{type}_{rank}")
-        filename = pattern.format(
-            distribution=dist,
-            outcome=_get_outcome_name(config),
-            type=model_type,
-            rank=rank,
-        )
+        filename = _draws_filename(config, model_type, rank)
 
         mcmc_started_at = time.monotonic()
         mcmc = run_mcmc_inference(data_dict, model, rank, config)
@@ -325,9 +324,6 @@ def main():
         "--rank", type=int, default=None, help="Model rank (overrides config)"
     )
     parser.add_argument(
-        "--no-aggregate", action="store_true", help="Skip temporal aggregation"
-    )
-    parser.add_argument(
         "--verbose",
         "-v",
         action="store_true",
@@ -353,12 +349,6 @@ def main():
     # Load and validate configuration
     config = load_config(args.config)
     _validate_run_analysis_config(config)
-
-    # Handle --no-aggregate flag by modifying config
-    if args.no_aggregate:
-        config = config.copy()
-        config["data"] = config["data"].copy()
-        config["data"]["aggregation"] = {"enabled": False}
 
     # Setup output directory
     output_dir = Path(config["data"]["output_dir"])

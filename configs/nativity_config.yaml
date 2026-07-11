@@ -115,4 +115,3 @@ parallel:
 output:
   figures: false
   clean: false
-  filename_pattern: "{distribution}_{outcome}_{type}_{rank}"

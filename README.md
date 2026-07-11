@@ -33,7 +33,7 @@ When that finishes cleanly, run the full analysis:
 uv run scripts/run_analysis.py --config configs/fertility_config.yaml
 ```
 
-Full fertility runs default to `parallel.analysis_workers: 1` so progress remains visible and only one large draws/reporting job sits in memory at a time. You can set it to `-1` to auto-cap model-type workers against `mcmc.num_chains` and CPU count. Progress bars are disabled for multi-model parallel runs so subprocess output does not interleave; the parent process prints a heartbeat every `output.progress_interval_seconds` seconds showing how many model types have completed and which are still running.
+Full fertility runs default to `parallel.analysis_workers: 1` so progress remains visible and only one large draws/reporting job sits in memory at a time. You can set it to `-1` to auto-cap model-type workers against `mcmc.num_chains` and CPU count. Progress bars are disabled for multi-model parallel runs so subprocess output does not interleave; the parent process logs a line each time a model type finishes.
 
 Both write posterior draws + preprocessed data to `results/<type>/` (and figures under `results/<type>/figs/` when `output.figures: true`).
 
@@ -160,7 +160,7 @@ mcmc:
   num_chains: 4 # chains within one fit
 ```
 
-`analysis_workers × num_chains` is capped against CPU count automatically. With `analysis_workers: -1`, the runner uses the largest safe model-type worker count. For easier progress visibility or lower memory/disk pressure, set `analysis_workers: 1`. Parallel runs disable worker progress bars and print a parent-process heartbeat every `output.progress_interval_seconds` seconds so you can see which model types are still running.
+`analysis_workers × num_chains` is capped against CPU count automatically. With `analysis_workers: -1`, the runner uses the largest safe model-type worker count. For easier progress visibility or lower memory/disk pressure, set `analysis_workers: 1`. Parallel runs disable worker progress bars; each model type logs a line when it finishes.
 
 ### Figures, diagnostics + cleanup
 
@@ -168,9 +168,9 @@ mcmc:
 output:
   figures: true # auto-generate PPC + summary plots at the end of a run
   clean: false # wipe <output_dir>/<type>/ before writing
-  progress_interval_seconds: 60 # parent heartbeat for parallel runs
-  filename_pattern: "{distribution}_{type}_{rank}"
 ```
+
+Output filenames follow a fixed `{distribution}_{outcome}_{type}_{rank}` scheme (e.g. `NB_births_total_5.csv`), plus a `_convergence.json` sidecar with R-hat/ESS/divergence diagnostics written after every fit.
 
 ### Reporting-only aggregate units and PPC selection
 

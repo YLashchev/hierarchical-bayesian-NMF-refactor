@@ -77,7 +77,6 @@ parallel:
 output:
   figures: true
   clean: true
-  filename_pattern: "{distribution}_{outcome}_{type}_{rank}"
 
   # Optional reporting-only aggregate/PPC example. Names and dates below are
   # dataset-specific examples of generic mechanisms; aggregate units are not

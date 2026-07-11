@@ -54,4 +54,3 @@ output:
   save_traces: true
   print_tables: true
   print_target_table: true
-  filename_pattern: "{distribution}_{outcome}_{type}_{rank}"

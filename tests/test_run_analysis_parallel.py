@@ -217,7 +217,7 @@ def test_run_model_type_without_figures_does_not_import_viz(
     config = {
         "data": {"input_file": "unused.csv", "output_dir": str(output_dir)},
         "model": {"types": {"total": type_config}},
-        "output": {"figures": False, "filename_pattern": "{type}_{rank}"},
+        "output": {"figures": False},
     }
 
     run_analysis.run_model_type(
@@ -231,7 +231,7 @@ def test_run_model_type_without_figures_does_not_import_viz(
     )
 
     assert (output_dir / "total" / "df_total.csv").exists()
-    assert (output_dir / "total" / "total_1.csv").exists()
+    assert (output_dir / "total" / "NB_births_total_1.csv").exists()
 
 
 
@@ -405,3 +405,20 @@ def test_get_outcome_name_fallback_when_neither_set():
 def test_get_outcome_name_empty_prefix_falls_back():
     config = {"data": {"schema": {"outcomes_from_prefixes": {"outcome_prefix": ""}}}}
     assert run_analysis._get_outcome_name(config) == "births"
+
+
+# ---------------------------------------------------------------------------
+# _draws_filename
+# ---------------------------------------------------------------------------
+
+
+def test_draws_filename_fixed_scheme():
+    config = {
+        "model": {"outcome_distribution": "NB"},
+        "data": {"outcome": "births"},
+    }
+    assert run_analysis._draws_filename(config, "total", 5) == "NB_births_total_5"
+
+
+def test_draws_filename_default_distribution_and_outcome():
+    assert run_analysis._draws_filename({}, "groups", 3) == "NB_births_groups_3"

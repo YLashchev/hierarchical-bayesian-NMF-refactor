@@ -89,6 +89,15 @@ model:
       groups: ["total"]
       ranks_to_test: [10]
 
+      # Drop units for THIS type only, e.g. exclude_units: ["Texas"]
+      # exclude_units: null
+
+    # Additional model types run as independent fits with their own groups
+    # and ranks. Example — stratified sub-groups sharing the same schema:
+    # stratified:
+    #   groups: ["teen", "age2534", "age3544"]
+    #   ranks_to_test: [10]
+
   # Negative Binomial dispersion parameter
   # Lower = more overdispersion; 1e-4 approximates Poisson
   nb_disp: 1.0e-4
@@ -144,5 +153,28 @@ output:
   figures: false
   clean: false
   save_traces: false
-  # Parent-process heartbeat for parallel runs (workers > 1).
-  filename_pattern: "{distribution}_{type}_{rank}"
+
+  # --- Reporting ---
+  # target_unit: null       # Unit for headline table & per-unit plots.
+  #                          # Null = auto-detect (unit with most post-treatment obs)
+  # report_groups: null      # Subset for per-unit figures; null = all groups
+  # print_tables: true        # Print rich terminal tables
+  # print_target_table: true   # Print the target-unit headline table (Table 1)
+
+  # --- Synthetic aggregate units (reporting/PPC only; NOT fed to model) ---
+  # aggregate_units:
+  #   - unit: "Treated units excluding Texas"
+  #     include_treated_units: true
+  #     exclude_units: ["Texas"]
+  #     strict: false                  # Error if exclude_units missing?
+  #     overwrite: false               # Overwrite existing unit with same name?
+  #   - unit: "All treated"
+  #     include_all_units: true
+
+  # --- PPC plot filtering ---
+  # ppc_units:                         # Include only these units in PPC
+  #   - "Texas"
+  # ppc_exclude_units:                 # Exclude these units from PPC
+  #   - "California"
+  # ppc_acf_lags: [6, 3, 1]           # ACF lags for temporal PPC checks
+  # ppc_unit_corr_max_time: "2022-04-01"  # Max date for unit-correlation PPC plot
