@@ -9,10 +9,6 @@ from loguru import logger
 from bayesian_panel_nmf.inference import generate_predictions
 from bayesian_panel_nmf.logging_config import setup_logging
 from bayesian_panel_nmf.models import model
-from bayesian_panel_nmf.parallel import (
-    get_requested_analysis_workers,
-    resolve_analysis_workers,
-)
 from bayesian_panel_nmf.validation import ConfigError
 from bayesian_panel_nmf.validation import DataError
 
@@ -60,41 +56,31 @@ def test_run_analysis_config_requires_model_types():
         )
 
 
-def test_get_requested_analysis_workers_defaults_to_one():
-    assert get_requested_analysis_workers({}) == 1
+def test_resolve_workers_defaults_to_one(monkeypatch):
+    monkeypatch.setattr(run_analysis.os, "cpu_count", lambda: 8)
+    assert run_analysis._resolve_workers({}, num_chains=4, n_types=6) == 1
 
 
-def test_get_requested_analysis_workers_supports_legacy_num_workers():
-    config = {"parallel": {"num_workers": 3}}
-    assert get_requested_analysis_workers(config) == 3
-
-
-def test_resolve_analysis_workers_caps_by_chain_count():
-    workers = resolve_analysis_workers(
-        requested_workers=4,
-        num_chains=4,
-        num_model_types=6,
-        cpu_count=8,
+def test_resolve_workers_caps_by_chain_count(monkeypatch):
+    monkeypatch.setattr(run_analysis.os, "cpu_count", lambda: 8)
+    workers = run_analysis._resolve_workers(
+        {"parallel": {"analysis_workers": 4}}, num_chains=4, n_types=6
     )
     assert workers == 2
 
 
-def test_resolve_analysis_workers_respects_model_type_count():
-    workers = resolve_analysis_workers(
-        requested_workers=4,
-        num_chains=1,
-        num_model_types=2,
-        cpu_count=8,
+def test_resolve_workers_respects_model_type_count(monkeypatch):
+    monkeypatch.setattr(run_analysis.os, "cpu_count", lambda: 8)
+    workers = run_analysis._resolve_workers(
+        {"parallel": {"analysis_workers": 4}}, num_chains=1, n_types=2
     )
     assert workers == 2
 
 
-def test_resolve_analysis_workers_minus_one_uses_maximum_safe_count():
-    workers = resolve_analysis_workers(
-        requested_workers=-1,
-        num_chains=2,
-        num_model_types=10,
-        cpu_count=8,
+def test_resolve_workers_minus_one_uses_maximum_safe_count(monkeypatch):
+    monkeypatch.setattr(run_analysis.os, "cpu_count", lambda: 8)
+    workers = run_analysis._resolve_workers(
+        {"parallel": {"analysis_workers": -1}}, num_chains=2, n_types=10
     )
     assert workers == 4
 
@@ -299,7 +285,7 @@ def test_main_parallel_branch_disables_worker_progress_bars(monkeypatch, tmp_pat
         )
     )
 
-    monkeypatch.setattr(run_analysis, "resolve_analysis_workers", lambda *a, **k: 2)
+    monkeypatch.setattr(run_analysis, "_resolve_workers", lambda *a, **k: 2)
 
     progress_flags = []
 
@@ -372,8 +358,8 @@ def test_main_dispatches_types_to_process_pool_when_workers_gt_one(
         )
     )
 
-    # Make the parallel branch eligible: resolve_analysis_workers must return >1
-    monkeypatch.setattr(run_analysis, "resolve_analysis_workers", lambda *a, **k: 2)
+    # Make the parallel branch eligible: _resolve_workers must return >1
+    monkeypatch.setattr(run_analysis, "_resolve_workers", lambda *a, **k: 2)
 
     submitted: list[str] = []
 

@@ -109,9 +109,6 @@ parallel:
   # 1 = sequential. -1 = auto-cap at cpu_count // mcmc.num_chains.
   analysis_workers: 1
 
-  # Deprecated alias; use analysis_workers instead.
-  # num_workers: 1
-
 # -----------------------------------------------------------------------------
 # Output Settings
 # -----------------------------------------------------------------------------

@@ -24,10 +24,6 @@ from bayesian_panel_nmf.inference import (
     convergence_summary,
 )
 from bayesian_panel_nmf.output import format_draws
-from bayesian_panel_nmf.parallel import (
-    get_requested_analysis_workers,
-    resolve_analysis_workers,
-)
 from bayesian_panel_nmf.models import model
 
 # Visualization (optional — requires pip install bayesian_panel_nmf[viz])
@@ -74,9 +70,6 @@ __all__ = [
     "convergence_summary",
     # Output
     "format_draws",
-    # Parallel
-    "get_requested_analysis_workers",
-    "resolve_analysis_workers",
     # Models
     "model",
 ]

@@ -17,6 +17,7 @@ Usage:
 
 import argparse
 import json
+import os
 import shutil
 import sys
 import time
@@ -37,10 +38,6 @@ from bayesian_panel_nmf.inference import (
 from bayesian_panel_nmf.models import model
 from bayesian_panel_nmf.validation import ConfigError, validate_config
 from bayesian_panel_nmf.logging_config import setup_logging
-from bayesian_panel_nmf.parallel import (
-    get_requested_analysis_workers,
-    resolve_analysis_workers,
-)
 
 
 def _validate_run_analysis_config(config: dict) -> None:
@@ -90,6 +87,19 @@ def _format_elapsed(seconds: float) -> str:
     if minutes:
         return f"{minutes}m {secs}s"
     return f"{secs}s"
+
+
+def _resolve_workers(config: dict, num_chains: int, n_types: int) -> int:
+    """Resolve ``parallel.analysis_workers`` against CPU count and chain count.
+
+    ``analysis_workers``: 1 = sequential (default), -1 = auto (max safe), N = explicit.
+    Caps so ``workers x num_chains`` does not oversubscribe the machine, and never
+    exceeds the number of model types being run.
+    """
+    requested = int(config.get("parallel", {}).get("analysis_workers", 1) or 1)
+    max_safe = max(1, (os.cpu_count() or 1) // max(1, num_chains))
+    workers = max_safe if requested == -1 else max(1, requested)
+    return max(1, min(workers, max_safe, n_types))
 
 
 def _get_outcome_name(config: dict) -> str:
@@ -396,15 +406,10 @@ def main():
 
     # Resolve analysis-level parallelism against num_chains and CPU count
     num_chains = int(config.get("mcmc", {}).get("num_chains", 4))
-    requested_workers = get_requested_analysis_workers(config)
-    workers = resolve_analysis_workers(
-        requested_workers,
-        num_chains=num_chains,
-        num_model_types=len(types_to_run),
-    )
+    workers = _resolve_workers(config, num_chains=num_chains, n_types=len(types_to_run))
     logger.info(
         f"Running {len(types_to_run)} model type(s) with {workers} worker(s) "
-        f"(requested={requested_workers}, num_chains={num_chains})"
+        f"(num_chains={num_chains})"
     )
 
     if workers > 1:
