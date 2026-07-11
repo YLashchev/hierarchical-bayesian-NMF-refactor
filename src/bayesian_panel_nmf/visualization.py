@@ -62,6 +62,16 @@ def _standardize_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _detect_outcome_column(df: pd.DataFrame) -> str:
+    """Return the outcome column: standardized name first, then legacy fallbacks."""
+    for col in ("outcome", "births", "count", "y"):
+        if col in df.columns:
+            return col
+    raise ValueError(
+        f"No outcome column found (looked for outcome/births/count/y); have: {list(df.columns)}"
+    )
+
+
 def _identify_treated_units(df: pd.DataFrame) -> List[str]:
     """
     Identify units that have treatment at any time point.
@@ -366,20 +376,8 @@ def make_abs_ppc_plot(
     df = _standardize_columns(draws_df)
 
     # Handle outcome column (might have custom name)
-    if outcome_col not in df.columns and "outcome" in df.columns:
-        outcome_col = "outcome"
-    elif outcome_col not in df.columns:
-        # Try legacy names
-        for legacy in ["births", "count", "y"]:
-            if legacy in df.columns:
-                outcome_col = legacy
-                break
-
     if outcome_col not in df.columns:
-        raise ValueError(
-            f"Outcome column '{outcome_col}' not found in DataFrame. "
-            f"Available columns: {list(df.columns)}"
-        )
+        outcome_col = _detect_outcome_column(df)
 
     # Get categories
     if categories is None:
@@ -490,16 +488,8 @@ def make_acf_ppc_plot(
     df = _standardize_columns(draws_df)
 
     # Handle outcome column
-    if outcome_col not in df.columns and "outcome" in df.columns:
-        outcome_col = "outcome"
-    elif outcome_col not in df.columns:
-        for legacy in ["births", "count", "y"]:
-            if legacy in df.columns:
-                outcome_col = legacy
-                break
-
     if outcome_col not in df.columns:
-        raise ValueError(f"Outcome column '{outcome_col}' not found in DataFrame.")
+        outcome_col = _detect_outcome_column(df)
 
     # Get categories
     if categories is None:
@@ -617,16 +607,8 @@ def make_rmse_ppc_plot(
     df = _standardize_columns(draws_df)
 
     # Handle outcome column
-    if outcome_col not in df.columns and "outcome" in df.columns:
-        outcome_col = "outcome"
-    elif outcome_col not in df.columns:
-        for legacy in ["births", "count", "y"]:
-            if legacy in df.columns:
-                outcome_col = legacy
-                break
-
     if outcome_col not in df.columns:
-        raise ValueError(f"Outcome column '{outcome_col}' not found in DataFrame.")
+        outcome_col = _detect_outcome_column(df)
 
     # Get categories
     if categories is None:
@@ -745,16 +727,8 @@ def make_unit_corr_ppc_plot(
     df = _standardize_columns(draws_df)
 
     # Handle outcome column
-    if outcome_col not in df.columns and "outcome" in df.columns:
-        outcome_col = "outcome"
-    elif outcome_col not in df.columns:
-        for legacy in ["births", "count", "y"]:
-            if legacy in df.columns:
-                outcome_col = legacy
-                break
-
     if outcome_col not in df.columns:
-        raise ValueError(f"Outcome column '{outcome_col}' not found in DataFrame.")
+        outcome_col = _detect_outcome_column(df)
 
     # Get categories
     if categories is None:
