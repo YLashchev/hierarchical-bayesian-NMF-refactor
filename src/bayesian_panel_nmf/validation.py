@@ -348,9 +348,3 @@ def validate_predictions(
                 f"samples['mu_ctrl'] shape {samples['mu_ctrl'].shape}"
             )
 
-
-# Backwards compatibility aliases
-ValidationError = DataError
-ConfigValidationError = ConfigError
-DataValidationError = DataError
-ArrayShapeError = DataError

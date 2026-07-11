@@ -72,12 +72,11 @@ def load_and_prepare(
 
     Raises
     ------
-    ValidationError
-        If filepath doesn't exist or is invalid
-    ConfigValidationError
+    DataError
+        If filepath doesn't exist or is invalid, or if data file is missing
+        required columns or has invalid values
+    ConfigError
         If config is missing required sections or keys
-    DataValidationError
-        If data file is missing required columns or has invalid values
     """
     validate_filepath(filepath)
     validate_config(config)
@@ -337,7 +336,7 @@ def _load_and_standardize(
 
     Raises
     ------
-    DataValidationError
+    DataError
         If required columns are missing, time cannot be parsed, or treatment has invalid values
     """
     path = Path(filepath)

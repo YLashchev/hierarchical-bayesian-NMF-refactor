@@ -6,16 +6,8 @@ from bayesian_panel_nmf.logging_config import setup_logging, logger
 from bayesian_panel_nmf.validation import (
     ConfigError,
     DataError,
-    # Backwards compatibility aliases
-    ValidationError,
-    ConfigValidationError,
-    DataValidationError,
-    ArrayShapeError,
     validate_config,
     validate_data_dict,
-    validate_filepath,
-    validate_groups,
-    validate_rank,
 )
 from bayesian_panel_nmf.data import load_and_prepare
 from bayesian_panel_nmf.inference import (
@@ -48,20 +40,12 @@ __all__ = [
     # Logging
     "setup_logging",
     "logger",
-    # Validation - New simplified exceptions
+    # Validation - Exceptions
     "ConfigError",
     "DataError",
-    # Validation - Backwards compatibility aliases
-    "ValidationError",
-    "ConfigValidationError",
-    "DataValidationError",
-    "ArrayShapeError",
     # Validation - Functions
     "validate_config",
     "validate_data_dict",
-    "validate_filepath",
-    "validate_groups",
-    "validate_rank",
     # Data loading
     "load_and_prepare",
     # Inference

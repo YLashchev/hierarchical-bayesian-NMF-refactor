@@ -918,7 +918,6 @@ def make_raw_rate_plot(
     rate_multiplier: float = 1000,
     treatment_dates: Optional[Dict[str, str]] = None,
     separate_unit: Optional[str] = None,
-    separate_texas: bool = False,  # Backward compatibility alias
     smooth_window: Optional[int] = None,
     plot_type: str = "rate",  # 'rate' or 'count'
     figsize: Tuple[int, int] = (10, 6),
@@ -950,9 +949,6 @@ def make_raw_rate_plot(
     separate_unit : str, optional
         If provided, show this specific unit as a separate group from other
         treated units. Useful for highlighting a particular unit of interest.
-    separate_texas : bool, default=False
-        Deprecated. Use separate_unit='Texas' instead.
-        If True, equivalent to separate_unit='Texas'.
     smooth_window : int, optional
         Rolling window size for smoothing. If None, no smoothing applied.
     plot_type : str, default='rate'
@@ -981,26 +977,8 @@ def make_raw_rate_plot(
     ...     separate_unit='TX',
     ...     smooth_window=3
     ... )
-
-    >>> # For backward compatibility with older code
-    >>> fig, ax = make_raw_rate_plot(df, group='total', separate_texas=True)
     """
     _setup_plot_style()
-
-    # Handle backward compatibility for separate_texas
-    if separate_texas:
-        warnings.warn(
-            "separate_texas is deprecated and has been removed. "
-            "Pass separate_unit='<your_unit_name>' explicitly instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if separate_unit is None:
-            raise TypeError(
-                "separate_texas=True requires passing the unit name explicitly via "
-                "separate_unit='<your_unit_name>'. The deprecated alias no longer "
-                "infers a dataset-specific default."
-            )
 
     # Standardize column names
     df = _standardize_columns(df)

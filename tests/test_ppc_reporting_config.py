@@ -61,16 +61,6 @@ def test_ppc_units_empty_list_warns() -> None:
     assert pvals.empty
 
 
-def test_separate_texas_raises_without_explicit_unit() -> None:
-    """Backward-compat shim must not silently inject a dataset-specific name."""
-    from bayesian_panel_nmf.visualization import make_raw_rate_plot
-
-    df = _ppc_df()
-    with pytest.warns(DeprecationWarning):
-        with pytest.raises(TypeError, match="separate_unit"):
-            make_raw_rate_plot(df, separate_texas=True)
-
-
 def test_ppc_units_missing_warn_and_skip() -> None:
     df = _ppc_df()
 
