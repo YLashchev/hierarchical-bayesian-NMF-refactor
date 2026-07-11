@@ -208,11 +208,6 @@ def run_model_type(
     exclude_units = type_config.get("exclude_units")
 
     model_started_at = time.monotonic()
-    logger.info(
-        f"{model_type}: starting groups={groups}, ranks={ranks}, output={type_output_dir}"
-    )
-
-    logger.info(f"{model_type}: loading and preparing data")
     load_started_at = time.monotonic()
     data_dict = load_and_prepare(
         filepath=config["data"]["input_file"],
@@ -232,7 +227,6 @@ def run_model_type(
     df_preprocessed = data_dict["df_preprocessed"]
     preprocessed_file = type_output_dir / f"df_{model_type}.csv"
     df_preprocessed.to_csv(preprocessed_file, index=False)
-    logger.info(f"{model_type}: wrote preprocessed data to {preprocessed_file}")
 
     for rank in ranks:
         dist = config["model"].get("outcome_distribution", "NB")
@@ -244,9 +238,12 @@ def run_model_type(
             rank=rank,
         )
 
-        logger.info(f"{model_type} rank {rank}: MCMC starting")
+        mcmc_started_at = time.monotonic()
         mcmc = run_mcmc_inference(data_dict, model, rank, config)
-        logger.info(f"{model_type} rank {rank}: MCMC finished")
+        logger.info(
+            f"{model_type} rank {rank}: MCMC finished in "
+            f"{_format_elapsed(time.monotonic() - mcmc_started_at)}"
+        )
 
         clean_samples = _clean_scoped_samples(mcmc, model_type, rank)
         extra_fields = mcmc.get_extra_fields()
@@ -267,12 +264,8 @@ def run_model_type(
         convergence_file = type_output_dir / f"{filename}_convergence.json"
         with open(convergence_file, "w") as f:
             json.dump(gate, f, indent=2)
-        logger.info(
-            f"{model_type} rank {rank}: wrote convergence gate to {convergence_file}"
-        )
 
         if save_traces:
-            logger.info(f"{model_type} rank {rank}: saving trace sidecar (NetCDF)")
             traces_file = type_output_dir / f"{filename}_traces.nc"
             trace_clean_samples = _clean_scoped_samples(mcmc, model_type, rank)
             trace_idata = az.from_dict({"posterior": trace_clean_samples})
@@ -283,19 +276,15 @@ def run_model_type(
                 f"({size_mb:.1f} MB)"
             )
 
-        logger.info(f"{model_type} rank {rank}: posterior prediction starting")
         predictions = generate_predictions(mcmc, data_dict, model, rank, config)
-        logger.info(f"{model_type} rank {rank}: posterior prediction finished")
 
-        logger.info(f"{model_type} rank {rank}: formatting draws")
         samples = mcmc.get_samples(group_by_chain=True)
         draws_df = format_draws(samples, predictions, data_dict)
 
         draws_file = type_output_dir / f"{filename}.csv"
-        logger.info(f"{model_type} rank {rank}: writing draws to {draws_file}")
         draws_df.to_csv(draws_file, index=False)
         size_mb = draws_file.stat().st_size / 1024**2
-        logger.info(f"{model_type} rank {rank}: wrote draws ({size_mb:.1f} MB)")
+        logger.info(f"{model_type} rank {rank}: wrote draws to {draws_file} ({size_mb:.1f} MB)")
 
         # Multi-rank runs nest under rank_<rank>/ so figs don't collide
         report_dir = (
@@ -304,9 +293,7 @@ def run_model_type(
         report_dir.mkdir(parents=True, exist_ok=True)
 
         if output_config.get("figures", False):
-            logger.info(f"{model_type} rank {rank}: reporting/figures starting")
             _run_reporting(draws_df, report_dir, output_config)
-            logger.info(f"{model_type} rank {rank}: reporting/figures finished")
 
     logger.info(
         f"{model_type}: complete in {_format_elapsed(time.monotonic() - model_started_at)}"
@@ -366,18 +353,12 @@ def main():
     # Load and validate configuration
     config = load_config(args.config)
     _validate_run_analysis_config(config)
-    logger.info("=" * 60)
-    logger.info("BAYESIAN PANEL NMF ANALYSIS")
-    logger.info("=" * 60)
-    logger.debug(f"Config file: {args.config}")
-    logger.debug(f"Log level: {log_level}")
 
     # Handle --no-aggregate flag by modifying config
     if args.no_aggregate:
         config = config.copy()
         config["data"] = config["data"].copy()
         config["data"]["aggregation"] = {"enabled": False}
-        logger.info("Temporal aggregation disabled via --no-aggregate flag")
 
     # Setup output directory
     output_dir = Path(config["data"]["output_dir"])
@@ -386,7 +367,6 @@ def main():
     except OSError as e:
         logger.error(f"Failed to create directory {output_dir}: {e}")
         raise
-    logger.debug(f"Output directory: {output_dir}")
 
     # Select which model types to run
     all_types = config["model"]["types"]
@@ -401,8 +381,6 @@ def main():
 
     # Resolve save_traces: CLI flag overrides config
     save_traces = args.save_traces or config.get("output", {}).get("save_traces", False)
-    if save_traces:
-        logger.info("Trace sidecar enabled (NetCDF will be written per rank)")
 
     # Resolve analysis-level parallelism against num_chains and CPU count
     num_chains = int(config.get("mcmc", {}).get("num_chains", 4))
@@ -412,21 +390,15 @@ def main():
         f"(num_chains={num_chains})"
     )
 
-    if workers > 1:
-        logger.info("Parallel model run: worker progress bars disabled.")
-
     # Sequential path (preserves rich logging for single-type or workers=1)
     if workers == 1:
         total_count = len(types_to_run)
         for index, (model_type, type_config) in enumerate(
             types_to_run.items(), start=1
         ):
-            logger.info("")
-            logger.info("=" * 60)
             logger.info(
                 f"RUNNING MODEL TYPE: {model_type.upper()} ({index}/{total_count})"
             )
-            logger.info("=" * 60)
             run_model_type(
                 model_type=model_type,
                 type_config=type_config,
@@ -459,11 +431,7 @@ def main():
                 fut.result()  # re-raises worker exceptions
                 logger.info(f"{mt} finished ({i}/{len(futures)})")
 
-    logger.info("")
-    logger.info("=" * 60)
-    logger.info("ANALYSIS COMPLETE")
-    logger.info("=" * 60)
-    logger.info(f"Results saved to: {output_dir}")
+    logger.info(f"Analysis complete. Results saved to: {output_dir}")
 
 
 if __name__ == "__main__":

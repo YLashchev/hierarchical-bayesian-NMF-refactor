@@ -97,9 +97,6 @@ def run_mcmc_inference(
     validate_data_dict(data_dict)
     rank = validate_rank(rank)
 
-    K, D, N = data_dict["Y"].shape
-    logger.debug(f"Running inference: K={K}, D={D}, N={N}, rank={rank}")
-
     mcmc_config = config.get("mcmc", {})
     num_chains = mcmc_config.get("num_chains", 4)
     num_warmup = mcmc_config.get("num_warmup", 1000)
@@ -129,19 +126,6 @@ def run_mcmc_inference(
         num_chains=num_chains,
         progress_bar=progress_bar,
         thinning=thinning,
-    )
-
-    logger.info("Starting MCMC inference")
-    logger.info(f"  Rank: {rank}")
-    logger.info(f"  Distribution: {outcome_dist}")
-    logger.info(f"  Chains: {num_chains}")
-    logger.info(
-        f"  Warmup: {num_warmup}, Samples: {num_samples}, Thinning: {thinning}"
-    )
-    logger.debug(f"  Data shape: {data_dict['Y'].shape}")
-    logger.debug(
-        f"  Model options: adjust_missingness={adjust_for_missingness}, "
-        f"model_treated={model_treated}, nb_disp={nb_disp}, sample_disp={sample_disp}"
     )
 
     start_time = time.time()
@@ -225,13 +209,9 @@ def generate_predictions(
     rng_key = random.PRNGKey(random_seed + 1)
     rng_key, rng_key_ = random.split(rng_key)
 
-    logger.info("Generating posterior predictive samples")
-    logger.debug(f"  Using {outcome_dist} distribution with nb_disp={nb_disp}")
-
     predictive = Predictive(model_fn, mcmc.get_samples(group_by_chain=False))
 
     # control_idx_array=None + model_treated=False => counterfactual (untreated) predictions
-    start_time = time.time()
     predictions = predictive(
         rng_key_,
         denominators=data_dict["denominators"],
@@ -244,8 +224,6 @@ def generate_predictions(
         model_treated=False,
     )["y_obs"]
     predictions = block_until_ready(predictions)
-    elapsed = time.time() - start_time
-    logger.debug(f"  Predictions generated in {elapsed:.1f}s")
 
     K, D, N = data_dict["denominators"].shape
     num_chains = mcmc.num_chains
@@ -260,6 +238,5 @@ def generate_predictions(
     samples_per_chain = total_samples // num_chains
 
     pred_mat = predictions.reshape(mcmc.num_chains, samples_per_chain, K, D, N)
-    logger.debug(f"  Prediction shape: {pred_mat.shape}")
 
     return pred_mat

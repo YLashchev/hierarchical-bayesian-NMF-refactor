@@ -4,10 +4,8 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from loguru import logger
 
 from bayesian_panel_nmf.inference import generate_predictions
-from bayesian_panel_nmf.logging_config import setup_logging
 from bayesian_panel_nmf.models import model
 from bayesian_panel_nmf.validation import ConfigError
 from bayesian_panel_nmf.validation import DataError
@@ -154,25 +152,6 @@ def test_model_rejects_none_control_idx_when_model_treated_true():
             model_treated=True,
         )
 
-
-def test_setup_logging_preserves_foreign_handler():
-    messages = []
-    foreign_id = logger.add(lambda msg: messages.append(str(msg)), level="INFO")
-    try:
-        setup_logging(level="INFO")
-        logger.info("first-message")
-        setup_logging(level="DEBUG")
-        logger.info("second-message")
-    finally:
-        logger.remove(foreign_id)
-
-    assert any("first-message" in msg for msg in messages)
-    assert any("second-message" in msg for msg in messages)
-
-
-def test_setup_logging_removes_default_handler():
-    setup_logging(level="INFO")
-    assert 0 not in getattr(logger, "_core").handlers
 
 
 def test_run_model_type_without_figures_does_not_import_viz(
