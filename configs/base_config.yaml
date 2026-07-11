@@ -145,5 +145,4 @@ output:
   clean: false
   save_traces: false
   # Parent-process heartbeat for parallel runs (workers > 1).
-  progress_interval_seconds: 60
   filename_pattern: "{distribution}_{type}_{rank}"

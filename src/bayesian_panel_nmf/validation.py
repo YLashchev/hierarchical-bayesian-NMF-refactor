@@ -156,13 +156,6 @@ def _validate_config_boolean_flags(
                 "config['output.ppc_acf_lags'] must contain positive integers"
             )
 
-    progress_interval = output_cfg.get("progress_interval_seconds")
-    if progress_interval is not None:
-        if not isinstance(progress_interval, int) or progress_interval <= 0:
-            raise ConfigError(
-                "config['output.progress_interval_seconds'] must be a positive integer"
-            )
-
 
 def _validate_data_schema(config: dict) -> tuple[dict, dict]:
     if "data" not in config:

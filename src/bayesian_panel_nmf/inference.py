@@ -131,20 +131,18 @@ def run_mcmc_inference(
         thinning=thinning,
     )
 
-    worker_log_level = config.get("output", {}).get("worker_log_level")
-    if worker_log_level != "WARNING":
-        logger.info("Starting MCMC inference")
-        logger.info(f"  Rank: {rank}")
-        logger.info(f"  Distribution: {outcome_dist}")
-        logger.info(f"  Chains: {num_chains}")
-        logger.info(
-            f"  Warmup: {num_warmup}, Samples: {num_samples}, Thinning: {thinning}"
-        )
-        logger.debug(f"  Data shape: {data_dict['Y'].shape}")
-        logger.debug(
-            f"  Model options: adjust_missingness={adjust_for_missingness}, "
-            f"model_treated={model_treated}, nb_disp={nb_disp}, sample_disp={sample_disp}"
-        )
+    logger.info("Starting MCMC inference")
+    logger.info(f"  Rank: {rank}")
+    logger.info(f"  Distribution: {outcome_dist}")
+    logger.info(f"  Chains: {num_chains}")
+    logger.info(
+        f"  Warmup: {num_warmup}, Samples: {num_samples}, Thinning: {thinning}"
+    )
+    logger.debug(f"  Data shape: {data_dict['Y'].shape}")
+    logger.debug(
+        f"  Model options: adjust_missingness={adjust_for_missingness}, "
+        f"model_treated={model_treated}, nb_disp={nb_disp}, sample_disp={sample_disp}"
+    )
 
     start_time = time.time()
     mcmc.run(
@@ -164,8 +162,7 @@ def run_mcmc_inference(
     # JAX dispatch is asynchronous; force samples ready before logging runtime.
     block_until_ready(mcmc.get_samples(group_by_chain=False))
     elapsed = time.time() - start_time
-    if worker_log_level != "WARNING":
-        logger.info(f"MCMC completed in {elapsed:.1f}s ({elapsed / 60:.1f} min)")
+    logger.info(f"MCMC completed in {elapsed:.1f}s ({elapsed / 60:.1f} min)")
 
     return mcmc
 
@@ -228,10 +225,8 @@ def generate_predictions(
     rng_key = random.PRNGKey(random_seed + 1)
     rng_key, rng_key_ = random.split(rng_key)
 
-    worker_log_level = config.get("output", {}).get("worker_log_level")
-    if worker_log_level != "WARNING":
-        logger.info("Generating posterior predictive samples")
-        logger.debug(f"  Using {outcome_dist} distribution with nb_disp={nb_disp}")
+    logger.info("Generating posterior predictive samples")
+    logger.debug(f"  Using {outcome_dist} distribution with nb_disp={nb_disp}")
 
     predictive = Predictive(model_fn, mcmc.get_samples(group_by_chain=False))
 
@@ -250,8 +245,7 @@ def generate_predictions(
     )["y_obs"]
     predictions = block_until_ready(predictions)
     elapsed = time.time() - start_time
-    if worker_log_level != "WARNING":
-        logger.debug(f"  Predictions generated in {elapsed:.1f}s")
+    logger.debug(f"  Predictions generated in {elapsed:.1f}s")
 
     K, D, N = data_dict["denominators"].shape
     num_chains = mcmc.num_chains

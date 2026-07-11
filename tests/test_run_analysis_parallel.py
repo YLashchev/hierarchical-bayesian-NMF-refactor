@@ -270,9 +270,7 @@ def test_run_model_type_without_figures_does_not_import_viz(
 
 
 
-def test_main_parallel_branch_disables_worker_progress_bars_and_emits_heartbeat(
-    monkeypatch, tmp_path: Path
-):
+def test_main_parallel_branch_disables_worker_progress_bars(monkeypatch, tmp_path: Path):
     import yaml  # type: ignore[import-untyped]
 
     config_path = tmp_path / "cfg.yaml"
@@ -297,7 +295,6 @@ def test_main_parallel_branch_disables_worker_progress_bars_and_emits_heartbeat(
                 },
                 "mcmc": {"num_chains": 1},
                 "parallel": {"analysis_workers": 2},
-                "output": {"progress_interval_seconds": 3},
             }
         )
     )
@@ -305,9 +302,6 @@ def test_main_parallel_branch_disables_worker_progress_bars_and_emits_heartbeat(
     monkeypatch.setattr(run_analysis, "resolve_analysis_workers", lambda *a, **k: 2)
 
     progress_flags = []
-    progress_states = []
-    pending_future = None
-    done_future = None
 
     class FakeFuture:
         def __init__(self, name):
@@ -327,75 +321,18 @@ def test_main_parallel_branch_disables_worker_progress_bars_and_emits_heartbeat(
             return False
 
         def submit(self, fn, **kwargs):
-            nonlocal pending_future, done_future
             progress_flags.append(kwargs["disable_progress_bar"])
-            progress_states.append(kwargs["progress_state"])
-            future = FakeFuture(kwargs["model_type"])
-            if pending_future is None:
-                pending_future = future
-            else:
-                done_future = future
-            return future
+            return FakeFuture(kwargs["model_type"])
 
-    wait_calls = []
-
-    def fake_wait_for_completed_futures(pending, timeout):
-        wait_calls.append(timeout)
-        if len(wait_calls) == 1:
-            return set(), pending
-        return {done_future, pending_future}, set()
-
-    class FakeManager:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return False
-
-        def dict(self, initial):
-            return dict(initial)
-
-    heartbeats = []
-    monkeypatch.setattr(run_analysis, "Manager", FakeManager)
     monkeypatch.setattr(run_analysis, "ProcessPoolExecutor", FakePool)
     monkeypatch.setattr(
-        run_analysis, "_wait_for_completed_futures", fake_wait_for_completed_futures
-    )
-
-    def fake_log_parallel_heartbeat(
-        pending, futures, completed_count, total_count, started_at, progress_state=None
-    ):
-        assert progress_state is not None
-        heartbeats.append(
-            (len(pending), completed_count, total_count, dict(progress_state))
-        )
-
-    monkeypatch.setattr(
-        run_analysis, "_log_parallel_heartbeat", fake_log_parallel_heartbeat
+        run_analysis, "as_completed", lambda futures: list(futures.keys())
     )
     monkeypatch.setattr("sys.argv", ["run_analysis.py", "--config", str(config_path)])
 
     run_analysis.main()
 
     assert progress_flags == [True, True]
-    assert wait_calls == [3, 3]
-    assert progress_states[0] is progress_states[1]
-    assert heartbeats == [(2, 0, 2, {"a": "queued", "b": "queued"})]
-
-
-def test_format_progress_details_includes_current_stage():
-    class Future:
-        pass
-
-    age = Future()
-    total = Future()
-    details = run_analysis._format_progress_details(
-        {age, total},
-        {age: "age", total: "total"},
-        {"age": "MCMC rank 5", "total": "writing draws rank 5"},
-    )
-
-    assert details == "age=MCMC rank 5; total=writing draws rank 5"
 
 
 def test_main_dispatches_types_to_process_pool_when_workers_gt_one(
@@ -463,9 +400,7 @@ def test_main_dispatches_types_to_process_pool_when_workers_gt_one(
 
     monkeypatch.setattr(run_analysis, "ProcessPoolExecutor", FakePool)
     monkeypatch.setattr(
-        run_analysis,
-        "_wait_for_completed_futures",
-        lambda pending, timeout: (set(pending), set()),
+        run_analysis, "as_completed", lambda futures: list(futures.keys())
     )
 
     monkeypatch.setattr("sys.argv", ["run_analysis.py", "--config", str(config_path)])

@@ -18,11 +18,11 @@ Usage:
 import argparse
 import json
 import shutil
+import sys
 import time
 import arviz as az
 import yaml  # type: ignore[import-untyped]
-from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
-from multiprocessing import Manager
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 from loguru import logger
@@ -92,10 +92,6 @@ def _format_elapsed(seconds: float) -> str:
     return f"{secs}s"
 
 
-def _get_progress_interval_seconds(config: dict) -> int:
-    return int(config.get("output", {}).get("progress_interval_seconds", 60))
-
-
 def _get_outcome_name(config: dict) -> str:
     """Derive outcome name for filename placeholder from config.
 
@@ -118,41 +114,6 @@ def _get_outcome_name(config: dict) -> str:
         return prefix or "births"
 
     return "births"
-
-
-def _wait_for_completed_futures(pending, timeout: int):
-    return wait(pending, timeout=timeout, return_when=FIRST_COMPLETED)
-
-
-def _set_progress(progress_state, model_type: str, status: str) -> None:
-    if progress_state is not None:
-        progress_state[model_type] = status
-
-
-def _format_progress_details(pending, futures: dict, progress_state) -> str:
-    details = []
-    for fut in pending:
-        model_type = futures[fut]
-        status = (
-            progress_state.get(model_type, "queued") if progress_state else "queued"
-        )
-        details.append(f"{model_type}={status}")
-    return "; ".join(sorted(details))
-
-
-def _log_parallel_heartbeat(
-    pending,
-    futures: dict,
-    completed_count: int,
-    total_count: int,
-    started_at: float,
-    progress_state=None,
-) -> None:
-    running = _format_progress_details(pending, futures, progress_state)
-    logger.info(
-        f"Still running after {_format_elapsed(time.monotonic() - started_at)}: "
-        f"{completed_count}/{total_count} complete; {running}"
-    )
 
 
 def _clean_scoped_samples(mcmc, model_type: str, rank: int) -> dict:
@@ -205,21 +166,21 @@ def run_model_type(
     log_level: str = "INFO",
     configure_logging: bool = True,
     disable_progress_bar: bool = False,
-    progress_state=None,
 ) -> None:
     """Run analysis for a single model type across specified ranks."""
     if configure_logging:
         setup_logging(level=log_level)
 
     if disable_progress_bar:
-        # Mutate shallow copies so parallel workers don't race on shared state.
-        # Suppress lower-level data/inference logs; run_model_type emits per-model
-        # stage logs and parent process emits heartbeat/progress.
+        # Mutate a shallow copy so parallel workers don't race on shared state.
         config = {
             **config,
             "mcmc": {**config.get("mcmc", {}), "progress_bar": False},
-            "output": {**config.get("output", {}), "worker_log_level": "WARNING"},
         }
+        # Parallel worker: this process's own logger only, filtered to WARNING
+        # so per-model stage logs don't interleave across concurrent workers.
+        logger.remove()
+        logger.add(sys.stderr, level="WARNING")
 
     base_output_dir = Path(config["data"]["output_dir"])
     output_config = config.get("output", {})
@@ -237,12 +198,10 @@ def run_model_type(
     exclude_units = type_config.get("exclude_units")
 
     model_started_at = time.monotonic()
-    _set_progress(progress_state, model_type, "starting")
     logger.info(
         f"{model_type}: starting groups={groups}, ranks={ranks}, output={type_output_dir}"
     )
 
-    _set_progress(progress_state, model_type, "loading data")
     logger.info(f"{model_type}: loading and preparing data")
     load_started_at = time.monotonic()
     data_dict = load_and_prepare(
@@ -253,7 +212,6 @@ def run_model_type(
         type_config=type_config,
     )
 
-    _set_progress(progress_state, model_type, "data ready")
     logger.info(
         f"{model_type}: data ready in "
         f"{_format_elapsed(time.monotonic() - load_started_at)} "
@@ -276,10 +234,8 @@ def run_model_type(
             rank=rank,
         )
 
-        _set_progress(progress_state, model_type, f"MCMC rank {rank}")
         logger.info(f"{model_type} rank {rank}: MCMC starting")
         mcmc = run_mcmc_inference(data_dict, model, rank, config)
-        _set_progress(progress_state, model_type, f"MCMC rank {rank} finished")
         logger.info(f"{model_type} rank {rank}: MCMC finished")
 
         clean_samples = _clean_scoped_samples(mcmc, model_type, rank)
@@ -306,7 +262,6 @@ def run_model_type(
         )
 
         if save_traces:
-            _set_progress(progress_state, model_type, f"traces rank {rank}")
             logger.info(f"{model_type} rank {rank}: saving trace sidecar (NetCDF)")
             traces_file = type_output_dir / f"{filename}_traces.nc"
             trace_clean_samples = _clean_scoped_samples(mcmc, model_type, rank)
@@ -318,18 +273,15 @@ def run_model_type(
                 f"({size_mb:.1f} MB)"
             )
 
-        _set_progress(progress_state, model_type, f"posterior prediction rank {rank}")
         logger.info(f"{model_type} rank {rank}: posterior prediction starting")
         predictions = generate_predictions(mcmc, data_dict, model, rank, config)
         logger.info(f"{model_type} rank {rank}: posterior prediction finished")
 
-        _set_progress(progress_state, model_type, f"formatting draws rank {rank}")
         logger.info(f"{model_type} rank {rank}: formatting draws")
         samples = mcmc.get_samples(group_by_chain=True)
         draws_df = format_draws(samples, predictions, data_dict)
 
         draws_file = type_output_dir / f"{filename}.csv"
-        _set_progress(progress_state, model_type, f"writing draws rank {rank}")
         logger.info(f"{model_type} rank {rank}: writing draws to {draws_file}")
         draws_df.to_csv(draws_file, index=False)
         size_mb = draws_file.stat().st_size / 1024**2
@@ -342,12 +294,10 @@ def run_model_type(
         report_dir.mkdir(parents=True, exist_ok=True)
 
         if output_config.get("figures", False):
-            _set_progress(progress_state, model_type, f"reporting/figures rank {rank}")
             logger.info(f"{model_type} rank {rank}: reporting/figures starting")
             _run_reporting(draws_df, report_dir, output_config)
             logger.info(f"{model_type} rank {rank}: reporting/figures finished")
 
-    _set_progress(progress_state, model_type, "complete")
     logger.info(
         f"{model_type}: complete in {_format_elapsed(time.monotonic() - model_started_at)}"
     )
@@ -396,12 +346,6 @@ def main():
         "--save-traces",
         action="store_true",
         help="Save full posterior draws as NetCDF sidecar (arviz InferenceData)",
-    )
-    parser.add_argument(
-        "--progress-interval-seconds",
-        type=int,
-        default=None,
-        help="Parallel-run heartbeat interval (default: output.progress_interval_seconds or 60)",
     )
     args = parser.parse_args()
 
@@ -462,18 +406,9 @@ def main():
         f"Running {len(types_to_run)} model type(s) with {workers} worker(s) "
         f"(requested={requested_workers}, num_chains={num_chains})"
     )
-    progress_interval_seconds = (
-        args.progress_interval_seconds
-        if args.progress_interval_seconds is not None
-        else _get_progress_interval_seconds(config)
-    )
-    progress_interval_seconds = max(1, progress_interval_seconds)
 
     if workers > 1:
-        logger.info(
-            "Parallel model run: worker progress bars disabled; "
-            f"status heartbeat every {progress_interval_seconds}s."
-        )
+        logger.info("Parallel model run: worker progress bars disabled.")
 
     # Sequential path (preserves rich logging for single-type or workers=1)
     if workers == 1:
@@ -497,68 +432,27 @@ def main():
                 configure_logging=False,
             )
     else:
-        # Parallel path: each worker reconfigures its own logger + progress bars disabled
-        # to keep stdout readable when N>1 subprocesses print concurrently.
-        with Manager() as manager:
-            progress_state = manager.dict(
-                {model_type: "queued" for model_type in types_to_run}
-            )
-            with ProcessPoolExecutor(max_workers=workers) as pool:
-                futures = {
-                    pool.submit(
-                        run_model_type,
-                        model_type=model_type,
-                        type_config=type_config,
-                        config=config,
-                        rank_override=args.rank,
-                        save_traces=save_traces,
-                        log_level=log_level,
-                        configure_logging=True,
-                        disable_progress_bar=True,
-                        progress_state=progress_state,
-                    ): model_type
-                    for model_type, type_config in types_to_run.items()
-                }
-                pending = set(futures)
-                completed_count = 0
-                total_count = len(futures)
-                parallel_started_at = time.monotonic()
-                while pending:
-                    done, pending = _wait_for_completed_futures(
-                        pending, progress_interval_seconds
-                    )
-                    if not done:
-                        _log_parallel_heartbeat(
-                            pending,
-                            futures,
-                            completed_count,
-                            total_count,
-                            parallel_started_at,
-                            progress_state,
-                        )
-                        continue
-
-                    for fut in done:
-                        mt = futures[fut]
-                        try:
-                            fut.result()
-                            completed_count += 1
-                            logger.info(
-                                f"✓ {mt} finished ({completed_count}/{total_count})"
-                            )
-                        except Exception as e:
-                            progress_state[mt] = "failed"
-                            logger.error(f"✗ {mt} failed: {e}")
-                            raise
-
-                    if pending:
-                        remaining = _format_progress_details(
-                            pending, futures, progress_state
-                        )
-                        logger.info(
-                            f"Progress: {completed_count}/{total_count} complete; "
-                            f"still running: {remaining}"
-                        )
+        # Parallel path: each worker reconfigures its own logger + progress bars
+        # disabled to keep stdout readable when N>1 subprocesses print concurrently.
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(
+                    run_model_type,
+                    model_type=model_type,
+                    type_config=type_config,
+                    config=config,
+                    rank_override=args.rank,
+                    save_traces=save_traces,
+                    log_level=log_level,
+                    configure_logging=True,
+                    disable_progress_bar=True,
+                ): model_type
+                for model_type, type_config in types_to_run.items()
+            }
+            for i, fut in enumerate(as_completed(futures), 1):
+                mt = futures[fut]
+                fut.result()  # re-raises worker exceptions
+                logger.info(f"{mt} finished ({i}/{len(futures)})")
 
     logger.info("")
     logger.info("=" * 60)

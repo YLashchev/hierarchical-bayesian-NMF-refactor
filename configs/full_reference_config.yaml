@@ -131,7 +131,6 @@ output:
   print_target_table: true # Print the target-unit headline table (Table 1)
 
   # --- Progress heartbeat (parallel runs only) ---
-  progress_interval_seconds: 60
 
   # --- Synthetic aggregate units (reporting/PPC only; NOT fed to model) ---
   # aggregate_units:
