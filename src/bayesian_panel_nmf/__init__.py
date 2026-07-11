@@ -25,10 +25,6 @@ try:
     _HAS_VIZ = importlib.util.find_spec("bayesian_panel_nmf.visualization") is not None
     if _HAS_VIZ:
         from bayesian_panel_nmf.visualization import (  # noqa: F401
-            make_abs_ppc_plot,
-            make_acf_ppc_plot,
-            make_rmse_ppc_plot,
-            make_unit_corr_ppc_plot,
             make_all_ppc_plots,
             make_raw_rate_plot,
             make_group_comparison_plot,
@@ -60,10 +56,6 @@ __all__ = [
 
 # Extend __all__ with viz names only if available
 _VIZ_NAMES = [
-    "make_abs_ppc_plot",
-    "make_acf_ppc_plot",
-    "make_rmse_ppc_plot",
-    "make_unit_corr_ppc_plot",
     "make_all_ppc_plots",
     "make_raw_rate_plot",
     "make_group_comparison_plot",
