@@ -121,3 +121,7 @@ oracle_pyright_review.md
 jama_supplement_analysis.md
 pyrightconfig.json
 page*.png
+
+# Refactor baseline fixtures (local-only, deleted after verification)
+tests/fixtures/pre_refactor_*
+tests/fixtures/compare_posterior.py
