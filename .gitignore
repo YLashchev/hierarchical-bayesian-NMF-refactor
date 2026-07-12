@@ -112,5 +112,6 @@ ty.toml
 # Local git worktrees
 .worktrees/
 
-# Local git worktrees
-.worktrees/
+# Refactor baseline fixtures (local-only, deleted after verification)
+tests/fixtures/pre_refactor_*
+tests/fixtures/compare_posterior.py

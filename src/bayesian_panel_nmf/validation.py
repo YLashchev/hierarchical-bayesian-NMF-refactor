@@ -122,7 +122,6 @@ def _validate_config_boolean_flags(
     for flag in (
         "figures",
         "clean",
-        "save_diagnostics",
         "save_traces",
         "print_tables",
         "print_target_table",
@@ -155,13 +154,6 @@ def _validate_config_boolean_flags(
         if not all(isinstance(lag, int) and lag > 0 for lag in ppc_acf_lags):
             raise ConfigError(
                 "config['output.ppc_acf_lags'] must contain positive integers"
-            )
-
-    progress_interval = output_cfg.get("progress_interval_seconds")
-    if progress_interval is not None:
-        if not isinstance(progress_interval, int) or progress_interval <= 0:
-            raise ConfigError(
-                "config['output.progress_interval_seconds'] must be a positive integer"
             )
 
 
@@ -356,9 +348,3 @@ def validate_predictions(
                 f"samples['mu_ctrl'] shape {samples['mu_ctrl'].shape}"
             )
 
-
-# Backwards compatibility aliases
-ValidationError = DataError
-ConfigValidationError = ConfigError
-DataValidationError = DataError
-ArrayShapeError = DataError

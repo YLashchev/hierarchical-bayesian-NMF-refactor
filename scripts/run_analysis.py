@@ -5,27 +5,25 @@ This script:
 1. Loads and preprocesses panel data using schema-based configuration
 2. Runs Bayesian inference for specified model types and ranks
 3. Saves results in tidy format with standardized column names
-4. Optionally extracts and saves MCMC diagnostics (ESS, R-hat, divergences)
-
-Diagnostics are skipped by default because FFT-based ESS computation is
-expensive for models with many parameters. Enable via --save-diagnostics or
-output.save_diagnostics: true in the config.
+4. Always computes and saves an ArviZ-based convergence gate (ESS, R-hat,
+   divergences) next to the draws CSV
 
 Usage:
     python scripts/run_analysis.py --config configs/nativity_config.yaml
     python scripts/run_analysis.py --config configs/nativity_config.yaml --type groups --rank 10
     python scripts/run_analysis.py --config configs/nativity_config.yaml --verbose
     python scripts/run_analysis.py --config configs/nativity_config.yaml --log-file logs/analysis.log
-    python scripts/run_analysis.py --config configs/nativity_config.yaml --save-diagnostics
 """
 
 import argparse
 import json
+import os
 import shutil
+import sys
 import time
+import arviz as az
 import yaml  # type: ignore[import-untyped]
-from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
-from multiprocessing import Manager
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 from loguru import logger
@@ -35,16 +33,11 @@ from bayesian_panel_nmf.output import format_draws
 from bayesian_panel_nmf.inference import (
     run_mcmc_inference,
     generate_predictions,
-    extract_diagnostics,
-    check_convergence,
+    convergence_summary,
 )
 from bayesian_panel_nmf.models import model
 from bayesian_panel_nmf.validation import ConfigError, validate_config
 from bayesian_panel_nmf.logging_config import setup_logging
-from bayesian_panel_nmf.parallel import (
-    get_requested_analysis_workers,
-    resolve_analysis_workers,
-)
 
 
 def _validate_run_analysis_config(config: dict) -> None:
@@ -96,8 +89,17 @@ def _format_elapsed(seconds: float) -> str:
     return f"{secs}s"
 
 
-def _get_progress_interval_seconds(config: dict) -> int:
-    return int(config.get("output", {}).get("progress_interval_seconds", 60))
+def _resolve_workers(config: dict, num_chains: int, n_types: int) -> int:
+    """Resolve ``parallel.analysis_workers`` against CPU count and chain count.
+
+    ``analysis_workers``: 1 = sequential (default), -1 = auto (max safe), N = explicit.
+    Caps so ``workers x num_chains`` does not oversubscribe the machine, and never
+    exceeds the number of model types being run.
+    """
+    requested = int(config.get("parallel", {}).get("analysis_workers", 1) or 1)
+    max_safe = max(1, (os.cpu_count() or 1) // max(1, num_chains))
+    workers = max_safe if requested == -1 else max(1, requested)
+    return max(1, min(workers, max_safe, n_types))
 
 
 def _get_outcome_name(config: dict) -> str:
@@ -124,39 +126,28 @@ def _get_outcome_name(config: dict) -> str:
     return "births"
 
 
-def _wait_for_completed_futures(pending, timeout: int):
-    return wait(pending, timeout=timeout, return_when=FIRST_COMPLETED)
+def _draws_filename(config: dict, model_type: str, rank: int) -> str:
+    """Fixed scheme: {distribution}_{outcome}_{type}_{rank}."""
+    dist = config.get("model", {}).get("outcome_distribution", "NB")
+    return f"{dist}_{_get_outcome_name(config)}_{model_type}_{rank}"
 
 
-def _set_progress(progress_state, model_type: str, status: str) -> None:
-    if progress_state is not None:
-        progress_state[model_type] = status
+def _clean_scoped_samples(mcmc, model_type: str, rank: int) -> dict:
+    """Drop sample keys containing '/' (from numpyro.handlers.scope).
 
-
-def _format_progress_details(pending, futures: dict, progress_state) -> str:
-    details = []
-    for fut in pending:
-        model_type = futures[fut]
-        status = (
-            progress_state.get(model_type, "queued") if progress_state else "queued"
+    xarray DataTree rejects '/' in variable names (path-separator conflict),
+    so both the convergence gate and the trace sidecar need this filter
+    before handing samples to az.from_dict.
+    """
+    raw_samples = mcmc.get_samples(group_by_chain=True)
+    clean_samples = {k: v for k, v in raw_samples.items() if "/" not in k}
+    if len(clean_samples) < len(raw_samples):
+        dropped = set(raw_samples) - set(clean_samples)
+        logger.debug(
+            f"{model_type} rank {rank}: excluded {len(dropped)} scoped "
+            f"sample keys: {sorted(dropped)}"
         )
-        details.append(f"{model_type}={status}")
-    return "; ".join(sorted(details))
-
-
-def _log_parallel_heartbeat(
-    pending,
-    futures: dict,
-    completed_count: int,
-    total_count: int,
-    started_at: float,
-    progress_state=None,
-) -> None:
-    running = _format_progress_details(pending, futures, progress_state)
-    logger.info(
-        f"Still running after {_format_elapsed(time.monotonic() - started_at)}: "
-        f"{completed_count}/{total_count} complete; {running}"
-    )
+    return clean_samples
 
 
 def _run_reporting(
@@ -187,26 +178,25 @@ def run_model_type(
     type_config: dict,
     config: dict,
     rank_override: int | None = None,
-    save_diagnostics: bool = False,
     save_traces: bool = False,
     log_level: str = "INFO",
     configure_logging: bool = True,
     disable_progress_bar: bool = False,
-    progress_state=None,
 ) -> None:
     """Run analysis for a single model type across specified ranks."""
     if configure_logging:
         setup_logging(level=log_level)
 
     if disable_progress_bar:
-        # Mutate shallow copies so parallel workers don't race on shared state.
-        # Suppress lower-level data/inference logs; run_model_type emits per-model
-        # stage logs and parent process emits heartbeat/progress.
+        # Mutate a shallow copy so parallel workers don't race on shared state.
         config = {
             **config,
             "mcmc": {**config.get("mcmc", {}), "progress_bar": False},
-            "output": {**config.get("output", {}), "worker_log_level": "WARNING"},
         }
+        # Parallel worker: this process's own logger only, filtered to WARNING
+        # so per-model stage logs don't interleave across concurrent workers.
+        logger.remove()
+        logger.add(sys.stderr, level="WARNING")
 
     base_output_dir = Path(config["data"]["output_dir"])
     output_config = config.get("output", {})
@@ -224,13 +214,6 @@ def run_model_type(
     exclude_units = type_config.get("exclude_units")
 
     model_started_at = time.monotonic()
-    _set_progress(progress_state, model_type, "starting")
-    logger.info(
-        f"{model_type}: starting groups={groups}, ranks={ranks}, output={type_output_dir}"
-    )
-
-    _set_progress(progress_state, model_type, "loading data")
-    logger.info(f"{model_type}: loading and preparing data")
     load_started_at = time.monotonic()
     data_dict = load_and_prepare(
         filepath=config["data"]["input_file"],
@@ -240,7 +223,6 @@ def run_model_type(
         type_config=type_config,
     )
 
-    _set_progress(progress_state, model_type, "data ready")
     logger.info(
         f"{model_type}: data ready in "
         f"{_format_elapsed(time.monotonic() - load_started_at)} "
@@ -251,104 +233,57 @@ def run_model_type(
     df_preprocessed = data_dict["df_preprocessed"]
     preprocessed_file = type_output_dir / f"df_{model_type}.csv"
     df_preprocessed.to_csv(preprocessed_file, index=False)
-    logger.info(f"{model_type}: wrote preprocessed data to {preprocessed_file}")
 
     for rank in ranks:
-        _set_progress(progress_state, model_type, f"MCMC rank {rank}")
-        logger.info(f"{model_type} rank {rank}: MCMC starting")
+        filename = _draws_filename(config, model_type, rank)
+
+        mcmc_started_at = time.monotonic()
         mcmc = run_mcmc_inference(data_dict, model, rank, config)
-        _set_progress(progress_state, model_type, f"MCMC rank {rank} finished")
-        logger.info(f"{model_type} rank {rank}: MCMC finished")
+        logger.info(
+            f"{model_type} rank {rank}: MCMC finished in "
+            f"{_format_elapsed(time.monotonic() - mcmc_started_at)}"
+        )
 
-        if save_diagnostics:
-            _set_progress(progress_state, model_type, f"diagnostics rank {rank}")
-            logger.info(f"{model_type} rank {rank}: diagnostics starting")
-            diagnostics = extract_diagnostics(mcmc)
-            check_convergence(diagnostics)
-
-            dist = config["model"].get("outcome_distribution", "NB")
-            pattern = output_config.get(
-                "filename_pattern", "{distribution}_{type}_{rank}"
+        clean_samples = _clean_scoped_samples(mcmc, model_type, rank)
+        extra_fields = mcmc.get_extra_fields()
+        idata_dict = {"posterior": clean_samples}
+        if "diverging" in extra_fields:
+            # get_extra_fields() is flat (chains*samples,); reshape to match the
+            # (chain, draw) samples returned by get_samples(group_by_chain=True).
+            diverging = extra_fields["diverging"].reshape(mcmc.num_chains, -1)
+            idata_dict["sample_stats"] = {"diverging": diverging}
+        idata = az.from_dict(idata_dict)
+        gate = convergence_summary(idata)
+        if not gate["converged"]:
+            logger.warning(
+                f"{model_type} rank {rank}: convergence gate FAILED — "
+                f"max R-hat={gate['rhat_max']:.4f}, min bulk ESS={gate['ess_bulk_min']:.0f}, "
+                f"min tail ESS={gate['ess_tail_min']:.0f}, divergences={gate['divergences']}"
             )
-            diag_filename = pattern.format(
-                distribution=dist,
-                outcome=_get_outcome_name(config),
-                type=model_type,
-                rank=rank,
-            )
-            diagnostics_file = type_output_dir / f"{diag_filename}_diagnostics.json"
-            diag_output = {
-                "n_eff_min": diagnostics["n_eff_min"],
-                "n_eff_mean": diagnostics["n_eff_mean"],
-                "rhat_max": diagnostics["rhat_max"],
-                "rhat_mean": diagnostics["rhat_mean"],
-                "divergences": diagnostics["divergences"],
-                "converged": diagnostics["converged"],
-            }
-            with open(diagnostics_file, "w") as f:
-                json.dump(diag_output, f, indent=2)
-            logger.info(
-                f"{model_type} rank {rank}: wrote diagnostics to {diagnostics_file}"
-            )
+        convergence_file = type_output_dir / f"{filename}_convergence.json"
+        with open(convergence_file, "w") as f:
+            json.dump(gate, f, indent=2)
 
         if save_traces:
-            import arviz as az
-
-            _set_progress(progress_state, model_type, f"traces rank {rank}")
-            logger.info(f"{model_type} rank {rank}: saving trace sidecar (NetCDF)")
-            dist = config["model"].get("outcome_distribution", "NB")
-            pattern = output_config.get(
-                "filename_pattern", "{distribution}_{type}_{rank}"
-            )
-            traces_filename = pattern.format(
-                distribution=dist,
-                outcome=_get_outcome_name(config),
-                type=model_type,
-                rank=rank,
-            )
-            traces_file = type_output_dir / f"{traces_filename}_traces.nc"
-            # Filter out samples whose names contain '/' (from numpyro.handlers.scope)
-            # as xarray DataTree rejects '/' in variable names (path-separator conflict).
-            raw_samples = mcmc.get_samples(group_by_chain=True)
-            clean_samples = {k: v for k, v in raw_samples.items() if "/" not in k}
-            if len(clean_samples) < len(raw_samples):
-                dropped = set(raw_samples) - set(clean_samples)
-                logger.debug(
-                    f"{model_type} rank {rank}: excluded {len(dropped)} scoped "
-                    f"sample keys from trace sidecar: {sorted(dropped)}"
-                )
-            idata = az.from_dict({"posterior": clean_samples})
-            idata.to_netcdf(str(traces_file), engine="h5netcdf")
+            traces_file = type_output_dir / f"{filename}_traces.nc"
+            trace_clean_samples = _clean_scoped_samples(mcmc, model_type, rank)
+            trace_idata = az.from_dict({"posterior": trace_clean_samples})
+            trace_idata.to_netcdf(str(traces_file), engine="h5netcdf")
             size_mb = traces_file.stat().st_size / 1024**2
             logger.info(
                 f"{model_type} rank {rank}: wrote trace sidecar to {traces_file} "
                 f"({size_mb:.1f} MB)"
             )
 
-        _set_progress(progress_state, model_type, f"posterior prediction rank {rank}")
-        logger.info(f"{model_type} rank {rank}: posterior prediction starting")
         predictions = generate_predictions(mcmc, data_dict, model, rank, config)
-        logger.info(f"{model_type} rank {rank}: posterior prediction finished")
 
-        _set_progress(progress_state, model_type, f"formatting draws rank {rank}")
-        logger.info(f"{model_type} rank {rank}: formatting draws")
         samples = mcmc.get_samples(group_by_chain=True)
         draws_df = format_draws(samples, predictions, data_dict)
 
-        dist = config["model"].get("outcome_distribution", "NB")
-        pattern = output_config.get("filename_pattern", "{distribution}_{type}_{rank}")
-        filename = pattern.format(
-            distribution=dist,
-            outcome=_get_outcome_name(config),
-            type=model_type,
-            rank=rank,
-        )
         draws_file = type_output_dir / f"{filename}.csv"
-        _set_progress(progress_state, model_type, f"writing draws rank {rank}")
-        logger.info(f"{model_type} rank {rank}: writing draws to {draws_file}")
         draws_df.to_csv(draws_file, index=False)
         size_mb = draws_file.stat().st_size / 1024**2
-        logger.info(f"{model_type} rank {rank}: wrote draws ({size_mb:.1f} MB)")
+        logger.info(f"{model_type} rank {rank}: wrote draws to {draws_file} ({size_mb:.1f} MB)")
 
         # Multi-rank runs nest under rank_<rank>/ so figs don't collide
         report_dir = (
@@ -357,12 +292,8 @@ def run_model_type(
         report_dir.mkdir(parents=True, exist_ok=True)
 
         if output_config.get("figures", False):
-            _set_progress(progress_state, model_type, f"reporting/figures rank {rank}")
-            logger.info(f"{model_type} rank {rank}: reporting/figures starting")
             _run_reporting(draws_df, report_dir, output_config)
-            logger.info(f"{model_type} rank {rank}: reporting/figures finished")
 
-    _set_progress(progress_state, model_type, "complete")
     logger.info(
         f"{model_type}: complete in {_format_elapsed(time.monotonic() - model_started_at)}"
     )
@@ -393,9 +324,6 @@ def main():
         "--rank", type=int, default=None, help="Model rank (overrides config)"
     )
     parser.add_argument(
-        "--no-aggregate", action="store_true", help="Skip temporal aggregation"
-    )
-    parser.add_argument(
         "--verbose",
         "-v",
         action="store_true",
@@ -408,20 +336,9 @@ def main():
         help="Path to log file (enables file logging)",
     )
     parser.add_argument(
-        "--save-diagnostics",
-        action="store_true",
-        help="Save MCMC diagnostics to JSON file",
-    )
-    parser.add_argument(
         "--save-traces",
         action="store_true",
         help="Save full posterior draws as NetCDF sidecar (arviz InferenceData)",
-    )
-    parser.add_argument(
-        "--progress-interval-seconds",
-        type=int,
-        default=None,
-        help="Parallel-run heartbeat interval (default: output.progress_interval_seconds or 60)",
     )
     args = parser.parse_args()
 
@@ -432,18 +349,6 @@ def main():
     # Load and validate configuration
     config = load_config(args.config)
     _validate_run_analysis_config(config)
-    logger.info("=" * 60)
-    logger.info("BAYESIAN PANEL NMF ANALYSIS")
-    logger.info("=" * 60)
-    logger.debug(f"Config file: {args.config}")
-    logger.debug(f"Log level: {log_level}")
-
-    # Handle --no-aggregate flag by modifying config
-    if args.no_aggregate:
-        config = config.copy()
-        config["data"] = config["data"].copy()
-        config["data"]["aggregation"] = {"enabled": False}
-        logger.info("Temporal aggregation disabled via --no-aggregate flag")
 
     # Setup output directory
     output_dir = Path(config["data"]["output_dir"])
@@ -452,7 +357,6 @@ def main():
     except OSError as e:
         logger.error(f"Failed to create directory {output_dir}: {e}")
         raise
-    logger.debug(f"Output directory: {output_dir}")
 
     # Select which model types to run
     all_types = config["model"]["types"]
@@ -465,42 +369,16 @@ def main():
     else:
         types_to_run = all_types
 
-    # Resolve save_diagnostics: CLI flag overrides config
-    save_diagnostics = args.save_diagnostics or config.get("output", {}).get(
-        "save_diagnostics", False
-    )
-    if save_diagnostics:
-        logger.info("Diagnostics enabled (ESS/R-hat will be computed)")
-
     # Resolve save_traces: CLI flag overrides config
     save_traces = args.save_traces or config.get("output", {}).get("save_traces", False)
-    if save_traces:
-        logger.info("Trace sidecar enabled (NetCDF will be written per rank)")
 
     # Resolve analysis-level parallelism against num_chains and CPU count
     num_chains = int(config.get("mcmc", {}).get("num_chains", 4))
-    requested_workers = get_requested_analysis_workers(config)
-    workers = resolve_analysis_workers(
-        requested_workers,
-        num_chains=num_chains,
-        num_model_types=len(types_to_run),
-    )
+    workers = _resolve_workers(config, num_chains=num_chains, n_types=len(types_to_run))
     logger.info(
         f"Running {len(types_to_run)} model type(s) with {workers} worker(s) "
-        f"(requested={requested_workers}, num_chains={num_chains})"
+        f"(num_chains={num_chains})"
     )
-    progress_interval_seconds = (
-        args.progress_interval_seconds
-        if args.progress_interval_seconds is not None
-        else _get_progress_interval_seconds(config)
-    )
-    progress_interval_seconds = max(1, progress_interval_seconds)
-
-    if workers > 1:
-        logger.info(
-            "Parallel model run: worker progress bars disabled; "
-            f"status heartbeat every {progress_interval_seconds}s."
-        )
 
     # Sequential path (preserves rich logging for single-type or workers=1)
     if workers == 1:
@@ -508,92 +386,42 @@ def main():
         for index, (model_type, type_config) in enumerate(
             types_to_run.items(), start=1
         ):
-            logger.info("")
-            logger.info("=" * 60)
             logger.info(
                 f"RUNNING MODEL TYPE: {model_type.upper()} ({index}/{total_count})"
             )
-            logger.info("=" * 60)
             run_model_type(
                 model_type=model_type,
                 type_config=type_config,
                 config=config,
                 rank_override=args.rank,
-                save_diagnostics=save_diagnostics,
                 save_traces=save_traces,
                 log_level=log_level,
                 configure_logging=False,
             )
     else:
-        # Parallel path: each worker reconfigures its own logger + progress bars disabled
-        # to keep stdout readable when N>1 subprocesses print concurrently.
-        with Manager() as manager:
-            progress_state = manager.dict(
-                {model_type: "queued" for model_type in types_to_run}
-            )
-            with ProcessPoolExecutor(max_workers=workers) as pool:
-                futures = {
-                    pool.submit(
-                        run_model_type,
-                        model_type=model_type,
-                        type_config=type_config,
-                        config=config,
-                        rank_override=args.rank,
-                        save_diagnostics=save_diagnostics,
-                        save_traces=save_traces,
-                        log_level=log_level,
-                        configure_logging=True,
-                        disable_progress_bar=True,
-                        progress_state=progress_state,
-                    ): model_type
-                    for model_type, type_config in types_to_run.items()
-                }
-                pending = set(futures)
-                completed_count = 0
-                total_count = len(futures)
-                parallel_started_at = time.monotonic()
-                while pending:
-                    done, pending = _wait_for_completed_futures(
-                        pending, progress_interval_seconds
-                    )
-                    if not done:
-                        _log_parallel_heartbeat(
-                            pending,
-                            futures,
-                            completed_count,
-                            total_count,
-                            parallel_started_at,
-                            progress_state,
-                        )
-                        continue
+        # Parallel path: each worker reconfigures its own logger + progress bars
+        # disabled to keep stdout readable when N>1 subprocesses print concurrently.
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(
+                    run_model_type,
+                    model_type=model_type,
+                    type_config=type_config,
+                    config=config,
+                    rank_override=args.rank,
+                    save_traces=save_traces,
+                    log_level=log_level,
+                    configure_logging=True,
+                    disable_progress_bar=True,
+                ): model_type
+                for model_type, type_config in types_to_run.items()
+            }
+            for i, fut in enumerate(as_completed(futures), 1):
+                mt = futures[fut]
+                fut.result()  # re-raises worker exceptions
+                logger.info(f"{mt} finished ({i}/{len(futures)})")
 
-                    for fut in done:
-                        mt = futures[fut]
-                        try:
-                            fut.result()
-                            completed_count += 1
-                            logger.info(
-                                f"✓ {mt} finished ({completed_count}/{total_count})"
-                            )
-                        except Exception as e:
-                            progress_state[mt] = "failed"
-                            logger.error(f"✗ {mt} failed: {e}")
-                            raise
-
-                    if pending:
-                        remaining = _format_progress_details(
-                            pending, futures, progress_state
-                        )
-                        logger.info(
-                            f"Progress: {completed_count}/{total_count} complete; "
-                            f"still running: {remaining}"
-                        )
-
-    logger.info("")
-    logger.info("=" * 60)
-    logger.info("ANALYSIS COMPLETE")
-    logger.info("=" * 60)
-    logger.info(f"Results saved to: {output_dir}")
+    logger.info(f"Analysis complete. Results saved to: {output_dir}")
 
 
 if __name__ == "__main__":

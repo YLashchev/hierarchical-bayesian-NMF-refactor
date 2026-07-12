@@ -72,12 +72,11 @@ def load_and_prepare(
 
     Raises
     ------
-    ValidationError
-        If filepath doesn't exist or is invalid
-    ConfigValidationError
+    DataError
+        If filepath doesn't exist or is invalid, or if data file is missing
+        required columns or has invalid values
+    ConfigError
         If config is missing required sections or keys
-    DataValidationError
-        If data file is missing required columns or has invalid values
     """
     validate_filepath(filepath)
     validate_config(config)
@@ -85,28 +84,20 @@ def load_and_prepare(
 
     data_config = config.get("data", {})
 
-    logger.info(f"Loading data from: {filepath}")
-    logger.debug(f"Requested groups: {groups}")
-
     # Peek at CSV columns to resolve prefix-based outcomes
     _header = pd.read_csv(filepath, nrows=0)
     available_columns = _header.columns.tolist()
 
     schema_info = _parse_schema(config, available_columns=available_columns)
-    logger.debug(
-        f"Schema parsed: unit_col={schema_info['unit_col']}, time_col={schema_info['time_col']}"
-    )
 
     df = _load_and_standardize(
         filepath, schema_info, data_config.get("date_format", "auto")
     )
-    logger.debug(f"Loaded {len(df)} rows, columns: {list(df.columns)}")
 
     total_from_labels = _validate_and_resolve_total(
         groups, schema_info["outcomes"], type_config
     )
     df = _wide_to_long(df, schema_info, groups, total_from_labels=total_from_labels)
-    logger.debug(f"After wide_to_long: {len(df)} rows")
 
     dupe_cols = [GROUP_COL, UNIT_COL, TIME_COL]
     dupes = df[df.duplicated(subset=dupe_cols, keep=False)]
@@ -121,10 +112,6 @@ def load_and_prepare(
     start_date = data_config.get("start_date")
     end_date = data_config.get("end_date")
     df = _filter_time_range(df, start_date, end_date)
-    if start_date or end_date:
-        logger.debug(
-            f"Filtered to date range [{start_date}, {end_date}): {len(df)} rows"
-        )
 
     if exclude_units:
         before_count = df[UNIT_COL].nunique()
@@ -145,9 +132,6 @@ def load_and_prepare(
 
     K, D, N = data_dict["Y"].shape
     logger.info(f"Model arrays built: K={K} groups, D={D} units, N={N} time periods")
-    logger.debug(f"Y shape: {data_dict['Y'].shape}, dtype: {data_dict['Y'].dtype}")
-    logger.debug(f"Control observations: {data_dict['control_idx_array'].sum()}")
-    logger.debug(f"Missing observations: {data_dict['missing_idx_array'].sum()}")
 
     # Preprocessed DataFrame returned for downstream output merging
     data_dict["df_preprocessed"] = df
@@ -352,7 +336,7 @@ def _load_and_standardize(
 
     Raises
     ------
-    DataValidationError
+    DataError
         If required columns are missing, time cannot be parsed, or treatment has invalid values
     """
     path = Path(filepath)
@@ -361,7 +345,6 @@ def _load_and_standardize(
         raise FileNotFoundError(f"Data file not found: {filepath}")
 
     df = pd.read_csv(path)
-    logger.debug(f"CSV loaded: {len(df)} rows, {len(df.columns)} columns")
 
     time_col, unit_col, treatment_col = _validate_schema_cols_in_df(df, schema_info)
 
@@ -373,9 +356,6 @@ def _load_and_standardize(
             try:
                 df[time_col] = pd.to_datetime(df[time_col], format=fmt)
                 parsed = True
-                logger.debug(
-                    f"Time column parsed with format: {fmt or 'auto-detected'}"
-                )
                 break
             except (ValueError, TypeError):
                 continue
@@ -384,7 +364,6 @@ def _load_and_standardize(
     else:
         try:
             df[time_col] = pd.to_datetime(df[time_col], format=date_format)
-            logger.debug(f"Time column parsed with specified format: {date_format}")
         except ValueError as e:
             raise DataError(f"Could not parse time column '{time_col}': {e}")
 

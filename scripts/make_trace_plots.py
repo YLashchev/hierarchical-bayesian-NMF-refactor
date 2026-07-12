@@ -1,23 +1,14 @@
-"""Generate MCMC trace plots from draws CSV or NetCDF trace sidecar.
+"""Generate MCMC trace plots from a NetCDF trace sidecar.
 
-When given a NetCDF sidecar (produced with --save-traces), all latent
-parameters are available (te, unit_fe, time_fac, treatment_state_scale, etc.).
-
-When given a CSV (fallback), only marginal columns saved to disk are available
-(mu, mu_treated, ypred).  A random subset of cells is traced to avoid OOM.
+Requires a NetCDF sidecar (produced with --save-traces), giving access to
+all latent parameters (te, unit_fe, time_fac, treatment_state_scale, etc.).
 
 Usage:
-    # From NetCDF sidecar (preferred — full latent access):
     uv run python scripts/make_trace_plots.py results/total/NB_births_total_3_traces.nc
 
     # Filter to specific parameters:
     uv run python scripts/make_trace_plots.py results/total/NB_births_total_3_traces.nc \\
         --param-filter te,state_treatment_effect,treatment_state_scale
-
-    # From CSV (marginals only):
-    uv run python scripts/make_trace_plots.py results/total/NB_births_total_3.csv
-    uv run python scripts/make_trace_plots.py results/total/NB_births_total_3.csv \\
-        --param-filter mu --num-vars 8 --seed 42
 """
 
 import argparse
@@ -31,41 +22,6 @@ import numpy as np
 from loguru import logger
 
 matplotlib.use("Agg")  # headless — no display needed
-
-
-def _load_and_reshape(
-    csv_path: str,
-    param_filters: list[str],
-) -> tuple[dict[str, np.ndarray], int, int]:
-    """Load selected CSV columns and reshape to (chains, draws, cells)."""
-    import pandas as pd
-
-    header = pd.read_csv(csv_path, nrows=0).columns
-    value_cols = [
-        col
-        for col in ["mu", "mu_treated", "ypred"]
-        if col in header and any(col.startswith(f) for f in param_filters)
-    ]
-    if not value_cols:
-        return {}, 0, 0
-
-    usecols = [".chain", ".iteration", *value_cols]
-    df = pd.read_csv(
-        csv_path,
-        usecols=lambda col: col in usecols,
-        dtype={".chain": int, ".iteration": int},
-    )
-    chains = df[".chain"].nunique()
-    draws_per_chain = df[".iteration"].nunique()
-    params: dict[str, np.ndarray] = {}
-    for col in value_cols:
-        grouped = df.groupby([".chain", ".iteration"], sort=True)[col].apply(
-            lambda s: s.values
-        )
-        n_obs = len(grouped.iloc[0])
-        arr = np.stack(grouped.to_list()).reshape(chains, draws_per_chain, n_obs)
-        params[col] = arr
-    return params, chains, draws_per_chain
 
 
 def _make_trace_plots_from_netcdf(
@@ -206,87 +162,22 @@ def _make_trace_plots_from_netcdf(
     return saved
 
 
-def _make_trace_plots_from_csv(
-    csv_path: Path,
-    param_filters: list[str],
-    num_vars: int,
-    seed: int,
-    out_dir: Path,
-) -> list[Path]:
-    """Load draws CSV, subset cells, generate trace plots, save PNGs."""
-    logger.info(f"Loading CSV: {csv_path}")
-    params, chains, draws_per_chain = _load_and_reshape(str(csv_path), param_filters)
-
-    if not params:
-        logger.error("No matching columns found — check --param-filter")
-        return []
-
-    logger.info(f"Chains: {chains}, draws/chain: {draws_per_chain}")
-    out_dir.mkdir(parents=True, exist_ok=True)
-    rng = np.random.default_rng(seed)
-    saved: list[Path] = []
-
-    for name, arr in params.items():
-        # arr shape: (chains, draws, n_obs)
-        n_obs = arr.shape[2]
-        k = min(num_vars, n_obs)
-        idx = rng.choice(n_obs, size=k, replace=False)
-        idx.sort()
-
-        posterior: dict[str, np.ndarray] = {
-            f"{name}[{i}]": arr[:, :, j] for j, i in enumerate(idx)
-        }
-
-        dt = az.from_dict({"posterior": posterior})  # nested dict per ArviZ >=0.19 API
-        az.plot_trace(dt, backend="matplotlib")
-        fig = plt.gcf()
-        fig.suptitle(
-            f"Trace — {name}  ({k} of {n_obs} random cells, seed={seed})",
-            fontsize=11,
-            y=1.01,
-        )
-        fig.tight_layout()
-
-        out_path = out_dir / f"trace_{name}.png"
-        fig.savefig(out_path, dpi=120, bbox_inches="tight")
-        plt.close(fig)
-
-        logger.info(f"Saved {out_path}  ({k} cells)")
-        saved.append(out_path)
-
-    return saved
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate MCMC trace plots from draws CSV or NetCDF trace sidecar"
+        description="Generate MCMC trace plots from a NetCDF trace sidecar"
     )
     parser.add_argument(
         "input",
-        help="Path to draws CSV or NetCDF sidecar (.nc). "
-        "NetCDF gives access to full latent parameters.",
+        help="Path to NetCDF trace sidecar (.nc), giving access to full latent parameters.",
     )
     parser.add_argument(
         "--param-filter",
         default=None,
         help=(
-            "Comma-separated parameter name(s) to trace. "
-            "NetCDF: exact variable names (e.g. te,treatment_state_scale). "
-            "CSV: column prefixes (e.g. mu,ypred). "
-            "Default: auto-select treatment effects (NetCDF) or mu (CSV)."
+            "Comma-separated exact variable name(s) to trace "
+            "(e.g. te,treatment_state_scale). "
+            "Default: auto-select treatment effects."
         ),
-    )
-    parser.add_argument(
-        "--num-vars",
-        type=int,
-        default=5,
-        help="[CSV only] Number of random cells to trace per parameter (default: 5)",
-    )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=0,
-        help="[CSV only] RNG seed for reproducible cell selection (default: 0)",
     )
     parser.add_argument(
         "--out-dir",
@@ -300,6 +191,12 @@ def main() -> None:
         logger.error(f"File not found: {input_path}")
         sys.exit(1)
 
+    if input_path.suffix != ".nc":
+        sys.exit(
+            f"Expected a NetCDF traces file (*.nc), got {input_path}. "
+            "Run with --save-traces."
+        )
+
     out_dir = (
         Path(args.out_dir)
         if args.out_dir
@@ -310,13 +207,7 @@ def main() -> None:
         [f.strip() for f in args.param_filter.split(",")] if args.param_filter else None
     )
 
-    if input_path.suffix == ".nc":
-        saved = _make_trace_plots_from_netcdf(input_path, filters, out_dir)
-    else:
-        # CSV path: default to mu if no filter given
-        saved = _make_trace_plots_from_csv(
-            input_path, filters or ["mu"], args.num_vars, args.seed, out_dir
-        )
+    saved = _make_trace_plots_from_netcdf(input_path, filters, out_dir)
 
     if not saved:
         sys.exit(1)

@@ -18,7 +18,6 @@ BOOL_PATHS = [
     ("mcmc", "progress_bar"),
     ("output", "figures"),
     ("output", "clean"),
-    ("output", "save_diagnostics"),
 ]
 
 
@@ -81,16 +80,4 @@ def test_nested_total_all_accepted(minimal_config):
 
 def test_flag_absent_ok(minimal_config):
     # Base minimal config without any of the boolean flags set
-    validate_config(minimal_config)
-
-
-@pytest.mark.parametrize("bad_value", [0, -1, 1.5, "60"])
-def test_progress_interval_rejects_non_positive_integer(minimal_config, bad_value):
-    minimal_config["output"]["progress_interval_seconds"] = bad_value
-    with pytest.raises(ConfigError, match="progress_interval_seconds"):
-        validate_config(minimal_config)
-
-
-def test_progress_interval_accepts_positive_integer(minimal_config):
-    minimal_config["output"]["progress_interval_seconds"] = 30
     validate_config(minimal_config)

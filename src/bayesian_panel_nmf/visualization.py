@@ -62,6 +62,16 @@ def _standardize_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _detect_outcome_column(df: pd.DataFrame) -> str:
+    """Return the outcome column: standardized name first, then legacy fallbacks."""
+    for col in ("outcome", "births", "count", "y"):
+        if col in df.columns:
+            return col
+    raise ValueError(
+        f"No outcome column found (looked for outcome/births/count/y); have: {list(df.columns)}"
+    )
+
+
 def _identify_treated_units(df: pd.DataFrame) -> List[str]:
     """
     Identify units that have treatment at any time point.
@@ -366,20 +376,8 @@ def make_abs_ppc_plot(
     df = _standardize_columns(draws_df)
 
     # Handle outcome column (might have custom name)
-    if outcome_col not in df.columns and "outcome" in df.columns:
-        outcome_col = "outcome"
-    elif outcome_col not in df.columns:
-        # Try legacy names
-        for legacy in ["births", "count", "y"]:
-            if legacy in df.columns:
-                outcome_col = legacy
-                break
-
     if outcome_col not in df.columns:
-        raise ValueError(
-            f"Outcome column '{outcome_col}' not found in DataFrame. "
-            f"Available columns: {list(df.columns)}"
-        )
+        outcome_col = _detect_outcome_column(df)
 
     # Get categories
     if categories is None:
@@ -490,16 +488,8 @@ def make_acf_ppc_plot(
     df = _standardize_columns(draws_df)
 
     # Handle outcome column
-    if outcome_col not in df.columns and "outcome" in df.columns:
-        outcome_col = "outcome"
-    elif outcome_col not in df.columns:
-        for legacy in ["births", "count", "y"]:
-            if legacy in df.columns:
-                outcome_col = legacy
-                break
-
     if outcome_col not in df.columns:
-        raise ValueError(f"Outcome column '{outcome_col}' not found in DataFrame.")
+        outcome_col = _detect_outcome_column(df)
 
     # Get categories
     if categories is None:
@@ -617,16 +607,8 @@ def make_rmse_ppc_plot(
     df = _standardize_columns(draws_df)
 
     # Handle outcome column
-    if outcome_col not in df.columns and "outcome" in df.columns:
-        outcome_col = "outcome"
-    elif outcome_col not in df.columns:
-        for legacy in ["births", "count", "y"]:
-            if legacy in df.columns:
-                outcome_col = legacy
-                break
-
     if outcome_col not in df.columns:
-        raise ValueError(f"Outcome column '{outcome_col}' not found in DataFrame.")
+        outcome_col = _detect_outcome_column(df)
 
     # Get categories
     if categories is None:
@@ -745,16 +727,8 @@ def make_unit_corr_ppc_plot(
     df = _standardize_columns(draws_df)
 
     # Handle outcome column
-    if outcome_col not in df.columns and "outcome" in df.columns:
-        outcome_col = "outcome"
-    elif outcome_col not in df.columns:
-        for legacy in ["births", "count", "y"]:
-            if legacy in df.columns:
-                outcome_col = legacy
-                break
-
     if outcome_col not in df.columns:
-        raise ValueError(f"Outcome column '{outcome_col}' not found in DataFrame.")
+        outcome_col = _detect_outcome_column(df)
 
     # Get categories
     if categories is None:
@@ -918,7 +892,6 @@ def make_raw_rate_plot(
     rate_multiplier: float = 1000,
     treatment_dates: Optional[Dict[str, str]] = None,
     separate_unit: Optional[str] = None,
-    separate_texas: bool = False,  # Backward compatibility alias
     smooth_window: Optional[int] = None,
     plot_type: str = "rate",  # 'rate' or 'count'
     figsize: Tuple[int, int] = (10, 6),
@@ -950,9 +923,6 @@ def make_raw_rate_plot(
     separate_unit : str, optional
         If provided, show this specific unit as a separate group from other
         treated units. Useful for highlighting a particular unit of interest.
-    separate_texas : bool, default=False
-        Deprecated. Use separate_unit='Texas' instead.
-        If True, equivalent to separate_unit='Texas'.
     smooth_window : int, optional
         Rolling window size for smoothing. If None, no smoothing applied.
     plot_type : str, default='rate'
@@ -981,26 +951,8 @@ def make_raw_rate_plot(
     ...     separate_unit='TX',
     ...     smooth_window=3
     ... )
-
-    >>> # For backward compatibility with older code
-    >>> fig, ax = make_raw_rate_plot(df, group='total', separate_texas=True)
     """
     _setup_plot_style()
-
-    # Handle backward compatibility for separate_texas
-    if separate_texas:
-        warnings.warn(
-            "separate_texas is deprecated and has been removed. "
-            "Pass separate_unit='<your_unit_name>' explicitly instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if separate_unit is None:
-            raise TypeError(
-                "separate_texas=True requires passing the unit name explicitly via "
-                "separate_unit='<your_unit_name>'. The deprecated alias no longer "
-                "infers a dataset-specific default."
-            )
 
     # Standardize column names
     df = _standardize_columns(df)
