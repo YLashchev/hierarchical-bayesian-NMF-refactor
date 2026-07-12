@@ -1,55 +1,43 @@
-# Agent configurations
+# ── Agent / AI tooling ──────────────────────────────────────────────
 .opencode/
 opencode.json
+.pi/
+.pi-lens/
+.pi-subagents/
+.atl/
 AGENTS.md
 
-# pi-lens caches and local reviews
-.pi-lens/
-
-# Local pi agent state (personal, not pushed to remote)
-.pi/
+# ── Local dev planning & scratch ───────────────────────────────────
+BACKLOG.md
+context.md
+jama_supplement_analysis.md
+oracle_pyright_review.md
+progress.md
+pyrightconfig.json
+reference_directories/
+reporting_review.md
+research.md
+review_*.md
+review-outcome-derivation.md
+todo_plan.md
+page*.png
 scripts/booboo_append_slop.sh
 
-# Internal planning docs (dev workflow only, not package artifacts)
-BACKLOG.md
-todo_plan.md
+# ── Results & generated output ──────────────────────────────────────
+results/**
+*.log
 
-# Type checker config (personal tool config)
-ty.toml
-
-# Raw data (large CSVs, sometimes sensitive) — shipped examples allowed
+# ── Data ────────────────────────────────────────────────────────────
 data/raw/*.csv
 !data/raw/.gitkeep
 !data/raw/fertility_data.csv
 !data/raw/nativity_analyticdata.csv
 
-# Node
-node_modules/
-package.json
-package-lock.json
-
-# Reference implementations (not part of package)
-# NOTE: moved up one level to ../reference_directories (Refactor_DOBBS/) to keep
-# pi-lens /lens-booboo scans fast. Kept rule below in case dir is recreated here.
-reference_directories/
-
-# R / Quarto (package is pure Python — any .R / .qmd stragglers are local-only)
-*.R
-*.r
-*.Rmd
-*.qmd
-*.Rproj
-.Rhistory
-.RData
-.Rproj.user/
-.Rlibrary/
-renv/
-renv.lock
-
-# Python
+# ── Python ──────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
-*$py.class
+*.egg
+*.egg-info/
 *.so
 .Python
 build/
@@ -64,60 +52,65 @@ parts/
 sdist/
 var/
 wheels/
-*.egg-info/
 .installed.cfg
-*.egg
 
-# Virtual environments
+# ── Virtual environments ────────────────────────────────────────────
 venv/
 ENV/
 env/
 .venv/
 .env/
 
-# IDE
+# ── IDE / Editor ────────────────────────────────────────────────────
 .idea/
 .vscode/
 *.swp
 *.swo
 
-# Jupyter
-.ipynb_checkpoints/
-
-# OS
+# ── OS ──────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 
-# Results (generated, not source) — includes figs/ subdirs written by reporting.py
-results/**
-!results/.gitkeep
+# ── Local handoff, reference & planning docs (not package source) ────
+docs/
+PROJECT_HANDOFF.md
+jama-e2428527-s001.pdf
 
-# Quarto/RMarkdown cache
+# ── R / Quarto (pure Python package — any .R / .qmd are local-only) ─
+*.R
+*.r
+*.Rmd
+*.qmd
+*.Rproj
+.Rhistory
+.RData
+.Rproj.user/
+.Rlibrary/
+renv/
+renv.lock
+
+# ── Node ────────────────────────────────────────────────────────────
+node_modules/
+package.json
+package-lock.json
+
+# ── Jupyter ─────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+
+# ── Testing / type checking ────────────────────────────────────────
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+ty.toml
+
+# ── Quarto / RMarkdown cache ────────────────────────────────────────
 *_cache/
 *_files/
 *.html
 
-# Logs
-*.log
+# Local git worktrees
+.worktrees/
 
-# Coverage
-.coverage
-htmlcov/
-
-# pytest
-.pytest_cache/
-
-# mypy
-.mypy_cache/
-
-# Scratch / subagent review artifacts (local-only, not package source)
-progress.md
-context.md
-research.md
-reporting_review.md
-review-outcome-derivation.md
-review_*.md
-oracle_pyright_review.md
-jama_supplement_analysis.md
-pyrightconfig.json
-page*.png
+# Local git worktrees
+.worktrees/
