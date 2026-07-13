@@ -7,6 +7,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+import jax
 import numpy as np
 import numpyro.infer.initialization  # noqa: F401 — binds attr arviz's from_numpyro needs
 from jax import block_until_ready, random
@@ -121,9 +122,18 @@ def run_mcmc_inference(
     if auto_parallelism:
         max_chains = mcmc_config.get("max_chains", 4)
         num_chains, chain_method = choose_mcmc_parallelism(max_chains=max_chains)
+        logger.info(
+            f"auto_parallelism: max_chains={max_chains} -> "
+            f"num_chains={num_chains}, chain_method={chain_method!r} "
+            f"(jax.local_device_count()={jax.local_device_count()})"
+        )
     else:
         num_chains = mcmc_config.get("num_chains", 4)
         chain_method = mcmc_config.get("chain_method", "sequential")
+        logger.info(
+            f"auto_parallelism=false -> num_chains={num_chains}, "
+            f"chain_method={chain_method!r}"
+        )
     num_warmup = mcmc_config.get("num_warmup", 1000)
     num_samples = mcmc_config.get("num_samples", 2500)
     thinning = mcmc_config.get("thinning", 10)
