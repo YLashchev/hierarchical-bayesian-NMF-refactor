@@ -138,6 +138,69 @@ def _filter_ppc_units(
     return df
 
 
+def _prepare_ppc_residuals(
+    draws_df: pd.DataFrame,
+    outcome_col: str,
+    categories: list[str] | None,
+    ppc_units: list[str] | None,
+    ppc_exclude_units: list[str] | None,
+    *,
+    sort_by_time: bool = False,
+) -> tuple[pd.DataFrame, list[str], list[str]]:
+    """Shared setup for the per-draw residual PPC checks (max-abs residual,
+    ACF, RMSE): standardize columns, resolve the outcome column and
+    categories, restrict to the control period and configured/default
+    units, and compute observed/predicted residuals against the
+    counterfactual rate.
+
+    Set ``sort_by_time=True`` for checks that require chronological order
+    within each (unit, group, draw) group (currently only ACF, which
+    computes a lagged autocorrelation and would get a wrong answer on an
+    arbitrary row order).
+
+    Returns
+    -------
+    df_control : pd.DataFrame
+        Filtered rows with ``pred_diff`` and ``obs_diff`` columns added.
+    resolved_categories : list of str
+        ``categories`` if given, otherwise every group present in
+        ``draws_df`` — callers use this to filter their own stats/pvals
+        frames identically to how the pre-extraction code did.
+    selected_units : list of str
+        Units remaining in ``df_control`` after unit filtering — callers
+        use this to filter their own stats/pvals frames.
+    """
+    df = _standardize_columns(draws_df)
+
+    if outcome_col not in df.columns:
+        outcome_col = _detect_outcome_column(df)
+
+    resolved_categories = (
+        categories if categories is not None else df["group"].unique().tolist()
+    )
+    df = df[df["group"].isin(resolved_categories)]
+
+    treated_units = _identify_treated_units(df)
+
+    df_control = df[df["treatment"] == 0].copy()
+    df_control = _filter_ppc_units(
+        df_control,
+        treated_units,
+        ppc_units=ppc_units,
+        ppc_exclude_units=ppc_exclude_units,
+    )
+
+    df_control["pred_diff"] = df_control["ypred"] - np.exp(df_control["mu"])
+    df_control["obs_diff"] = df_control[outcome_col] - np.exp(df_control["mu"])
+
+    if sort_by_time and "time" in df_control.columns:
+        df_control = df_control.sort_values(["unit", "group", ".draw", "time"])
+
+    selected_units = df_control["unit"].unique().tolist()
+
+    return df_control, resolved_categories, selected_units
+
+
 def _compute_autocorrelation(x: np.ndarray, lag: int) -> float:
     """
     Compute autocorrelation at a specific lag.
@@ -379,37 +442,9 @@ def make_abs_ppc_plot(
     pvals_df : pd.DataFrame
         DataFrame with columns: unit, group, pval
     """
-    # Standardize column names
-    df = _standardize_columns(draws_df)
-
-    # Handle outcome column (might have custom name)
-    if outcome_col not in df.columns:
-        outcome_col = _detect_outcome_column(df)
-
-    # Get categories
-    if categories is None:
-        categories = df["group"].unique().tolist()
-
-    # Filter to categories
-    df = df[df["group"].isin(categories)]
-
-    # Identify treated units
-    treated_units = _identify_treated_units(df)
-
-    # Filter to control period only
-    df_control = df[df["treatment"] == 0].copy()
-
-    # Filter to configured units or default treated units.
-    df_control = _filter_ppc_units(
-        df_control,
-        treated_units,
-        ppc_units=ppc_units,
-        ppc_exclude_units=ppc_exclude_units,
+    df_control, categories, selected_units = _prepare_ppc_residuals(
+        draws_df, outcome_col, categories, ppc_units, ppc_exclude_units
     )
-
-    # Compute residuals
-    df_control["pred_diff"] = df_control["ypred"] - np.exp(df_control["mu"])
-    df_control["obs_diff"] = df_control[outcome_col] - np.exp(df_control["mu"])
 
     # Compute max absolute residual per unit/group/draw
     max_stats = (
@@ -431,7 +466,6 @@ def make_abs_ppc_plot(
     )
 
     # Filter pvals to categories and selected units
-    selected_units = df_control["unit"].unique().tolist()
     pvals_df = pvals_df[pvals_df["group"].isin(categories)]
     pvals_df = pvals_df[pvals_df["unit"].isin(selected_units)]
 
@@ -491,39 +525,14 @@ def make_acf_ppc_plot(
     pvals_df : pd.DataFrame
         DataFrame with columns: unit, group, pval
     """
-    # Standardize column names
-    df = _standardize_columns(draws_df)
-
-    # Handle outcome column
-    if outcome_col not in df.columns:
-        outcome_col = _detect_outcome_column(df)
-
-    # Get categories
-    if categories is None:
-        categories = df["group"].unique().tolist()
-
-    # Filter to categories
-    df = df[df["group"].isin(categories)]
-
-    # Identify treated units
-    treated_units = _identify_treated_units(df)
-
-    # Filter to control period and configured/default units
-    df_control = df[df["treatment"] == 0].copy()
-    df_control = _filter_ppc_units(
-        df_control,
-        treated_units,
-        ppc_units=ppc_units,
-        ppc_exclude_units=ppc_exclude_units,
+    df_control, categories, selected_units = _prepare_ppc_residuals(
+        draws_df,
+        outcome_col,
+        categories,
+        ppc_units,
+        ppc_exclude_units,
+        sort_by_time=True,
     )
-
-    # Compute residuals
-    df_control["pred_diff"] = df_control["ypred"] - np.exp(df_control["mu"])
-    df_control["obs_diff"] = df_control[outcome_col] - np.exp(df_control["mu"])
-
-    # Sort by time within each group for proper ACF computation
-    if "time" in df_control.columns:
-        df_control = df_control.sort_values(["unit", "group", ".draw", "time"])
 
     # Compute ACF per unit/group/draw
     def compute_acf_stats(group_df):
@@ -553,7 +562,6 @@ def make_acf_ppc_plot(
         .reset_index()
     )
 
-    selected_units = df_control["unit"].unique().tolist()
     pvals_df = pvals_df[pvals_df["group"].isin(categories)]
     pvals_df = pvals_df[pvals_df["unit"].isin(selected_units)]
 
@@ -610,35 +618,9 @@ def make_rmse_ppc_plot(
     pvals_df : pd.DataFrame
         DataFrame with columns: unit, group, pval
     """
-    # Standardize column names
-    df = _standardize_columns(draws_df)
-
-    # Handle outcome column
-    if outcome_col not in df.columns:
-        outcome_col = _detect_outcome_column(df)
-
-    # Get categories
-    if categories is None:
-        categories = df["group"].unique().tolist()
-
-    # Filter to categories
-    df = df[df["group"].isin(categories)]
-
-    # Identify treated units
-    treated_units = _identify_treated_units(df)
-
-    # Filter to control period and configured/default units.
-    df_control = df[df["treatment"] == 0].copy()
-    df_control = _filter_ppc_units(
-        df_control,
-        treated_units,
-        ppc_units=ppc_units,
-        ppc_exclude_units=ppc_exclude_units,
+    df_control, categories, selected_units = _prepare_ppc_residuals(
+        draws_df, outcome_col, categories, ppc_units, ppc_exclude_units
     )
-
-    # Compute residuals
-    df_control["pred_diff"] = df_control["ypred"] - np.exp(df_control["mu"])
-    df_control["obs_diff"] = df_control[outcome_col] - np.exp(df_control["mu"])
 
     # Compute RMSE per unit/group/draw
     rmse_stats = (
@@ -661,7 +643,6 @@ def make_rmse_ppc_plot(
         .reset_index()
     )
 
-    selected_units = df_control["unit"].unique().tolist()
     pvals_df = pvals_df[pvals_df["group"].isin(categories)]
     pvals_df = pvals_df[pvals_df["unit"].isin(selected_units)]
 
