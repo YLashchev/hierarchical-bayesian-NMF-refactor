@@ -180,6 +180,98 @@ def _run_reporting(
     )
 
 
+def _prepare_type_output_dir(
+    base_output_dir: Path, model_type: str, output_config: dict
+) -> Path:
+    """Return this model type's output directory, optionally clearing it
+    first when output.clean is true."""
+    type_output_dir = base_output_dir / model_type
+
+    if output_config.get("clean", False) and type_output_dir.exists():
+        logger.info(f"clean=true: removing existing {type_output_dir}")
+        _safe_rmtree(type_output_dir, base_output_dir)
+
+    type_output_dir.mkdir(parents=True, exist_ok=True)
+    return type_output_dir
+
+
+def _run_single_rank(
+    rank: int,
+    data_dict: dict,
+    model_type: str,
+    config: dict,
+    type_output_dir: Path,
+    ranks: list[int],
+    save_traces: bool,
+    output_config: dict,
+) -> None:
+    """Run MCMC inference for one rank, write the convergence gate,
+    optionally save a trace sidecar, write draws, and optionally dispatch
+    reporting/figure generation."""
+    filename = _draws_filename(config, model_type, rank)
+
+    mcmc_started_at = time.monotonic()
+    mcmc = run_mcmc_inference(data_dict, model, rank, config)
+    logger.info(
+        f"{model_type} rank {rank}: MCMC finished in "
+        f"{_format_elapsed(time.monotonic() - mcmc_started_at)}"
+    )
+
+    clean_samples = _clean_scoped_samples(mcmc, model_type, rank)
+    extra_fields = mcmc.get_extra_fields()
+    idata_dict = {"posterior": clean_samples}
+    if "diverging" in extra_fields:
+        # get_extra_fields() is flat (chains*samples,); reshape to match the
+        # (chain, draw) samples returned by get_samples(group_by_chain=True).
+        diverging = extra_fields["diverging"].reshape(mcmc.num_chains, -1)
+        idata_dict["sample_stats"] = {"diverging": diverging}
+    idata = az.from_dict(idata_dict)
+    gate = convergence_summary(idata)
+    if not gate["converged"]:
+        logger.warning(
+            f"{model_type} rank {rank}: convergence gate FAILED — "
+            f"max R-hat={gate['rhat_max']:.4f}, min bulk ESS={gate['ess_bulk_min']:.0f}, "
+            f"min tail ESS={gate['ess_tail_min']:.0f}, divergences={gate['divergences']}"
+        )
+    convergence_file = type_output_dir / f"{filename}_convergence.json"
+    try:
+        with open(convergence_file, "w") as f:
+            json.dump(gate, f, indent=2)
+    except OSError as e:
+        logger.error(f"Failed to write convergence file {convergence_file}: {e}")
+        raise
+
+    if save_traces:
+        traces_file = type_output_dir / f"{filename}_traces.nc"
+        trace_clean_samples = _clean_scoped_samples(mcmc, model_type, rank)
+        trace_idata = az.from_dict({"posterior": trace_clean_samples})
+        trace_idata.to_netcdf(str(traces_file), engine="h5netcdf")
+        size_mb = traces_file.stat().st_size / 1024**2
+        logger.info(
+            f"{model_type} rank {rank}: wrote trace sidecar to {traces_file} "
+            f"({size_mb:.1f} MB)"
+        )
+
+    predictions = generate_predictions(mcmc, data_dict, model, rank, config)
+
+    samples = mcmc.get_samples(group_by_chain=True)
+    draws_df = format_draws(samples, predictions, data_dict)
+
+    draws_file = type_output_dir / f"{filename}.csv"
+    draws_df.to_csv(draws_file, index=False)
+    size_mb = draws_file.stat().st_size / 1024**2
+    logger.info(
+        f"{model_type} rank {rank}: wrote draws to {draws_file} ({size_mb:.1f} MB)"
+    )
+
+    # Multi-rank runs nest under rank_<rank>/ so figs don't collide
+    report_dir = type_output_dir / f"rank_{rank}" if len(ranks) > 1 else type_output_dir
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    if output_config.get("figures", False):
+        _run_reporting(draws_df, report_dir, output_config)
+
+
 def run_model_type(
     model_type: str,
     type_config: dict,
@@ -207,14 +299,9 @@ def run_model_type(
 
     base_output_dir = Path(config["data"]["output_dir"])
     output_config = config.get("output", {})
-    type_output_dir = base_output_dir / model_type
-
-    # Optional cleanup of this type's subtree before writing
-    if output_config.get("clean", False) and type_output_dir.exists():
-        logger.info(f"clean=true: removing existing {type_output_dir}")
-        _safe_rmtree(type_output_dir, base_output_dir)
-
-    type_output_dir.mkdir(parents=True, exist_ok=True)
+    type_output_dir = _prepare_type_output_dir(
+        base_output_dir, model_type, output_config
+    )
 
     groups = type_config["groups"]
     ranks = [rank_override] if rank_override else type_config.get("ranks_to_test", [10])
@@ -242,70 +329,16 @@ def run_model_type(
     df_preprocessed.to_csv(preprocessed_file, index=False)
 
     for rank in ranks:
-        filename = _draws_filename(config, model_type, rank)
-
-        mcmc_started_at = time.monotonic()
-        mcmc = run_mcmc_inference(data_dict, model, rank, config)
-        logger.info(
-            f"{model_type} rank {rank}: MCMC finished in "
-            f"{_format_elapsed(time.monotonic() - mcmc_started_at)}"
+        _run_single_rank(
+            rank,
+            data_dict,
+            model_type,
+            config,
+            type_output_dir,
+            ranks,
+            save_traces,
+            output_config,
         )
-
-        clean_samples = _clean_scoped_samples(mcmc, model_type, rank)
-        extra_fields = mcmc.get_extra_fields()
-        idata_dict = {"posterior": clean_samples}
-        if "diverging" in extra_fields:
-            # get_extra_fields() is flat (chains*samples,); reshape to match the
-            # (chain, draw) samples returned by get_samples(group_by_chain=True).
-            diverging = extra_fields["diverging"].reshape(mcmc.num_chains, -1)
-            idata_dict["sample_stats"] = {"diverging": diverging}
-        idata = az.from_dict(idata_dict)
-        gate = convergence_summary(idata)
-        if not gate["converged"]:
-            logger.warning(
-                f"{model_type} rank {rank}: convergence gate FAILED — "
-                f"max R-hat={gate['rhat_max']:.4f}, min bulk ESS={gate['ess_bulk_min']:.0f}, "
-                f"min tail ESS={gate['ess_tail_min']:.0f}, divergences={gate['divergences']}"
-            )
-        convergence_file = type_output_dir / f"{filename}_convergence.json"
-        try:
-            with open(convergence_file, "w") as f:
-                json.dump(gate, f, indent=2)
-        except OSError as e:
-            logger.error(f"Failed to write convergence file {convergence_file}: {e}")
-            raise
-
-        if save_traces:
-            traces_file = type_output_dir / f"{filename}_traces.nc"
-            trace_clean_samples = _clean_scoped_samples(mcmc, model_type, rank)
-            trace_idata = az.from_dict({"posterior": trace_clean_samples})
-            trace_idata.to_netcdf(str(traces_file), engine="h5netcdf")
-            size_mb = traces_file.stat().st_size / 1024**2
-            logger.info(
-                f"{model_type} rank {rank}: wrote trace sidecar to {traces_file} "
-                f"({size_mb:.1f} MB)"
-            )
-
-        predictions = generate_predictions(mcmc, data_dict, model, rank, config)
-
-        samples = mcmc.get_samples(group_by_chain=True)
-        draws_df = format_draws(samples, predictions, data_dict)
-
-        draws_file = type_output_dir / f"{filename}.csv"
-        draws_df.to_csv(draws_file, index=False)
-        size_mb = draws_file.stat().st_size / 1024**2
-        logger.info(
-            f"{model_type} rank {rank}: wrote draws to {draws_file} ({size_mb:.1f} MB)"
-        )
-
-        # Multi-rank runs nest under rank_<rank>/ so figs don't collide
-        report_dir = (
-            type_output_dir / f"rank_{rank}" if len(ranks) > 1 else type_output_dir
-        )
-        report_dir.mkdir(parents=True, exist_ok=True)
-
-        if output_config.get("figures", False):
-            _run_reporting(draws_df, report_dir, output_config)
 
     logger.info(
         f"{model_type}: complete in {_format_elapsed(time.monotonic() - model_started_at)}"
