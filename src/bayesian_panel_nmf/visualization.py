@@ -5,16 +5,17 @@ Accepts both standardized (unit/group/denominator/treatment) and legacy
 D=units, N=time periods.
 """
 
-from pathlib import Path
-from typing import Optional, List, Tuple, Dict
 import warnings
+from pathlib import Path
+from typing import cast
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import seaborn as sns
 from loguru import logger
-
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 
 # Legacy → standardized column name map
 _COLUMN_MAPPING = {
@@ -60,7 +61,17 @@ def _standardize_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _identify_treated_units(df: pd.DataFrame) -> List[str]:
+def _detect_outcome_column(df: pd.DataFrame) -> str:
+    """Return the outcome column: standardized name first, then legacy fallbacks."""
+    for col in ("outcome", "births", "count", "y"):
+        if col in df.columns:
+            return col
+    raise ValueError(
+        f"No outcome column found (looked for outcome/births/count/y); have: {list(df.columns)}"
+    )
+
+
+def _identify_treated_units(df: pd.DataFrame) -> list[str]:
     """
     Identify units that have treatment at any time point.
 
@@ -79,14 +90,115 @@ def _identify_treated_units(df: pd.DataFrame) -> List[str]:
     """
     if "treated_unit" in df.columns:
         # Legacy column was renamed
-        return df[df["treated_unit"] == 1]["unit"].unique().tolist()
+        treated_mask = cast(pd.Series, df["treated_unit"]) == 1
+        units = cast(pd.Series, df.loc[treated_mask, "unit"])
+        return units.drop_duplicates().tolist()
     elif "treatment" in df.columns:
         # Infer from treatment column
-        treated = df[df["treatment"] == 1]["unit"].unique().tolist()
-        return treated
+        treated_mask = cast(pd.Series, df["treatment"]) == 1
+        units = cast(pd.Series, df.loc[treated_mask, "unit"])
+        return units.drop_duplicates().tolist()
     else:
         # No treatment column - return all units
-        return df["unit"].unique().tolist()
+        units = cast(pd.Series, df["unit"])
+        return units.drop_duplicates().tolist()
+
+
+def _filter_ppc_units(
+    df: pd.DataFrame,
+    treated_units: list[str],
+    ppc_units: list[str] | None = None,
+    ppc_exclude_units: list[str] | None = None,
+) -> pd.DataFrame:
+    """Filter DataFrame to units selected for PPC."""
+    unit_values = set(cast(pd.Series, df["unit"]).drop_duplicates().tolist())
+    if ppc_units is not None:
+        if len(ppc_units) == 0:
+            warnings.warn(
+                "ppc_units is an empty list; no units will be included in PPC.",
+                stacklevel=3,
+            )
+        selected = [u for u in ppc_units if u in unit_values]
+        missing = [u for u in ppc_units if u not in unit_values]
+        if missing:
+            warnings.warn(
+                f"ppc_units missing from draws: {missing}",
+                stacklevel=3,
+            )
+        mask = cast(pd.Series, df["unit"]).isin(selected)
+        df = cast(pd.DataFrame, df.loc[mask].copy())
+    else:
+        mask = cast(pd.Series, df["unit"]).isin(treated_units)
+        df = cast(pd.DataFrame, df.loc[mask].copy())
+
+    if ppc_exclude_units is not None:
+        mask = ~cast(pd.Series, df["unit"]).isin(ppc_exclude_units)
+        df = cast(pd.DataFrame, df.loc[mask].copy())
+
+    return df
+
+
+def _prepare_ppc_residuals(
+    draws_df: pd.DataFrame,
+    outcome_col: str,
+    categories: list[str] | None,
+    ppc_units: list[str] | None,
+    ppc_exclude_units: list[str] | None,
+    *,
+    sort_by_time: bool = False,
+) -> tuple[pd.DataFrame, list[str], list[str]]:
+    """Shared setup for the per-draw residual PPC checks (max-abs residual,
+    ACF, RMSE): standardize columns, resolve the outcome column and
+    categories, restrict to the control period and configured/default
+    units, and compute observed/predicted residuals against the
+    counterfactual rate.
+
+    Set ``sort_by_time=True`` for checks that require chronological order
+    within each (unit, group, draw) group (currently only ACF, which
+    computes a lagged autocorrelation and would get a wrong answer on an
+    arbitrary row order).
+
+    Returns
+    -------
+    df_control : pd.DataFrame
+        Filtered rows with ``pred_diff`` and ``obs_diff`` columns added.
+    resolved_categories : list of str
+        ``categories`` if given, otherwise every group present in
+        ``draws_df`` — callers use this to filter their own stats/pvals
+        frames identically to how the pre-extraction code did.
+    selected_units : list of str
+        Units remaining in ``df_control`` after unit filtering — callers
+        use this to filter their own stats/pvals frames.
+    """
+    df = _standardize_columns(draws_df)
+
+    if outcome_col not in df.columns:
+        outcome_col = _detect_outcome_column(df)
+
+    resolved_categories = (
+        categories if categories is not None else df["group"].unique().tolist()
+    )
+    df = df[df["group"].isin(resolved_categories)]
+
+    treated_units = _identify_treated_units(df)
+
+    df_control = df[df["treatment"] == 0].copy()
+    df_control = _filter_ppc_units(
+        df_control,
+        treated_units,
+        ppc_units=ppc_units,
+        ppc_exclude_units=ppc_exclude_units,
+    )
+
+    df_control["pred_diff"] = df_control["ypred"] - np.exp(df_control["mu"])
+    df_control["obs_diff"] = df_control[outcome_col] - np.exp(df_control["mu"])
+
+    if sort_by_time and "time" in df_control.columns:
+        df_control = df_control.sort_values(["unit", "group", ".draw", "time"])
+
+    selected_units = df_control["unit"].unique().tolist()
+
+    return df_control, resolved_categories, selected_units
 
 
 def _compute_autocorrelation(x: np.ndarray, lag: int) -> float:
@@ -149,10 +261,10 @@ def _create_faceted_histograms(
     x_col: str,
     title: str,
     xlabel: str,
-    facet_cols: List[str],
-    figsize: Tuple[int, int],
+    facet_cols: list[str],
+    figsize: tuple[int, int],
     ncol: int = 3,
-) -> plt.Figure:
+) -> Figure:
     """
     Create faceted histogram plot with p-value annotations.
 
@@ -210,7 +322,9 @@ def _create_faceted_histograms(
     fig, axes = plt.subplots(nrow, ncol, figsize=figsize, squeeze=False)
     axes = axes.flatten()
 
-    for i, (facet_key, facet_label) in enumerate(zip(facet_keys, facet_labels)):
+    for i, (facet_key, facet_label) in enumerate(
+        zip(facet_keys, facet_labels, strict=True)
+    ):
         ax = axes[i]
 
         # Filter data for this facet
@@ -219,11 +333,17 @@ def _create_faceted_histograms(
             pval_mask = pvals_df[facet_cols[0]] == facet_key
         else:
             mask = np.all(
-                [stats_df[col] == val for col, val in zip(facet_cols, facet_key)],
+                [
+                    stats_df[col] == val
+                    for col, val in zip(facet_cols, facet_key, strict=True)
+                ],
                 axis=0,
             )
             pval_mask = np.all(
-                [pvals_df[col] == val for col, val in zip(facet_cols, facet_key)],
+                [
+                    pvals_df[col] == val
+                    for col, val in zip(facet_cols, facet_key, strict=True)
+                ],
                 axis=0,
             )
 
@@ -263,7 +383,7 @@ def _create_faceted_histograms(
         ax.set_ylabel("")
 
     # Hide unused axes
-    for j in range(i + 1, len(axes)):
+    for j in range(n_facets, len(axes)):
         axes[j].set_visible(False)
 
     # Set common labels
@@ -279,9 +399,11 @@ def _create_faceted_histograms(
 def make_abs_ppc_plot(
     draws_df: pd.DataFrame,
     outcome_col: str = "outcome",
-    categories: Optional[List[str]] = None,
-    figsize: Tuple[int, int] = (12, 8),
-) -> Tuple[plt.Figure, pd.DataFrame]:
+    categories: list[str] | None = None,
+    figsize: tuple[int, int] = (12, 8),
+    ppc_units: list[str] | None = None,
+    ppc_exclude_units: list[str] | None = None,
+) -> tuple[Figure, pd.DataFrame]:
     """
     Posterior Predictive Check: Maximum Absolute Residual.
 
@@ -320,49 +442,9 @@ def make_abs_ppc_plot(
     pvals_df : pd.DataFrame
         DataFrame with columns: unit, group, pval
     """
-    # Standardize column names
-    df = _standardize_columns(draws_df)
-
-    # Handle outcome column (might have custom name)
-    if outcome_col not in df.columns and "outcome" in df.columns:
-        outcome_col = "outcome"
-    elif outcome_col not in df.columns:
-        # Try legacy names
-        for legacy in ["births", "count", "y"]:
-            if legacy in df.columns:
-                outcome_col = legacy
-                break
-
-    if outcome_col not in df.columns:
-        raise ValueError(
-            f"Outcome column '{outcome_col}' not found in DataFrame. "
-            f"Available columns: {list(df.columns)}"
-        )
-
-    # Get categories
-    if categories is None:
-        categories = df["group"].unique().tolist()
-
-    # Filter to categories
-    df = df[df["group"].isin(categories)]
-
-    # Identify treated units
-    treated_units = _identify_treated_units(df)
-
-    # Filter to control period only
-    df_control = df[df["treatment"] == 0].copy()
-
-    # Filter to treated units only
-    df_control = df_control[df_control["unit"].isin(treated_units)]
-
-    # Exclude aggregate units if present (e.g., "Ban States")
-    df_control = df_control[
-        ~df_control["unit"].str.contains("Ban States", case=False, na=False)
-    ]
-
-    # Compute residuals
-    df_control["pred_diff"] = df_control["ypred"] - np.exp(df_control["mu"])
-    df_control["obs_diff"] = df_control[outcome_col] - np.exp(df_control["mu"])
+    df_control, categories, selected_units = _prepare_ppc_residuals(
+        draws_df, outcome_col, categories, ppc_units, ppc_exclude_units
+    )
 
     # Compute max absolute residual per unit/group/draw
     max_stats = (
@@ -383,13 +465,13 @@ def make_abs_ppc_plot(
         .reset_index()
     )
 
-    # Filter pvals to categories and treated units
+    # Filter pvals to categories and selected units
     pvals_df = pvals_df[pvals_df["group"].isin(categories)]
-    pvals_df = pvals_df[pvals_df["unit"].isin(treated_units)]
+    pvals_df = pvals_df[pvals_df["unit"].isin(selected_units)]
 
     # Create faceted plot
     fig = _create_faceted_histograms(
-        stats_df=max_stats[max_stats["unit"].isin(treated_units)],
+        stats_df=max_stats[max_stats["unit"].isin(selected_units)],
         pvals_df=pvals_df,
         x_col="diff_in_diff",
         title="Difference in Maximum Absolute Predicted Residual",
@@ -405,9 +487,11 @@ def make_acf_ppc_plot(
     draws_df: pd.DataFrame,
     lag: int = 6,
     outcome_col: str = "outcome",
-    categories: Optional[List[str]] = None,
-    figsize: Tuple[int, int] = (12, 8),
-) -> Tuple[plt.Figure, pd.DataFrame]:
+    categories: list[str] | None = None,
+    figsize: tuple[int, int] = (12, 8),
+    ppc_units: list[str] | None = None,
+    ppc_exclude_units: list[str] | None = None,
+) -> tuple[Figure, pd.DataFrame]:
     """
     Posterior Predictive Check: Autocorrelation of Residuals.
 
@@ -441,45 +525,14 @@ def make_acf_ppc_plot(
     pvals_df : pd.DataFrame
         DataFrame with columns: unit, group, pval
     """
-    # Standardize column names
-    df = _standardize_columns(draws_df)
-
-    # Handle outcome column
-    if outcome_col not in df.columns and "outcome" in df.columns:
-        outcome_col = "outcome"
-    elif outcome_col not in df.columns:
-        for legacy in ["births", "count", "y"]:
-            if legacy in df.columns:
-                outcome_col = legacy
-                break
-
-    if outcome_col not in df.columns:
-        raise ValueError(f"Outcome column '{outcome_col}' not found in DataFrame.")
-
-    # Get categories
-    if categories is None:
-        categories = df["group"].unique().tolist()
-
-    # Filter to categories
-    df = df[df["group"].isin(categories)]
-
-    # Identify treated units
-    treated_units = _identify_treated_units(df)
-
-    # Filter to control period and treated units
-    df_control = df[df["treatment"] == 0].copy()
-    df_control = df_control[df_control["unit"].isin(treated_units)]
-    df_control = df_control[
-        ~df_control["unit"].str.contains("Ban States", case=False, na=False)
-    ]
-
-    # Compute residuals
-    df_control["pred_diff"] = df_control["ypred"] - np.exp(df_control["mu"])
-    df_control["obs_diff"] = df_control[outcome_col] - np.exp(df_control["mu"])
-
-    # Sort by time within each group for proper ACF computation
-    if "time" in df_control.columns:
-        df_control = df_control.sort_values(["unit", "group", ".draw", "time"])
+    df_control, categories, selected_units = _prepare_ppc_residuals(
+        draws_df,
+        outcome_col,
+        categories,
+        ppc_units,
+        ppc_exclude_units,
+        sort_by_time=True,
+    )
 
     # Compute ACF per unit/group/draw
     def compute_acf_stats(group_df):
@@ -510,11 +563,11 @@ def make_acf_ppc_plot(
     )
 
     pvals_df = pvals_df[pvals_df["group"].isin(categories)]
-    pvals_df = pvals_df[pvals_df["unit"].isin(treated_units)]
+    pvals_df = pvals_df[pvals_df["unit"].isin(selected_units)]
 
     # Create faceted plot
     fig = _create_faceted_histograms(
-        stats_df=acf_stats,
+        stats_df=acf_stats[acf_stats["unit"].isin(selected_units)],
         pvals_df=pvals_df,
         x_col="diff_in_ac",
         title=f"Difference in Residual Autocorrelation (Lag {lag})",
@@ -529,9 +582,11 @@ def make_acf_ppc_plot(
 def make_rmse_ppc_plot(
     draws_df: pd.DataFrame,
     outcome_col: str = "outcome",
-    categories: Optional[List[str]] = None,
-    figsize: Tuple[int, int] = (12, 8),
-) -> Tuple[plt.Figure, pd.DataFrame]:
+    categories: list[str] | None = None,
+    figsize: tuple[int, int] = (12, 8),
+    ppc_units: list[str] | None = None,
+    ppc_exclude_units: list[str] | None = None,
+) -> tuple[Figure, pd.DataFrame]:
     """
     Posterior Predictive Check: RMSE of Residuals.
 
@@ -563,37 +618,9 @@ def make_rmse_ppc_plot(
     pvals_df : pd.DataFrame
         DataFrame with columns: unit, group, pval
     """
-    # Standardize column names
-    df = _standardize_columns(draws_df)
-
-    # Handle outcome column
-    if outcome_col not in df.columns and "outcome" in df.columns:
-        outcome_col = "outcome"
-    elif outcome_col not in df.columns:
-        for legacy in ["births", "count", "y"]:
-            if legacy in df.columns:
-                outcome_col = legacy
-                break
-
-    if outcome_col not in df.columns:
-        raise ValueError(f"Outcome column '{outcome_col}' not found in DataFrame.")
-
-    # Get categories
-    if categories is None:
-        categories = df["group"].unique().tolist()
-
-    # Filter to categories
-    df = df[df["group"].isin(categories)]
-
-    # Identify treated units
-    treated_units = _identify_treated_units(df)
-
-    # Filter to control period (all units, not just treated, per R code)
-    df_control = df[df["treatment"] == 0].copy()
-
-    # Compute residuals
-    df_control["pred_diff"] = df_control["ypred"] - np.exp(df_control["mu"])
-    df_control["obs_diff"] = df_control[outcome_col] - np.exp(df_control["mu"])
+    df_control, categories, selected_units = _prepare_ppc_residuals(
+        draws_df, outcome_col, categories, ppc_units, ppc_exclude_units
+    )
 
     # Compute RMSE per unit/group/draw
     rmse_stats = (
@@ -617,10 +644,10 @@ def make_rmse_ppc_plot(
     )
 
     pvals_df = pvals_df[pvals_df["group"].isin(categories)]
-    pvals_df = pvals_df[pvals_df["unit"].isin(treated_units)]
+    pvals_df = pvals_df[pvals_df["unit"].isin(selected_units)]
 
-    # Filter stats to treated units for plotting
-    rmse_stats_plot = rmse_stats[rmse_stats["unit"].isin(treated_units)]
+    # Filter stats to selected units for plotting
+    rmse_stats_plot = rmse_stats[rmse_stats["unit"].isin(selected_units)]
     rmse_stats_plot = rmse_stats_plot[rmse_stats_plot["group"].isin(categories)]
 
     # Create faceted plot
@@ -639,12 +666,14 @@ def make_rmse_ppc_plot(
 
 def make_unit_corr_ppc_plot(
     draws_df: pd.DataFrame,
-    max_treat_date: Optional[str] = None,
+    max_treat_date: str | None = None,
     outcome_col: str = "outcome",
-    categories: Optional[List[str]] = None,
+    categories: list[str] | None = None,
     ndraws: int = 1000,
-    figsize: Tuple[int, int] = (10, 6),
-) -> Tuple[plt.Figure, pd.DataFrame]:
+    figsize: tuple[int, int] = (10, 6),
+    ppc_units: list[str] | None = None,
+    ppc_exclude_units: list[str] | None = None,
+) -> tuple[Figure, pd.DataFrame]:
     """
     Posterior Predictive Check: Cross-Unit Correlation (Spectral Norm).
 
@@ -686,16 +715,8 @@ def make_unit_corr_ppc_plot(
     df = _standardize_columns(draws_df)
 
     # Handle outcome column
-    if outcome_col not in df.columns and "outcome" in df.columns:
-        outcome_col = "outcome"
-    elif outcome_col not in df.columns:
-        for legacy in ["births", "count", "y"]:
-            if legacy in df.columns:
-                outcome_col = legacy
-                break
-
     if outcome_col not in df.columns:
-        raise ValueError(f"Outcome column '{outcome_col}' not found in DataFrame.")
+        outcome_col = _detect_outcome_column(df)
 
     # Get categories
     if categories is None:
@@ -703,6 +724,15 @@ def make_unit_corr_ppc_plot(
 
     # Filter to categories
     df = df[df["group"].isin(categories)]
+
+    if ppc_units is not None or ppc_exclude_units is not None:
+        all_units = cast(pd.Series, df["unit"]).drop_duplicates().tolist()
+        df = _filter_ppc_units(
+            df,
+            treated_units=all_units,
+            ppc_units=ppc_units,
+            ppc_exclude_units=ppc_exclude_units,
+        )
 
     # Filter by max_treat_date if provided
     if max_treat_date is not None and "time" in df.columns:
@@ -845,16 +875,15 @@ def make_unit_corr_ppc_plot(
 
 def make_raw_rate_plot(
     df: pd.DataFrame,
-    group: Optional[str] = None,
+    group: str | None = None,
     unit_col: str = "unit",
     rate_multiplier: float = 1000,
-    treatment_dates: Optional[Dict[str, str]] = None,
-    separate_unit: Optional[str] = None,
-    separate_texas: bool = False,  # Backward compatibility alias
-    smooth_window: Optional[int] = None,
+    treatment_dates: dict[str, str] | None = None,
+    separate_unit: str | None = None,
+    smooth_window: int | None = None,
     plot_type: str = "rate",  # 'rate' or 'count'
-    figsize: Tuple[int, int] = (10, 6),
-) -> Tuple[plt.Figure, plt.Axes]:
+    figsize: tuple[int, int] = (10, 6),
+) -> tuple[Figure, Axes]:
     """
     Create a time series plot showing rates by treatment group.
 
@@ -882,9 +911,6 @@ def make_raw_rate_plot(
     separate_unit : str, optional
         If provided, show this specific unit as a separate group from other
         treated units. Useful for highlighting a particular unit of interest.
-    separate_texas : bool, default=False
-        Deprecated. Use separate_unit='Texas' instead.
-        If True, equivalent to separate_unit='Texas'.
     smooth_window : int, optional
         Rolling window size for smoothing. If None, no smoothing applied.
     plot_type : str, default='rate'
@@ -902,31 +928,19 @@ def make_raw_rate_plot(
 
     Examples
     --------
-    >>> fig, ax = make_raw_rate_plot(df, group='total', rate_multiplier=1000)
-    >>> fig.savefig('rate_plot.png')
+    >>> fig, ax = make_raw_rate_plot(df, group="total", rate_multiplier=1000)
+    >>> fig.savefig("rate_plot.png")
 
     >>> # Separate a specific unit
     >>> fig, ax = make_raw_rate_plot(
     ...     df,
-    ...     group='total',
-    ...     treatment_dates={'Policy': '2022-06-24'},
-    ...     separate_unit='TX',
-    ...     smooth_window=3
+    ...     group="total",
+    ...     treatment_dates={"Policy": "2022-06-24"},
+    ...     separate_unit="TX",
+    ...     smooth_window=3,
     ... )
-
-    >>> # For backward compatibility with older code
-    >>> fig, ax = make_raw_rate_plot(df, group='total', separate_texas=True)
     """
     _setup_plot_style()
-
-    # Handle backward compatibility for separate_texas
-    if separate_texas and separate_unit is None:
-        separate_unit = "Texas"
-        warnings.warn(
-            "separate_texas is deprecated. Use separate_unit='Texas' instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
 
     # Standardize column names
     df = _standardize_columns(df)
@@ -1078,12 +1092,12 @@ def make_raw_rate_plot(
 
 def make_group_comparison_plot(
     df: pd.DataFrame,
-    groups: Optional[List[str]] = None,
+    groups: list[str] | None = None,
     rate_multiplier: float = 1000,
-    treatment_dates: Optional[Dict[str, str]] = None,
+    treatment_dates: dict[str, str] | None = None,
     plot_type: str = "rate",  # 'rate' or 'count'
-    figsize: Tuple[int, int] = (12, 8),
-) -> Tuple[plt.Figure, np.ndarray]:
+    figsize: tuple[int, int] = (12, 8),
+) -> tuple[Figure, np.ndarray]:
     """
     Create a faceted plot comparing rates across different outcome groups.
 
@@ -1116,11 +1130,9 @@ def make_group_comparison_plot(
     Examples
     --------
     >>> fig, axes = make_group_comparison_plot(
-    ...     df,
-    ...     groups=['usborn', 'foreign'],
-    ...     treatment_dates={'Policy': '2022-06-24'}
+    ...     df, groups=["usborn", "foreign"], treatment_dates={"Policy": "2022-06-24"}
     ... )
-    >>> fig.savefig('group_comparison.png')
+    >>> fig.savefig("group_comparison.png")
     """
     _setup_plot_style()
 
@@ -1227,7 +1239,7 @@ def make_group_comparison_plot(
         # Add treatment date markers with colors
         if treatment_dates is not None:
             marker_colors = ["#FF8C00", "#DC143C", "#9400D3", "#228B22"]
-            for i, (label, date_str) in enumerate(treatment_dates.items()):
+            for i, (_label, date_str) in enumerate(treatment_dates.items()):
                 date = pd.to_datetime(date_str)
                 color = marker_colors[i % len(marker_colors)]
                 ax.axvline(
@@ -1266,8 +1278,8 @@ def make_unit_fit_plot(
     unit_name: str,
     group: str = "total",
     outcome_col: str = "outcome",
-    figsize: Tuple[int, int] = (10, 6),
-) -> Tuple[plt.Figure, plt.Axes]:
+    figsize: tuple[int, int] = (10, 6),
+) -> tuple[Figure, Axes]:
     """
     Make fit plot showing observed vs predicted over time for a specific unit.
 
@@ -1293,12 +1305,10 @@ def make_unit_fit_plot(
     sns.set_palette("husl")
     df = _standardize_columns(quantiles_df)
 
-    if outcome_col not in df.columns:
-        legacy_names = ["births", "count", "y"]
-        for lname in legacy_names:
-            if lname in df.columns:
-                outcome_col = lname
-                break
+    if outcome_col not in df.columns and any(
+        col in df.columns for col in ("outcome", "births", "count", "y")
+    ):
+        outcome_col = _detect_outcome_column(df)
 
     df_plot = df[(df["group"] == group) & (df["unit"] == unit_name)].copy()
     if df_plot.empty:
@@ -1359,19 +1369,22 @@ def make_unit_fit_plot(
         )
 
     # Treatment line
-    if "treated_unit" in df_plot.columns and df_plot["treated_unit"].iloc[0]:
-        if "treatment" in df_plot.columns:
-            treated_times = df_plot[df_plot["treatment"] == 1]["time"]
-            if not treated_times.empty:
-                t_date = treated_times.iloc[0]
-                ax.axvline(
-                    x=t_date,
-                    color="black",
-                    linestyle="--",
-                    linewidth=1.5,
-                    alpha=0.7,
-                    label="Treatment start",
-                )
+    if (
+        "treated_unit" in df_plot.columns
+        and df_plot["treated_unit"].iloc[0]
+        and "treatment" in df_plot.columns
+    ):
+        treated_times = df_plot[df_plot["treatment"] == 1]["time"]
+        if not treated_times.empty:
+            t_date = treated_times.iloc[0]
+            ax.axvline(
+                x=t_date,
+                color="black",
+                linestyle="--",
+                linewidth=1.5,
+                alpha=0.7,
+                label="Treatment start",
+            )
 
     ax.set_title(f"Model Fit: {unit_name} ({group})", fontsize=14, fontweight="bold")
     ax.set_xlabel("Time", fontsize=12)
@@ -1389,8 +1402,8 @@ def make_unit_gap_plot(
     unit_name: str,
     group: str = "total",
     outcome_col: str = "outcome",
-    figsize: Tuple[int, int] = (10, 6),
-) -> Tuple[plt.Figure, plt.Axes]:
+    figsize: tuple[int, int] = (10, 6),
+) -> tuple[Figure, Axes]:
     """
     Make gap plot showing difference between observed and predicted relative to prediction
     for a specific unit.
@@ -1416,12 +1429,10 @@ def make_unit_gap_plot(
     _setup_plot_style()
     df = _standardize_columns(quantiles_df)
 
-    if outcome_col not in df.columns:
-        legacy_names = ["births", "count", "y"]
-        for lname in legacy_names:
-            if lname in df.columns:
-                outcome_col = lname
-                break
+    if outcome_col not in df.columns and any(
+        col in df.columns for col in ("outcome", "births", "count", "y")
+    ):
+        outcome_col = _detect_outcome_column(df)
 
     df_plot = df[(df["group"] == group) & (df["unit"] == unit_name)].copy()
     if df_plot.empty:
@@ -1456,11 +1467,14 @@ def make_unit_gap_plot(
 
     # Treatment Date
     t_date = None
-    if "treated_unit" in df_plot.columns and df_plot["treated_unit"].iloc[0]:
-        if "treatment" in df_plot.columns:
-            treated_times = df_plot[df_plot["treatment"] == 1]["time"]
-            if not treated_times.empty:
-                t_date = treated_times.iloc[0]
+    if (
+        "treated_unit" in df_plot.columns
+        and df_plot["treated_unit"].iloc[0]
+        and "treatment" in df_plot.columns
+    ):
+        treated_times = df_plot[df_plot["treatment"] == 1]["time"]
+        if not treated_times.empty:
+            t_date = treated_times.iloc[0]
 
     fig, ax = plt.subplots(figsize=figsize)
 
@@ -1515,18 +1529,18 @@ def make_unit_gap_plot(
 
 def make_interval_plot(
     merged_df: pd.DataFrame,
-    units: Optional[List[str]] = None,
+    units: list[str] | None = None,
     group_var: str = "unit",
-    categories: Optional[List[str]] = None,
+    categories: list[str] | None = None,
     outcome_col: str = "outcome",
     denom_col: str = "denominator",
     rate_normalizer: float = 1000.0,
     estimand: str = "diff",
     method: str = "mu",
     x_var: str = "unit",
-    color_group: Optional[str] = None,
-    figsize: Tuple[int, int] = (12, 10),
-) -> Tuple[plt.Figure, plt.Axes]:
+    color_group: str | None = None,
+    figsize: tuple[int, int] = (12, 10),
+) -> tuple[Figure, Axes]:
     """
     Generate interval plots showing causal effects with credible intervals using seaborn aesthetics.
 
@@ -1561,12 +1575,10 @@ def make_interval_plot(
     if color_group is None:
         color_group = "group" if group_var == "unit" else "unit"
 
-    if outcome_col not in df.columns:
-        legacy_names = ["births", "count", "y"]
-        for lname in legacy_names:
-            if lname in df.columns:
-                outcome_col = lname
-                break
+    if outcome_col not in df.columns and any(
+        col in df.columns for col in ("outcome", "births", "count", "y")
+    ):
+        outcome_col = _detect_outcome_column(df)
 
     if denom_col not in df.columns and "population" in df.columns:
         denom_col = "population"
@@ -1775,12 +1787,10 @@ def make_summary_table(
     """
     df = _standardize_columns(merged_df)
 
-    if outcome_col not in df.columns:
-        legacy_names = ["births", "count", "y"]
-        for lname in legacy_names:
-            if lname in df.columns:
-                outcome_col = lname
-                break
+    if outcome_col not in df.columns and any(
+        col in df.columns for col in ("outcome", "births", "count", "y")
+    ):
+        outcome_col = _detect_outcome_column(df)
 
     if denom_col not in df.columns and "population" in df.columns:
         denom_col = "population"
@@ -1883,14 +1893,17 @@ def make_summary_table(
 
 def make_all_ppc_plots(
     draws_df: pd.DataFrame,
-    output_dir: Optional[str] = None,
+    output_dir: str | None = None,
     outcome_col: str = "outcome",
-    categories: Optional[List[str]] = None,
-    figsize: Tuple[int, int] = (12, 8),
+    categories: list[str] | None = None,
+    figsize: tuple[int, int] = (12, 8),
     acf_lag: int = 6,
-    max_treat_date: Optional[str] = None,
+    acf_lags: list[int] | None = None,
+    max_treat_date: str | None = None,
     ndraws: int = 1000,
-) -> Dict[str, Dict]:
+    ppc_units: list[str] | None = None,
+    ppc_exclude_units: list[str] | None = None,
+) -> dict[str, dict]:
     """
     Generate all PPC plots and optionally save to files.
 
@@ -1926,27 +1939,46 @@ def make_all_ppc_plots(
     # Maximum absolute residual
     logger.info("  - Maximum absolute residual plot...")
     fig_abs, pvals_abs = make_abs_ppc_plot(
-        draws_df, outcome_col=outcome_col, categories=categories, figsize=figsize
+        draws_df,
+        outcome_col=outcome_col,
+        categories=categories,
+        figsize=figsize,
+        ppc_units=ppc_units,
+        ppc_exclude_units=ppc_exclude_units,
     )
     results["abs"] = {"fig": fig_abs, "pvals": pvals_abs}
     logger.debug(f"    Generated {len(pvals_abs)} p-values for abs residual check")
 
     # ACF
-    logger.info(f"  - ACF plot (lag={acf_lag})...")
-    fig_acf, pvals_acf = make_acf_ppc_plot(
-        draws_df,
-        lag=acf_lag,
-        outcome_col=outcome_col,
-        categories=categories,
-        figsize=figsize,
-    )
-    results["acf"] = {"fig": fig_acf, "pvals": pvals_acf}
-    logger.debug(f"    Generated {len(pvals_acf)} p-values for ACF check")
+    resolved_acf_lags = acf_lags if acf_lags is not None else [acf_lag]
+    acf_results = {}
+    for lag in resolved_acf_lags:
+        logger.info(f"  - ACF plot (lag={lag})...")
+        fig_acf, pvals_acf = make_acf_ppc_plot(
+            draws_df,
+            lag=lag,
+            outcome_col=outcome_col,
+            categories=categories,
+            figsize=figsize,
+            ppc_units=ppc_units,
+            ppc_exclude_units=ppc_exclude_units,
+        )
+        acf_key = f"acf_lag{lag}"
+        results[acf_key] = {"fig": fig_acf, "pvals": pvals_acf, "lag": lag}
+        acf_results[acf_key] = results[acf_key]
+        logger.debug(f"    Generated {len(pvals_acf)} p-values for ACF check")
+    if len(resolved_acf_lags) == 1:
+        results["acf"] = next(iter(acf_results.values()))
 
     # RMSE
     logger.info("  - RMSE plot...")
     fig_rmse, pvals_rmse = make_rmse_ppc_plot(
-        draws_df, outcome_col=outcome_col, categories=categories, figsize=figsize
+        draws_df,
+        outcome_col=outcome_col,
+        categories=categories,
+        figsize=figsize,
+        ppc_units=ppc_units,
+        ppc_exclude_units=ppc_exclude_units,
     )
     results["rmse"] = {"fig": fig_rmse, "pvals": pvals_rmse}
     logger.debug(f"    Generated {len(pvals_rmse)} p-values for RMSE check")
@@ -1960,6 +1992,8 @@ def make_all_ppc_plots(
         categories=categories,
         ndraws=ndraws,
         figsize=(10, 6),
+        ppc_units=ppc_units,
+        ppc_exclude_units=ppc_exclude_units,
     )
     results["unit_corr"] = {"fig": fig_corr, "pvals": pvals_corr}
     logger.debug(f"    Generated {len(pvals_corr)} p-values for unit correlation check")
@@ -1973,7 +2007,11 @@ def make_all_ppc_plots(
         fig_abs.savefig(
             output_path / "ppc_abs_residual.png", dpi=150, bbox_inches="tight"
         )
-        fig_acf.savefig(output_path / "ppc_acf.png", dpi=150, bbox_inches="tight")
+        for lag in resolved_acf_lags:
+            acf_key = f"acf_lag{lag}"
+            results[acf_key]["fig"].savefig(
+                output_path / f"ppc_acf_lag{lag}.png", dpi=150, bbox_inches="tight"
+            )
         fig_rmse.savefig(output_path / "ppc_rmse.png", dpi=150, bbox_inches="tight")
         fig_corr.savefig(
             output_path / "ppc_unit_corr.png", dpi=150, bbox_inches="tight"
@@ -1983,6 +2021,8 @@ def make_all_ppc_plots(
         # Save p-values to CSV
         all_pvals = []
         for name, data in results.items():
+            if name == "acf":
+                continue
             pvals = data["pvals"].copy()
             pvals["check_type"] = name
             all_pvals.append(pvals)

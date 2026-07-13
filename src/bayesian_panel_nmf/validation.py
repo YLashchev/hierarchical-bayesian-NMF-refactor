@@ -1,7 +1,8 @@
 """Config and data validation. Raises ConfigError or DataError with concise messages."""
 
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any
+
 import numpy as np
 
 
@@ -119,8 +120,42 @@ def _validate_config_boolean_flags(
     _require_bool(mcmc_cfg.get("progress_bar"), "mcmc.progress_bar")
 
     output_cfg = config.get("output", {}) or {}
-    for flag in ("figures", "clean"):
+    for flag in (
+        "figures",
+        "clean",
+        "save_traces",
+        "print_tables",
+        "print_target_table",
+    ):
         _require_bool(output_cfg.get(flag), f"output.{flag}")
+
+    aggregate_units = output_cfg.get("aggregate_units")
+    if aggregate_units is not None:
+        if not isinstance(aggregate_units, list):
+            raise ConfigError("config['output.aggregate_units'] must be a list")
+        for i, spec in enumerate(aggregate_units):
+            if isinstance(spec, dict):
+                _require_bool(
+                    spec.get("include_treated_units"),
+                    f"output.aggregate_units.{i}.include_treated_units",
+                )
+                _require_bool(
+                    spec.get("include_all_units"),
+                    f"output.aggregate_units.{i}.include_all_units",
+                )
+                _require_bool(spec.get("strict"), f"output.aggregate_units.{i}.strict")
+                _require_bool(
+                    spec.get("overwrite"), f"output.aggregate_units.{i}.overwrite"
+                )
+
+    ppc_acf_lags = output_cfg.get("ppc_acf_lags")
+    if ppc_acf_lags is not None:
+        if not isinstance(ppc_acf_lags, list) or not ppc_acf_lags:
+            raise ConfigError("config['output.ppc_acf_lags'] must be a non-empty list")
+        if not all(isinstance(lag, int) and lag > 0 for lag in ppc_acf_lags):
+            raise ConfigError(
+                "config['output.ppc_acf_lags'] must contain positive integers"
+            )
 
 
 def _validate_data_schema(config: dict) -> tuple[dict, dict]:
@@ -181,7 +216,7 @@ def validate_filepath(filepath: str) -> Path:
     return path
 
 
-def validate_groups(groups: List[str]) -> None:
+def validate_groups(groups: list[str]) -> None:
     """Require groups to be a non-empty list of strings."""
     if not groups or not isinstance(groups, list):
         raise DataError("groups must be non-empty list")
@@ -279,7 +314,7 @@ def validate_samples(samples: dict[str, np.ndarray]) -> None:
 
 
 def validate_predictions(
-    predictions: np.ndarray, samples: Optional[dict[str, Any]] = None
+    predictions: np.ndarray, samples: dict[str, Any] | None = None
 ) -> None:
     """
     Validate predictions array.
@@ -307,16 +342,12 @@ def validate_predictions(
             f"predictions must be 5D (C,S,K,D,N), got shape {predictions.shape}"
         )
 
-    if samples is not None and "mu_ctrl" in samples:
-        if predictions.shape != samples["mu_ctrl"].shape:
-            raise DataError(
-                f"predictions shape {predictions.shape} != "
-                f"samples['mu_ctrl'] shape {samples['mu_ctrl'].shape}"
-            )
-
-
-# Backwards compatibility aliases
-ValidationError = DataError
-ConfigValidationError = ConfigError
-DataValidationError = DataError
-ArrayShapeError = DataError
+    if (
+        samples is not None
+        and "mu_ctrl" in samples
+        and predictions.shape != samples["mu_ctrl"].shape
+    ):
+        raise DataError(
+            f"predictions shape {predictions.shape} != "
+            f"samples['mu_ctrl'] shape {samples['mu_ctrl'].shape}"
+        )

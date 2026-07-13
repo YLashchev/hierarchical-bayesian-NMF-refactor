@@ -95,7 +95,8 @@ model:
 # MCMC Settings
 # -----------------------------------------------------------------------------
 mcmc:
-  num_chains: 4
+  auto_parallelism: true
+  max_chains: 4
   num_warmup: 1000
   num_samples: 2500
   thinning: 10
@@ -103,16 +104,8 @@ mcmc:
   progress_bar: true
 
 # -----------------------------------------------------------------------------
-# Parallelization
-# -----------------------------------------------------------------------------
-parallel:
-  # Set to 1 for sequential execution, or -1 to use the maximum safe count.
-  analysis_workers: 1
-
-# -----------------------------------------------------------------------------
 # Output Settings
 # -----------------------------------------------------------------------------
 output:
   figures: false
   clean: false
-  filename_pattern: "{distribution}_{outcome}_{type}_{rank}"

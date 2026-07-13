@@ -12,7 +12,6 @@ observation selection, without running the full NumPyro plate-based model
 import numpy as np
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers: extract the mask logic from panel_nmf_model.model()
 # ---------------------------------------------------------------------------

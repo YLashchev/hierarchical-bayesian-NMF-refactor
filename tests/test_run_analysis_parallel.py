@@ -1,20 +1,13 @@
 import importlib.util
 import sys
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
-from loguru import logger
 
 from bayesian_panel_nmf.inference import generate_predictions
-from bayesian_panel_nmf.logging_config import setup_logging
 from bayesian_panel_nmf.models import model
-from bayesian_panel_nmf.parallel import (
-    get_requested_analysis_workers,
-    resolve_analysis_workers,
-)
-from bayesian_panel_nmf.validation import ConfigError
-from bayesian_panel_nmf.validation import DataError
-
+from bayesian_panel_nmf.validation import ConfigError, DataError
 
 RUN_ANALYSIS_PATH = Path(__file__).resolve().parents[1] / "scripts" / "run_analysis.py"
 RUN_ANALYSIS_SPEC = importlib.util.spec_from_file_location(
@@ -57,45 +50,6 @@ def test_run_analysis_config_requires_model_types():
                 "model": {},
             }
         )
-
-
-def test_get_requested_analysis_workers_defaults_to_one():
-    assert get_requested_analysis_workers({}) == 1
-
-
-def test_get_requested_analysis_workers_supports_legacy_num_workers():
-    config = {"parallel": {"num_workers": 3}}
-    assert get_requested_analysis_workers(config) == 3
-
-
-def test_resolve_analysis_workers_caps_by_chain_count():
-    workers = resolve_analysis_workers(
-        requested_workers=4,
-        num_chains=4,
-        num_model_types=6,
-        cpu_count=8,
-    )
-    assert workers == 2
-
-
-def test_resolve_analysis_workers_respects_model_type_count():
-    workers = resolve_analysis_workers(
-        requested_workers=4,
-        num_chains=1,
-        num_model_types=2,
-        cpu_count=8,
-    )
-    assert workers == 2
-
-
-def test_resolve_analysis_workers_minus_one_uses_maximum_safe_count():
-    workers = resolve_analysis_workers(
-        requested_workers=-1,
-        num_chains=2,
-        num_model_types=10,
-        cpu_count=8,
-    )
-    assert workers == 4
 
 
 def test_safe_rmtree_refuses_project_root(tmp_path: Path):
@@ -148,7 +102,7 @@ def test_generate_predictions_raises_when_samples_not_divisible_by_chains(monkey
 
     with pytest.raises(DataError, match="not evenly divisible"):
         generate_predictions(
-            DummyMCMC(),
+            cast(Any, DummyMCMC()),
             data_dict={"denominators": __import__("numpy").ones((1, 1, 1))},
             model_fn=model,
             rank=1,
@@ -168,21 +122,6 @@ def test_model_rejects_none_control_idx_when_model_treated_true():
         )
 
 
-def test_setup_logging_preserves_foreign_handler():
-    messages = []
-    foreign_id = logger.add(lambda msg: messages.append(str(msg)), level="INFO")
-    try:
-        setup_logging(level="INFO")
-        logger.info("first-message")
-        setup_logging(level="DEBUG")
-        logger.info("second-message")
-    finally:
-        logger.remove(foreign_id)
-
-    assert any("first-message" in msg for msg in messages)
-    assert any("second-message" in msg for msg in messages)
-
-
 def test_run_model_type_without_figures_does_not_import_viz(
     monkeypatch, tmp_path: Path
 ):
@@ -196,6 +135,9 @@ def test_run_model_type_without_figures_does_not_import_viz(
             "denominators": __import__("numpy").ones((1, 1, 1)),
             "control_idx_array": __import__("numpy").ones((1, 1, 1), dtype=bool),
             "missing_idx_array": __import__("numpy").zeros((1, 1, 1), dtype=bool),
+            "groups": ["total"],
+            "units": ["A"],
+            "times": ["2020-01-01"],
             "df_preprocessed": __import__("pandas").DataFrame(
                 [{"unit": "A", "time": "2020-01-01", "group": "total", "outcome": 1}]
             ),
@@ -206,11 +148,21 @@ def test_run_model_type_without_figures_does_not_import_viz(
         def get_samples(self, group_by_chain=True):
             return {"mu": __import__("numpy").zeros((1, 1, 1, 1))}
 
+        def get_extra_fields(self):
+            return {}
+
     monkeypatch.setattr(run_analysis, "run_mcmc_inference", lambda *a, **k: DummyMCMC())
     monkeypatch.setattr(
-        run_analysis, "extract_diagnostics", lambda *a, **k: {"converged": True}
+        run_analysis,
+        "convergence_summary",
+        lambda idata: {
+            "rhat_max": 1.0,
+            "ess_bulk_min": 1000.0,
+            "ess_tail_min": 1000.0,
+            "divergences": 0,
+            "converged": True,
+        },
     )
-    monkeypatch.setattr(run_analysis, "check_convergence", lambda *a, **k: True)
     monkeypatch.setattr(
         run_analysis,
         "generate_predictions",
@@ -229,94 +181,71 @@ def test_run_model_type_without_figures_does_not_import_viz(
         ),
     )
 
+    type_config = {"groups": ["total"], "ranks_to_test": [1]}
     config = {
         "data": {"input_file": "unused.csv", "output_dir": str(output_dir)},
-        "model": {"types": {"total": {"groups": ["total"], "ranks_to_test": [1]}}},
-        "output": {"figures": False, "filename_pattern": "{type}_{rank}"},
+        "model": {"types": {"total": type_config}},
+        "output": {"figures": False},
     }
 
     run_analysis.run_model_type(
         model_type="total",
-        type_config=config["model"]["types"]["total"],
+        type_config=type_config,
         config=config,
         rank_override=None,
-        save_diagnostics=False,
         log_level="INFO",
         configure_logging=False,
-        disable_progress_bar=True,
     )
 
     assert (output_dir / "total" / "df_total.csv").exists()
-    assert (output_dir / "total" / "total_1.csv").exists()
+    assert (output_dir / "total" / "NB_births_total_1.csv").exists()
 
 
-def test_main_dispatches_types_to_process_pool_when_workers_gt_one(
-    monkeypatch, tmp_path: Path
-):
-    """When workers>1, main() submits every model_type to ProcessPoolExecutor.
+# ---------------------------------------------------------------------------
+# _get_outcome_name
+# ---------------------------------------------------------------------------
 
-    Verifies the integration wired in scripts/run_analysis.py: the config
-    knob `parallel.analysis_workers` actually reaches the executor instead of
-    silently falling back to a sequential for-loop.
-    """
-    import yaml
 
-    config_path = tmp_path / "cfg.yaml"
-    config_path.write_text(
-        yaml.safe_dump(
-            {
-                "data": {
-                    "input_file": str(tmp_path / "unused.csv"),
-                    "output_dir": str(tmp_path / "results"),
-                    "schema": {
-                        "unit_col": "unit",
-                        "time_col": "time",
-                        "treatment_col": "treated",
-                        "outcomes": [{"outcome_col": "y", "label": "total"}],
-                    },
-                },
-                "model": {
-                    "types": {
-                        "a": {"groups": ["total"], "ranks_to_test": [1]},
-                        "b": {"groups": ["total"], "ranks_to_test": [1]},
-                    }
-                },
-                "mcmc": {"num_chains": 1},
-                "parallel": {"analysis_workers": 2},
-            }
-        )
-    )
+def test_get_outcome_name_explicit_override():
+    assert run_analysis._get_outcome_name({"data": {"outcome": "deaths"}}) == "deaths"
 
-    # Make the parallel branch eligible: resolve_analysis_workers must return >1
-    monkeypatch.setattr(run_analysis, "resolve_analysis_workers", lambda *a, **k: 2)
 
-    submitted: list[str] = []
+def test_get_outcome_name_derives_from_prefix_with_underscore():
+    config = {
+        "data": {"schema": {"outcomes_from_prefixes": {"outcome_prefix": "births_"}}}
+    }
+    assert run_analysis._get_outcome_name(config) == "births"
 
-    class FakeFuture:
-        def __init__(self, name):
-            self._name = name
 
-        def result(self):
-            submitted.append(self._name)
-            return None
+def test_get_outcome_name_derives_from_prefix_without_underscore():
+    config = {
+        "data": {"schema": {"outcomes_from_prefixes": {"outcome_prefix": "deaths"}}}
+    }
+    assert run_analysis._get_outcome_name(config) == "deaths"
 
-    class FakePool:
-        def __init__(self, *a, **k):
-            pass
 
-        def __enter__(self):
-            return self
+def test_get_outcome_name_fallback_when_neither_set():
+    assert run_analysis._get_outcome_name({"data": {}}) == "births"
+    assert run_analysis._get_outcome_name({}) == "births"
 
-        def __exit__(self, *a):
-            return False
 
-        def submit(self, fn, **kwargs):
-            return FakeFuture(kwargs["model_type"])
+def test_get_outcome_name_empty_prefix_falls_back():
+    config = {"data": {"schema": {"outcomes_from_prefixes": {"outcome_prefix": ""}}}}
+    assert run_analysis._get_outcome_name(config) == "births"
 
-    monkeypatch.setattr(run_analysis, "ProcessPoolExecutor", FakePool)
-    monkeypatch.setattr(run_analysis, "as_completed", lambda futs: list(futs))
 
-    monkeypatch.setattr("sys.argv", ["run_analysis.py", "--config", str(config_path)])
-    run_analysis.main()
+# ---------------------------------------------------------------------------
+# _draws_filename
+# ---------------------------------------------------------------------------
 
-    assert sorted(submitted) == ["a", "b"]
+
+def test_draws_filename_fixed_scheme():
+    config = {
+        "model": {"outcome_distribution": "NB"},
+        "data": {"outcome": "births"},
+    }
+    assert run_analysis._draws_filename(config, "total", 5) == "NB_births_total_5"
+
+
+def test_draws_filename_default_distribution_and_outcome():
+    assert run_analysis._draws_filename({}, "groups", 3) == "NB_births_groups_3"

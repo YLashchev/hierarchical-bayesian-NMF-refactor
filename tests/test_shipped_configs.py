@@ -1,6 +1,8 @@
-import pytest
 from pathlib import Path
-import yaml
+
+import pytest
+import yaml  # type: ignore[import-untyped]
+
 from bayesian_panel_nmf.validation import validate_config
 
 CONFIG_DIR = Path(__file__).parent.parent / "configs"

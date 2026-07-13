@@ -1,7 +1,7 @@
 # =============================================================================
 # Bayesian Panel NMF - Base Configuration
 # =============================================================================
-# 
+#
 # This is the generic configuration template for bayesian_panel_nmf.
 # Copy this file and modify for your specific analysis.
 #
@@ -16,26 +16,26 @@
 data:
   input_file: "data/panel_data.csv"
   output_dir: "results"
-  
+
   # Schema: Define how to interpret your data columns
   # This allows the package to work with any panel data format
   schema:
     # Panel unit identifier (e.g., state, firm, county, individual)
     unit_col: "state"
-    
+
     # Time column (will be parsed as datetime)
     time_col: "time"
-    
+
     # Treatment indicator column (0 = control, 1 = treated)
     treatment_col: "treated"
-    
+
     # Choose exactly one schema style:
     # 1) explicit outcomes (shown below), or
     # 2) outcomes_from_prefixes for many similarly named groups
     outcomes:
       - outcome_col: "outcome"
         label: "total"
-        denominator_col: "population"  # Optional: set to null if not applicable
+        denominator_col: "population" # Optional: set to null if not applicable
 
     # Shortcut for many groups with shared suffixes.
     # Use this instead of `outcomes`, not together with it.
@@ -43,18 +43,17 @@ data:
     #   outcome_prefix: "births_"
     #   denominator_prefix: "pop_"
     #   include: ["nhwhite", "hisp", "nhblack", "otherraceeth"]
-    
 
   # Date format for parsing time column
   # Use "auto" for automatic detection, or specify format string
   # Examples: "%Y-%m-%d", "%m/%d/%y", "%d-%b-%Y"
   date_format: "auto"
-  
+
   # Time period filtering (optional)
   # Set to null to use all available data
   start_date: null
   end_date: null
-  
+
   # Temporal aggregation
   aggregation:
     enabled: false
@@ -89,19 +88,28 @@ model:
       #                                      # (only if subgroups are disjoint)
       groups: ["total"]
       ranks_to_test: [10]
-  
+
+      # Drop units for THIS type only, e.g. exclude_units: ["Texas"]
+      # exclude_units: null
+
+    # Additional model types run as independent fits with their own groups
+    # and ranks. Example — stratified sub-groups sharing the same schema:
+    # stratified:
+    #   groups: ["teen", "age2534", "age3544"]
+    #   ranks_to_test: [10]
+
   # Negative Binomial dispersion parameter
   # Lower = more overdispersion; 1e-4 approximates Poisson
   nb_disp: 1.0e-4
-  
+
   # Whether to sample dispersion as a parameter
   # If false, uses fixed nb_disp value
   sample_disp: false
-  
+
   # Adjustment for missing/suppressed data
   # Set to true if your data has censored low counts
   adjust_for_missingness: false
-  
+
   # Whether to model treatment effects
   # Set to false for control-only model (counterfactual estimation)
   model_treated: true
@@ -110,33 +118,38 @@ model:
 # MCMC Settings
 # -----------------------------------------------------------------------------
 mcmc:
-  # Number of parallel chains
-  num_chains: 4
-  
+  # Automatically pick num_chains and chain_method from the visible JAX
+  # devices (see choose_mcmc_parallelism in mcmc_utils.py). This is the
+  # recommended default -- set to false only if you need to pin an exact
+  # chain count/method regardless of hardware (see the manual override
+  # example in README.md).
+  auto_parallelism: true
+
+  # Upper bound on chain count when auto_parallelism is true. Actual
+  # chain count may be lower on multi-device hosts (capped to the
+  # visible device count). Ignored when auto_parallelism is false --
+  # use num_chains below instead.
+  max_chains: 4
+
+  # Manual override values, used only when auto_parallelism: false.
+  # num_chains: 4
+  # chain_method: "sequential"  # "sequential", "parallel", or "vectorized"
+
   # Warmup iterations (burn-in)
   num_warmup: 1000
-  
+
   # Sampling iterations per chain
   num_samples: 2500
-  
+
   # Thinning interval (keep every Nth sample)
   # Reduces output size: effective samples = num_samples / thinning
   thinning: 10
-  
+
   # Random seed for reproducibility
   random_seed: 8675309
-  
+
   # Show progress bar during sampling
   progress_bar: true
-
-# -----------------------------------------------------------------------------
-# Parallelization Settings
-# -----------------------------------------------------------------------------
-parallel:
-  # Number of model types to run at once.
-  # This is separate from mcmc.num_chains, which controls chains within one fit.
-  # Set to 1 for sequential execution, or -1 to use the maximum safe count.
-  analysis_workers: 1
 
 # -----------------------------------------------------------------------------
 # Output Settings
@@ -144,4 +157,29 @@ parallel:
 output:
   figures: false
   clean: false
-  filename_pattern: "{distribution}_{type}_{rank}"
+  save_traces: false
+
+  # --- Reporting ---
+  # target_unit: null       # Unit for headline table & per-unit plots.
+  #                          # Null = auto-detect (unit with most post-treatment obs)
+  # report_groups: null      # Subset for per-unit figures; null = all groups
+  # print_tables: true        # Print rich terminal tables
+  # print_target_table: true   # Print the target-unit headline table (Table 1)
+
+  # --- Synthetic aggregate units (reporting/PPC only; NOT fed to model) ---
+  # aggregate_units:
+  #   - unit: "Treated units excluding Texas"
+  #     include_treated_units: true
+  #     exclude_units: ["Texas"]
+  #     strict: false                  # Error if exclude_units missing?
+  #     overwrite: false               # Overwrite existing unit with same name?
+  #   - unit: "All treated"
+  #     include_all_units: true
+
+  # --- PPC plot filtering ---
+  # ppc_units:                         # Include only these units in PPC
+  #   - "Texas"
+  # ppc_exclude_units:                 # Exclude these units from PPC
+  #   - "California"
+  # ppc_acf_lags: [6, 3, 1]           # ACF lags for temporal PPC checks
+  # ppc_unit_corr_max_time: "2022-04-01"  # Max date for unit-correlation PPC plot

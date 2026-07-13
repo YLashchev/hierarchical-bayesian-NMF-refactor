@@ -1,6 +1,6 @@
-from jax.scipy.special import logsumexp
 import numpyro
 from jax import numpy as jnp
+from jax.scipy.special import logsumexp
 from numpyro import distributions as dist
 
 

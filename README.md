@@ -19,7 +19,7 @@ Requires Python 3.12+ and [`uv`](https://docs.astral.sh/uv/). All other dependen
 The repo ships with `data/raw/fertility_data.csv` (state-level US birth counts 2016–2024) and two configs:
 
 - `configs/fertility_smoke_test.yaml` — 2 chains × 200+200 samples, rank 3, one model type. Runs in ~4 min on a laptop. For verifying the pipeline works, not for inference.
-- `configs/fertility_config.yaml` — 4 chains × 2000+2000 samples across 4 model types. Full production settings. Takes hours.
+- `configs/fertility_config.yaml` — 4 chains × 2000+2000 samples across 4 model types. Full production settings. Takes hours and writes large CSVs (hundreds of MB to ~1 GB per multi-group type).
 
 Smoke test first:
 
@@ -33,12 +33,25 @@ When that finishes cleanly, run the full analysis:
 uv run scripts/run_analysis.py --config configs/fertility_config.yaml
 ```
 
+Chain-level parallelism is chosen automatically from the visible JAX devices (`mcmc.auto_parallelism: true`, the default): a single-CPU host runs `mcmc.max_chains` chains sequentially, a single GPU runs them vectorized on that device, and a multi-device host (multiple CPUs exposed via `numpyro.set_host_device_count`, or multiple GPUs/TPUs) runs them in parallel across devices, capped at the visible device count. See `src/bayesian_panel_nmf/mcmc_utils.py::choose_mcmc_parallelism` for the exact rules. Model types configured under `model.types` always run sequentially, one after another, in a single process.
+
 Both write posterior draws + preprocessed data to `results/<type>/` (and figures under `results/<type>/figs/` when `output.figures: true`).
 
 Regenerate figures from an existing draws CSV without re-running MCMC:
 
 ```bash
 uv run scripts/generate_full_viz.py --results results/total/NB_births_total_3.csv
+```
+
+An ArviZ-based convergence gate (rank-normalized R-hat, bulk/tail ESS,
+divergences) always runs after MCMC and is written to `*_convergence.json`
+next to the draws CSV.
+
+To compute full post-hoc diagnostics from saved trace sidecars (all latent
+parameters), or limited diagnostics from saved draws (mu / mu_treated / ypred only):
+
+```bash
+uv run python scripts/compute_posthoc_diagnostics.py results/total/NB_births_total_5.csv --param-filter mu
 ```
 
 ## Using Your Own Data
@@ -140,23 +153,53 @@ model:
 ### Parallelism
 
 ```yaml
-parallel:
-  analysis_workers: 1 # 1 = sequential, -1 = auto-cap
-
 mcmc:
-  num_chains: 4 # chains within one fit
+  auto_parallelism: true  # default: pick num_chains/chain_method from devices
+  max_chains: 4             # upper bound on chain count
 ```
 
-`analysis_workers × num_chains` is capped against CPU count automatically — you won't oversubscribe the machine.
+By default, `choose_mcmc_parallelism` picks the chain count and execution method from `jax.devices()`: sequential on a single CPU, vectorized on a single GPU, parallel (capped at device count) on multiple CPUs/GPUs/TPUs.
 
-### Figures + cleanup
+To pin exact values manually instead (e.g. to force `vectorized` on a CPU for testing, or guarantee a specific chain count regardless of detected hardware), set `auto_parallelism: false` and provide both `num_chains` and `chain_method` explicitly:
+
+```yaml
+mcmc:
+  auto_parallelism: false
+  num_chains: 4
+  chain_method: "sequential"  # "sequential", "parallel", or "vectorized"
+```
+
+### Figures, diagnostics + cleanup
 
 ```yaml
 output:
   figures: true # auto-generate PPC + summary plots at the end of a run
   clean: false # wipe <output_dir>/<type>/ before writing
-  filename_pattern: "{distribution}_{type}_{rank}"
 ```
+
+Output filenames follow a fixed `{distribution}_{outcome}_{type}_{rank}` scheme (e.g. `NB_births_total_5.csv`), plus a `_convergence.json` sidecar with R-hat/ESS/divergence diagnostics written after every fit.
+
+### Reporting-only aggregate units and PPC selection
+
+Aggregate units are created after model fitting, only for reporting/PPC. They are not added to model input.
+
+```yaml
+output:
+  aggregate_units:
+    - unit: "Treated units excluding Texas" # dataset-specific name example
+      include_treated_units: true
+      exclude_units: ["Texas"]
+
+  ppc_units:
+    - "Texas"
+    - "Treated units excluding Texas"
+
+  ppc_acf_lags: [6, 3, 1]
+  ppc_unit_corr_max_time: "2022-04-01" # optional time < cutoff for unit-correlation PPC
+  ppc_exclude_units: [] # default: do not silently exclude aggregate units
+```
+
+Selectors are generic: use exactly one of `include_treated_units: true`, `include_all_units: true`, or `include_units: [...]`; add optional `exclude_units`, `strict`, or `overwrite` per aggregate spec.
 
 ## Outputs
 
@@ -166,7 +209,7 @@ Per model type, under `<output_dir>/<type>/`:
 | ---------------------------------- | -------------------------------------------------------------------------------------- |
 | `{distribution}_{type}_{rank}.csv` | Tidy posterior draws                                                                   |
 | `df_{type}.csv`                    | Preprocessed observed data (standardized columns)                                      |
-| `*_diagnostics.json`               | MCMC ESS, R-hat, divergences (when `--save-diagnostics`)                               |
+| `*_convergence.json`               | Always-on ArviZ convergence gate: R-hat, bulk/tail ESS, divergences                     |
 | `figs/` (subdir)                   | Fit/gap plots, PPC panels, interval plot, summary tables (when `output.figures: true`) |
 
 Posterior draws schema:
@@ -223,6 +266,8 @@ Built-in but still being hardened:
 - [ ] **Add MCMC diagnostics** - trace plots (log postperior), ESS, Rhats
 - [ ] **Unit test coverage** — current suite is mostly integration / regression against synthetic CSVs; add targeted unit tests for functions in `models/`, `inference.py`, and `output.py`
 - [ ] **GPU support** — JAX already runs on GPU; surface a config flag + verify chain parallelism against `numpyro.set_host_device_count`
+- [ ] **Server/HPC multi-model-type parallelism** — model types currently always run sequentially in one process (chain-level parallelism via `mcmc.auto_parallelism` is automatic within each fit). If running many independent model types on a server/HPC host becomes a bottleneck, revisit process-level parallelism across model types, with the same CPU/RAM oversubscription guards the removed `analysis_workers` mechanism had.
+- [ ] **Reference-style post-hoc diagnostics** — optionally save selected latent draws (`te`, treatment effects, `unit_weight`, `time_fac`, `disp`) so R-hat/ESS can be computed after a run without calling NumPyro `summary()` during production. Prefer Parquet or compact sidecar files over widening the main CSV; keep full-run diagnostics off by default.
 - [ ] **Spillover analysis** — diagnostics for contamination between treated and neighboring control units
 - [ ] **Donor-pool sensitivity** — systematic leave-one-out / leave-region-out robustness checks
 - [ ] **Additional outcome distributions** — Gaussian, Student-t for continuous outcomes
