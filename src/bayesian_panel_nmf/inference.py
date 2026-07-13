@@ -45,6 +45,19 @@ def convergence_summary(idata) -> dict[str, Any]:
     return result
 
 
+def _resolve_model_settings(config: dict) -> dict:
+    """Resolve the outcome-distribution settings shared by
+    run_mcmc_inference and generate_predictions, with defaults matching
+    the model's own signature defaults (outcome_dist='NB', nb_disp=1e-4,
+    sample_disp=False)."""
+    model_config = config.get("model", {})
+    return {
+        "outcome_dist": model_config.get("outcome_distribution", "NB"),
+        "nb_disp": model_config.get("nb_disp", 1e-4),
+        "sample_disp": model_config.get("sample_disp", False),
+    }
+
+
 def run_mcmc_inference(
     data_dict: dict[str, np.ndarray], model_fn: Callable, rank: int, config: dict
 ) -> MCMC:
@@ -104,10 +117,12 @@ def run_mcmc_inference(
     random_seed = mcmc_config.get("random_seed", 8675309)
     progress_bar = mcmc_config.get("progress_bar", True)
 
+    model_settings = _resolve_model_settings(config)
+    outcome_dist = model_settings["outcome_dist"]
+    nb_disp = model_settings["nb_disp"]
+    sample_disp = model_settings["sample_disp"]
+
     model_config = config.get("model", {})
-    outcome_dist = model_config.get("outcome_distribution", "NB")
-    nb_disp = model_config.get("nb_disp", 1e-4)
-    sample_disp = model_config.get("sample_disp", False)
     adjust_for_missingness = model_config.get("adjust_for_missingness", True)
     model_treated = model_config.get("model_treated", True)
 
@@ -199,10 +214,10 @@ def generate_predictions(
     mcmc_config = config.get("mcmc", {})
     random_seed = mcmc_config.get("random_seed", 8675309)
 
-    model_config = config.get("model", {})
-    outcome_dist = model_config.get("outcome_distribution", "NB")
-    nb_disp = model_config.get("nb_disp", 1e-4)
-    sample_disp = model_config.get("sample_disp", False)
+    model_settings = _resolve_model_settings(config)
+    outcome_dist = model_settings["outcome_dist"]
+    nb_disp = model_settings["nb_disp"]
+    sample_disp = model_settings["sample_disp"]
 
     # Offset seed from inference key so posterior predictive uses a different stream
     rng_key = random.PRNGKey(random_seed + 1)
