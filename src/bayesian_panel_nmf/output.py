@@ -47,6 +47,155 @@ def _optimize_dtypes(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _build_posterior_draws_frame(
+    samples: dict[str, np.ndarray],
+    predictions: np.ndarray,
+    groups: list[str],
+    units: list[str],
+    times: list,
+) -> pd.DataFrame:
+    """Build the long-format posterior draws frame (one row per
+    chain x sample x group x unit x time) from raw MCMC arrays.
+
+    Returns the draws frame with .draw/.chain/.iteration, group, unit,
+    time, ypred, mu, mu_treated, plus integer K/D/N index columns used
+    as merge keys by _merge_observed_columns.
+    """
+    C, S, K, D, N = (
+        predictions.shape[0],
+        predictions.shape[1],
+        predictions.shape[2],
+        predictions.shape[3],
+        predictions.shape[4],
+    )
+
+    mu_ctrl = samples["mu_ctrl"]  # (C, S, K, D, N)
+    has_te = "te" in samples
+
+    total_rows = C * S * K * D * N
+    logger.info(
+        f"Building draws dataframe: {C} chains x {S} samples x {K} groups x {D} units x {N} times"
+    )
+    logger.info(f"Total rows: {total_rows:,}")
+
+    # meshgrid builds the full (C,S,K,D,N) index grid vectorized
+    idx_arrays = np.meshgrid(
+        np.arange(C),
+        np.arange(S),
+        np.arange(K),
+        np.arange(D),
+        np.arange(N),
+        indexing="ij",
+    )
+    c_idx, s_idx, k_idx, d_idx, n_idx = (
+        idx_arrays[0],
+        idx_arrays[1],
+        idx_arrays[2],
+        idx_arrays[3],
+        idx_arrays[4],
+    )
+
+    c_flat = c_idx.ravel()
+    s_flat = s_idx.ravel()
+    k_flat = k_idx.ravel()
+    d_flat = d_idx.ravel()
+    n_flat = n_idx.ravel()
+
+    # draw_num / chain_num / iter_num are 1-indexed for downstream R/tidybayes consumers
+    draw_num = c_flat * S + s_flat + 1
+    chain_num = c_flat + 1
+    iter_num = s_flat + 1
+
+    ypred_flat = predictions.ravel().astype(np.float32)
+    mu_flat = mu_ctrl.ravel().astype(np.float32)
+
+    if has_te:
+        te_flat = samples["te"].ravel().astype(np.float32)
+        mu_treated_flat = mu_flat + te_flat
+    else:
+        mu_treated_flat = mu_flat.copy()
+
+    groups_arr = np.array(groups)
+    units_arr = np.array(units)
+    times_arr = np.array(times)
+
+    group_flat = groups_arr[k_flat]
+    unit_flat = units_arr[d_flat]
+    time_flat = times_arr[n_flat]
+
+    draws_df = pd.DataFrame(
+        {
+            ".draw": draw_num.astype(np.int32),
+            ".chain": chain_num.astype(np.int8),
+            ".iteration": iter_num.astype(np.int32),
+            "K": k_flat.astype(np.int16),
+            "D": d_flat.astype(np.int16),
+            "N": n_flat.astype(np.int16),
+            "group": pd.Categorical(group_flat, categories=groups),
+            "unit": pd.Categorical(unit_flat, categories=units),
+            "time": time_flat,
+            "ypred": ypred_flat,
+            "mu": mu_flat,
+            "mu_treated": mu_treated_flat,
+        }
+    )
+
+    logger.debug(f"Draws dataframe built: {len(draws_df):,} rows")
+
+    return draws_df
+
+
+def _merge_observed_columns(
+    draws_df: pd.DataFrame,
+    groups: list[str],
+    units: list[str],
+    times: list,
+    df_preprocessed: pd.DataFrame,
+) -> pd.DataFrame:
+    """Left-join observed outcome/denominator/treatment columns onto the
+    posterior draws frame, keyed on (group, unit, time) via integer
+    index columns, then drop the join-key columns and fix output column
+    order.
+    """
+    obs_df = df_preprocessed.copy()
+
+    group_to_idx = {g: i for i, g in enumerate(groups)}
+    unit_to_idx = {u: i for i, u in enumerate(units)}
+    time_to_idx = {t: i for i, t in enumerate(times)}
+
+    obs_df["K"] = obs_df["group"].map(group_to_idx).astype(np.int16)
+    obs_df["D"] = obs_df["unit"].map(unit_to_idx).astype(np.int16)
+    obs_df["N"] = obs_df["time"].map(time_to_idx).astype(np.int16)
+
+    obs_cols = ["outcome"]
+    if "denominator" in obs_df.columns:
+        obs_cols.append("denominator")
+    if "treatment" in obs_df.columns:
+        obs_cols.append("treatment")
+
+    obs_subset = obs_df[["K", "D", "N"] + obs_cols].drop_duplicates()
+
+    merged = draws_df.merge(obs_subset, on=["K", "D", "N"], how="left")
+    merged = merged.drop(columns=["K", "D", "N"])
+
+    col_order = [
+        ".draw",
+        ".chain",
+        ".iteration",
+        "unit",
+        "time",
+        "group",
+        "outcome",
+        "denominator",
+        "treatment",
+        "ypred",
+        "mu",
+        "mu_treated",
+    ]
+    col_order = [c for c in col_order if c in merged.columns]
+    return merged[col_order]
+
+
 def format_draws(
     samples: dict[str, np.ndarray], predictions: np.ndarray, data_dict: dict
 ) -> pd.DataFrame:
@@ -103,131 +252,15 @@ def format_draws(
     if missing:
         raise DataError(f"data_dict missing keys: {missing}")
 
-    # Dimensions from predictions: (chains, samples, groups, units, times)
-    C, S, K, D, N = (
-        predictions.shape[0],
-        predictions.shape[1],
-        predictions.shape[2],
-        predictions.shape[3],
-        predictions.shape[4],
-    )
-
-    # Extract posterior arrays
-    mu_ctrl = samples["mu_ctrl"]  # (C, S, K, D, N)
-    has_te = "te" in samples
-
-    total_rows = C * S * K * D * N
-    logger.info(
-        f"Building draws dataframe: {C} chains x {S} samples x {K} groups x {D} units x {N} times"
-    )
-    logger.info(f"Total rows: {total_rows:,}")
-
-    # meshgrid builds the full (C,S,K,D,N) index grid vectorized
-    idx_arrays = np.meshgrid(
-        np.arange(C),
-        np.arange(S),
-        np.arange(K),
-        np.arange(D),
-        np.arange(N),
-        indexing="ij",
-    )
-    c_idx, s_idx, k_idx, d_idx, n_idx = (
-        idx_arrays[0],
-        idx_arrays[1],
-        idx_arrays[2],
-        idx_arrays[3],
-        idx_arrays[4],
-    )
-
-    c_flat = c_idx.ravel()
-    s_flat = s_idx.ravel()
-    k_flat = k_idx.ravel()
-    d_flat = d_idx.ravel()
-    n_flat = n_idx.ravel()
-
-    # draw_num / chain_num / iter_num are 1-indexed for downstream R/tidybayes consumers
-    draw_num = c_flat * S + s_flat + 1
-    chain_num = c_flat + 1
-    iter_num = s_flat + 1
-
-    ypred_flat = predictions.ravel().astype(np.float32)
-    mu_flat = mu_ctrl.ravel().astype(np.float32)
-
-    if has_te:
-        te_flat = samples["te"].ravel().astype(np.float32)
-        mu_treated_flat = mu_flat + te_flat
-    else:
-        mu_treated_flat = mu_flat.copy()
-
     groups = data_dict["groups"]
     units = data_dict["units"]
     times = data_dict["times"]
 
-    groups_arr = np.array(groups)
-    units_arr = np.array(units)
-    times_arr = np.array(times)
+    draws_df = _build_posterior_draws_frame(samples, predictions, groups, units, times)
 
-    group_flat = groups_arr[k_flat]
-    unit_flat = units_arr[d_flat]
-    time_flat = times_arr[n_flat]
-
-    draws_df = pd.DataFrame(
-        {
-            ".draw": draw_num.astype(np.int32),
-            ".chain": chain_num.astype(np.int8),
-            ".iteration": iter_num.astype(np.int32),
-            "K": k_flat.astype(np.int16),
-            "D": d_flat.astype(np.int16),
-            "N": n_flat.astype(np.int16),
-            "group": pd.Categorical(group_flat, categories=groups),
-            "unit": pd.Categorical(unit_flat, categories=units),
-            "time": time_flat,
-            "ypred": ypred_flat,
-            "mu": mu_flat,
-            "mu_treated": mu_treated_flat,
-        }
+    merged = _merge_observed_columns(
+        draws_df, groups, units, times, data_dict["df_preprocessed"]
     )
-
-    logger.debug(f"Draws dataframe built: {len(draws_df):,} rows")
-
-    df_preprocessed = data_dict["df_preprocessed"]
-    obs_df = df_preprocessed.copy()
-
-    group_to_idx = {g: i for i, g in enumerate(groups)}
-    unit_to_idx = {u: i for i, u in enumerate(units)}
-    time_to_idx = {t: i for i, t in enumerate(times)}
-
-    obs_df["K"] = obs_df["group"].map(group_to_idx).astype(np.int16)
-    obs_df["D"] = obs_df["unit"].map(unit_to_idx).astype(np.int16)
-    obs_df["N"] = obs_df["time"].map(time_to_idx).astype(np.int16)
-
-    obs_cols = ["outcome"]
-    if "denominator" in obs_df.columns:
-        obs_cols.append("denominator")
-    if "treatment" in obs_df.columns:
-        obs_cols.append("treatment")
-
-    obs_subset = obs_df[["K", "D", "N"] + obs_cols].drop_duplicates()
-
-    merged = draws_df.merge(obs_subset, on=["K", "D", "N"], how="left")
-    merged = merged.drop(columns=["K", "D", "N"])
-
-    col_order = [
-        ".draw",
-        ".chain",
-        ".iteration",
-        "unit",
-        "time",
-        "group",
-        "outcome",
-        "denominator",
-        "treatment",
-        "ypred",
-        "mu",
-        "mu_treated",
-    ]
-    col_order = [c for c in col_order if c in merged.columns]
-    merged = merged[col_order]
 
     merged = _optimize_dtypes(merged)
 
