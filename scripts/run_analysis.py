@@ -264,6 +264,7 @@ def _run_single_rank(
         f"{model_type} rank {rank}: wrote draws to {draws_file} ({size_mb:.1f} MB)"
     )
 
+    # Multi-rank runs nest under rank_<rank>/ so figs don't collide
     report_dir = type_output_dir / f"rank_{rank}" if len(ranks) > 1 else type_output_dir
     report_dir.mkdir(parents=True, exist_ok=True)
 
