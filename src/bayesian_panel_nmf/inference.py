@@ -8,7 +8,6 @@ from collections.abc import Callable
 from typing import Any
 
 import numpy as np
-import numpyro
 import numpyro.infer.initialization  # noqa: F401 — binds attr arviz's from_numpyro needs
 from jax import block_until_ready, random
 from loguru import logger
@@ -126,12 +125,15 @@ def run_mcmc_inference(
     adjust_for_missingness = model_config.get("adjust_for_missingness", True)
     model_treated = model_config.get("model_treated", True)
 
-    # Host device count must match num_chains for parallel chain execution
-    numpyro.set_host_device_count(num_chains)
-
     rng_key = random.PRNGKey(random_seed)
     rng_key, rng_key_ = random.split(rng_key)
 
+    # chain_method="parallel" requires jax.local_device_count() >= num_chains,
+    # which requires numpyro.set_host_device_count() to have run before JAX's
+    # backend was initialized — see scripts/run_analysis.py's module-level
+    # call for why this can't be done here. Explicit rather than relying on
+    # MCMC's own "parallel" default silently falling back to "sequential"
+    # when the device count requirement isn't met.
     kernel = NUTS(model_fn)
     mcmc = MCMC(
         kernel,
@@ -140,6 +142,7 @@ def run_mcmc_inference(
         num_chains=num_chains,
         progress_bar=progress_bar,
         thinning=thinning,
+        chain_method="parallel",
     )
 
     start_time = time.time()
