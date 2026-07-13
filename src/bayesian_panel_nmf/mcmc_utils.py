@@ -32,6 +32,9 @@ def choose_mcmc_parallelism(max_chains: int = 4) -> tuple[int, str]:
     - GPU, 1 device: ``max_chains`` chains, ``chain_method="vectorized"``
       (vmap batches chains on the single accelerator; NumPyro marks this
       experimental but it is the documented fit for one GPU).
+    - TPU, 1 device: ``max_chains`` chains, ``chain_method="vectorized"``
+      (mirrors the single-GPU case — vmap on the one chip; ``parallel`` here
+      would pmap across 1 device and fall back to sequential).
     - GPU or TPU, >1 device: ``min(max_chains, n_devices)`` chains,
       ``chain_method="parallel"``.
     - Any other/unrecognized platform: ``max_chains`` chains,
@@ -65,6 +68,8 @@ def choose_mcmc_parallelism(max_chains: int = 4) -> tuple[int, str]:
         return min(max_chains, n_devices), "parallel"
 
     if platform == "tpu":
+        if n_devices <= 1:
+            return max_chains, "vectorized"
         return min(max_chains, n_devices), "parallel"
 
     return max_chains, "sequential"

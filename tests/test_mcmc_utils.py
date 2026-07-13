@@ -94,6 +94,40 @@ def test_multi_gpu_device_uses_parallel_capped_at_device_count(monkeypatch):
     assert chain_method == "parallel"
 
 
+def test_single_tpu_device_uses_vectorized_with_max_chains(monkeypatch):
+    """TPU single-chip mirrors single-GPU: vmap on one chip, not pmap.
+    A literal ``parallel`` here would pmap across 1 device and fall back to
+    sequential (and only 1 chain if num_chains were capped to n_devices)."""
+    monkeypatch.setattr(
+        "bayesian_panel_nmf.mcmc_utils.jax.devices",
+        lambda: _fake_devices("tpu", 1),
+    )
+    monkeypatch.setattr(
+        "bayesian_panel_nmf.mcmc_utils.jax.local_device_count", lambda: 1
+    )
+
+    num_chains, chain_method = choose_mcmc_parallelism(max_chains=4)
+
+    assert num_chains == 4
+    assert chain_method == "vectorized"
+
+
+def test_single_tpu_device_caps_num_chains_below_max_chains(monkeypatch):
+    """max_chains=2 on a single TPU device still yields 2 vectorized chains."""
+    monkeypatch.setattr(
+        "bayesian_panel_nmf.mcmc_utils.jax.devices",
+        lambda: _fake_devices("tpu", 1),
+    )
+    monkeypatch.setattr(
+        "bayesian_panel_nmf.mcmc_utils.jax.local_device_count", lambda: 1
+    )
+
+    num_chains, chain_method = choose_mcmc_parallelism(max_chains=2)
+
+    assert num_chains == 2
+    assert chain_method == "vectorized"
+
+
 def test_multi_tpu_device_uses_parallel_capped_at_device_count(monkeypatch):
     monkeypatch.setattr(
         "bayesian_panel_nmf.mcmc_utils.jax.devices",
