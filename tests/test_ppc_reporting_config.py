@@ -158,7 +158,13 @@ def test_rich_table_prints_group_column(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_per_unit_post_treatment_uses_mu_not_ypred(tmp_path: Path) -> None:
-    """_compute_per_unit_post_treatment must use exp(mu) as expected, not ypred."""
+    """Estimate the model excess = treated - untreated (matches upstream R and JAMA supplement).
+
+    _compute_per_unit_post_treatment must use sum(exp(mu)) as the untreated
+    counterfactual (``expected``) and sum(exp(mu_treated)) as the treated fit;
+    the reported ``excess`` is the model-implied treatment effect (treated -
+    untreated), NOT observed minus counterfactual.
+    """
     rows = []
     for draw in range(1, 21):
         for unit in ["A", "B"]:
@@ -185,18 +191,29 @@ def test_per_unit_post_treatment_uses_mu_not_ypred(tmp_path: Path) -> None:
 
     result = _compute_per_unit_post_treatment(draws, tmp_path / "out.csv")
 
-    # expected_mean should be close to 3 * 100 = 300 (3 periods * exp(mu)=100)
+    # expected_mean (untreated counterfactual) = 3 periods * exp(mu)=100 = 300
     # NOT close to 3 * 500 = 1500 (ypred)
     assert result.loc[result["unit"] == "A", "expected_mean"].values[
         0
     ] == pytest.approx(300.0)
-    # observed should be sum of outcome = 3 * 110 = 330
+    # observed is informational: sum of outcome = 3 * 110 = 330
     assert result.loc[result["unit"] == "A", "observed"].values[0] == pytest.approx(
         330.0
     )
     assert result.loc[result["unit"] == "A", "n_periods"].values[0] == 3
+    # excess (model treatment effect) = treated - untreated = 3*100*(e^0.1 - 1) = 31.55..
+    # NOT observed - untreated = 30, NOT ypred-based.
+    expected_excess = 3 * 100.0 * (np.exp(0.1) - 1)
+    assert result.loc[result["unit"] == "A", "excess_mean"].values[0] == pytest.approx(
+        expected_excess, rel=1e-5
+    )
+    # excess_pct matches supplement's "Expected percent change":
+    #   100 * (treated/untreated - 1) = 100 * (e^0.1 - 1) = 10.517..
+    expected_pct = 100.0 * (np.exp(0.1) - 1)
+    assert result.loc[result["unit"] == "A", "excess_pct_mean"].values[
+        0
+    ] == pytest.approx(expected_pct, rel=1e-5)
     # excess_pct has proper posterior CI (draw-by-draw, not point estimate)
-    assert "excess_pct_mean" in result.columns
     assert "excess_pct_lower_95" in result.columns
     assert "excess_pct_upper_95" in result.columns
     # CSV written

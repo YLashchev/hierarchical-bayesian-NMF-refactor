@@ -175,10 +175,14 @@ pct       = 100 * (treated_rate / untreated_rate - 1)
 - Neither is wrong — they are scientifically different estimands.
 - **To reproduce the supplement's published values, use the upstream formula.**
 
-### Action item
+### Action item — DONE 2026-07-12
 
-- [ ] Decide whether `reporting.py` should adopt the upstream formula (treated − untreated) to match the published supplement, or document the difference and offer both.
-- [ ] If changing: update `reporting.py::_compute_per_unit_post_treatment`, add tests, and re-validate against the supplement tables.
+- [x] Adopted the upstream formula: `_compute_per_unit_post_treatment` now reports `excess = sum(exp(mu_treated)) − sum(exp(mu))` and `excess_pct = 100 * (treated/untreated − 1)`, matching the supplement's per-state "Expected difference" and "Expected percent change". Public CSV columns preserved; only `excess_*` semantics shifted from observed-minus-counterfactual to model-implied treatment effect. `observed` kept informational.
+- [x] Confirmed PPC formulas (`make_abs_ppc_plot`, `make_acf_ppc_plot`, `make_rmse_ppc_plot`, `make_unit_corr_ppc_plot`) already match upstream R (`outcome − exp(mu)` and `ypred − exp(mu)` on `treatment==0` rows). No PPC code change.
+- [x] Confirmed `make_summary_table` (Table 1) and `make_interval_plot` (method=mu) already used `treated − untreated`.
+- [x] Test `test_per_unit_post_treatment_uses_mu_not_ypred` updated to assert the new estimand (`excess_mean = 3*100*(e^0.1−1) = 31.55`, `excess_pct_mean = 100*(e^0.1−1) = 10.52`).
+- [x] Verification: 190 tests pass, ruff clean, mypy clean, real draws CSV `results/total/NB_births_total_3.csv` regenerated end-to-end successfully.
+- Methodological context: this is a reported-estimand change (the supplement-equivalence fix the user approved), not a refactor. The previously reported `observed − untreated` conflated observed-vs-fit residual with excess; the supplement publishes the model treatment effect (`treated − untreated`). For Texas rank 3, values shifted from 25,835 → 24,533 exactly by the observation-vs-fit gap.
 
 ---
 

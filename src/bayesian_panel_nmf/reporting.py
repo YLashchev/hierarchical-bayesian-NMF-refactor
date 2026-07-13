@@ -282,13 +282,19 @@ def generate_reports(
 def _compute_per_unit_post_treatment(
     draws_df: pd.DataFrame, csv_path: Path
 ) -> pd.DataFrame:
-    """Per-(unit, group) post-treatment totals using mu-based counterfactual.
+    """Per-(unit, group) post-treatment totals matching reference R
+    ``make_fertility_table`` and the JAMA supplement per-state tables.
 
-    Matches reference R ``make_fertility_table``:
-        expected  = sum(exp(mu))        # counterfactual without treatment
-        excess    = observed - expected
+    Estimands (identical to upstream R):
+        expected (untreated) = sum(exp(mu))           # counterfactual
+        treated              = sum(exp(mu_treated))    # model fit WITH treatment
+        excess               = treated - untreated      # "Expected difference"
+        excess_pct           = 100 * (treated/untreated - 1)   # percent change
 
-    CI is the draw-level distribution of sum(exp(mu)).
+    ``observed`` is retained for transparency only; the supplement's per-state
+    excess estimand is the model-implied treatment effect (treated − untreated),
+    not observed minus the counterfactual. CI is the draw-level distribution
+    of sum(exp(mu)) / sum(exp(mu_treated)).
     """
     post = draws_df[draws_df["treatment"] == 1].copy()
     if post.empty:
@@ -316,6 +322,7 @@ def _compute_per_unit_post_treatment(
         return pd.Series(
             {
                 "expected": float(np.sum(np.exp(g["mu"].to_numpy(dtype=float)))),
+                "treated": float(np.sum(np.exp(g["mu_treated"].to_numpy(dtype=float)))),
             }
         )
 
@@ -336,14 +343,15 @@ def _compute_per_unit_post_treatment(
         .reset_index(),
     )
 
-    # Merge observed for per-draw excess and excess_pct (proper posterior uncertainty)
+    # Merge observed (transparency only) and compute the model-implied excess:
+    # treated - untreated, matching the supplement's per-state estimand.
     draw_sums = draw_sums.merge(
         observed_totals[["unit", "group", "observed"]],
         on=["unit", "group"],
         how="left",
     )
-    draw_sums["excess"] = draw_sums["observed"] - draw_sums["expected"]
-    draw_sums["excess_pct"] = draw_sums["excess"] / draw_sums["expected"] * 100
+    draw_sums["excess"] = draw_sums["treated"] - draw_sums["expected"]
+    draw_sums["excess_pct"] = 100 * (draw_sums["treated"] / draw_sums["expected"] - 1)
 
     stats = cast(
         pd.DataFrame,
