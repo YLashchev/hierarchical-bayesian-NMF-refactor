@@ -9,6 +9,7 @@ AGENTS.md
 
 # ── Local dev planning & scratch ───────────────────────────────────
 BACKLOG.md
+TODO.md
 context.md
 jama_supplement_analysis.md
 oracle_pyright_review.md
@@ -60,6 +61,9 @@ ENV/
 env/
 .venv/
 .env/
+
+# ── Engram persistent memory (local-only) ───────────────────────────
+.engram/
 
 # ── IDE / Editor ────────────────────────────────────────────────────
 .idea/
