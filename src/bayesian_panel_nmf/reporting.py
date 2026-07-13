@@ -20,8 +20,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional, cast
 
-import matplotlib
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from loguru import logger
@@ -122,6 +120,13 @@ def generate_reports(
     dict with keys: ``summary``, ``per_unit``, ``detail``, ``target_unit``,
     ``groups``, ``figs_dir``, ``treated_units``.
     """
+    # Lazy import: AGENTS.md forbids top-level matplotlib/pyplot outside
+    # visualization.py. matplotlib is already loaded transitively via
+    # ``from .visualization import ...`` above; this binds local names for
+    # the Agg backend call and ``plt.close()`` calls below.
+    import matplotlib
+    import matplotlib.pyplot as plt
+
     matplotlib.use("Agg")
 
     output_dir = Path(output_dir)
