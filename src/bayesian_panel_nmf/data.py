@@ -364,7 +364,7 @@ def _load_and_standardize(
         try:
             df[time_col] = pd.to_datetime(df[time_col], format=date_format)
         except ValueError as e:
-            raise DataError(f"Could not parse time column '{time_col}': {e}")
+            raise DataError(f"Could not parse time column '{time_col}': {e}") from e
 
     return df
 

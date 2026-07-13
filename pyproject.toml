@@ -44,7 +44,7 @@ packages = ["src/bayesian_panel_nmf"]
 # Project-owned config (previously implicit via pi-lens's bundled fallback,
 # applied only when no [tool.ruff] exists — now explicit so `uv run ruff` and
 # any tool/agent get identical behavior).
-line-length = 88 # Black/Ruff default; matches AGENTS.md's documented commands
+line-length = 88         # Black/Ruff default; matches AGENTS.md's documented commands
 target-version = "py312" # floor of requires-python (>=3.12,<3.14)
 
 [tool.ruff.format]
@@ -52,7 +52,7 @@ target-version = "py312" # floor of requires-python (>=3.12,<3.14)
 # explicit rather than left to Ruff's own implicit defaults.
 quote-style = "double" # PEP 8/257-preferred; also normalizes the existing
 # single/double quote mix across data.py, inference.py, aggregate_units.py
-indent-style = "space" # PEP 8
+indent-style = "space"            # PEP 8
 skip-magic-trailing-comma = false # keep multi-arg NumPyro sample()/config
 # dicts expanded one-arg-per-line rather than collapsed — readability for
 # the model file's many keyword arguments

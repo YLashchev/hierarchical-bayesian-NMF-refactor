@@ -259,7 +259,9 @@ def _create_faceted_histograms(
     fig, axes = plt.subplots(nrow, ncol, figsize=figsize, squeeze=False)
     axes = axes.flatten()
 
-    for i, (facet_key, facet_label) in enumerate(zip(facet_keys, facet_labels)):
+    for i, (facet_key, facet_label) in enumerate(
+        zip(facet_keys, facet_labels, strict=True)
+    ):
         ax = axes[i]
 
         # Filter data for this facet
@@ -268,11 +270,17 @@ def _create_faceted_histograms(
             pval_mask = pvals_df[facet_cols[0]] == facet_key
         else:
             mask = np.all(
-                [stats_df[col] == val for col, val in zip(facet_cols, facet_key)],
+                [
+                    stats_df[col] == val
+                    for col, val in zip(facet_cols, facet_key, strict=True)
+                ],
                 axis=0,
             )
             pval_mask = np.all(
-                [pvals_df[col] == val for col, val in zip(facet_cols, facet_key)],
+                [
+                    pvals_df[col] == val
+                    for col, val in zip(facet_cols, facet_key, strict=True)
+                ],
                 axis=0,
             )
 
@@ -1250,7 +1258,7 @@ def make_group_comparison_plot(
         # Add treatment date markers with colors
         if treatment_dates is not None:
             marker_colors = ["#FF8C00", "#DC143C", "#9400D3", "#228B22"]
-            for i, (label, date_str) in enumerate(treatment_dates.items()):
+            for i, (_label, date_str) in enumerate(treatment_dates.items()):
                 date = pd.to_datetime(date_str)
                 color = marker_colors[i % len(marker_colors)]
                 ax.axvline(
@@ -1382,19 +1390,22 @@ def make_unit_fit_plot(
         )
 
     # Treatment line
-    if "treated_unit" in df_plot.columns and df_plot["treated_unit"].iloc[0]:
-        if "treatment" in df_plot.columns:
-            treated_times = df_plot[df_plot["treatment"] == 1]["time"]
-            if not treated_times.empty:
-                t_date = treated_times.iloc[0]
-                ax.axvline(
-                    x=t_date,
-                    color="black",
-                    linestyle="--",
-                    linewidth=1.5,
-                    alpha=0.7,
-                    label="Treatment start",
-                )
+    if (
+        "treated_unit" in df_plot.columns
+        and df_plot["treated_unit"].iloc[0]
+        and "treatment" in df_plot.columns
+    ):
+        treated_times = df_plot[df_plot["treatment"] == 1]["time"]
+        if not treated_times.empty:
+            t_date = treated_times.iloc[0]
+            ax.axvline(
+                x=t_date,
+                color="black",
+                linestyle="--",
+                linewidth=1.5,
+                alpha=0.7,
+                label="Treatment start",
+            )
 
     ax.set_title(f"Model Fit: {unit_name} ({group})", fontsize=14, fontweight="bold")
     ax.set_xlabel("Time", fontsize=12)
@@ -1479,11 +1490,14 @@ def make_unit_gap_plot(
 
     # Treatment Date
     t_date = None
-    if "treated_unit" in df_plot.columns and df_plot["treated_unit"].iloc[0]:
-        if "treatment" in df_plot.columns:
-            treated_times = df_plot[df_plot["treatment"] == 1]["time"]
-            if not treated_times.empty:
-                t_date = treated_times.iloc[0]
+    if (
+        "treated_unit" in df_plot.columns
+        and df_plot["treated_unit"].iloc[0]
+        and "treatment" in df_plot.columns
+    ):
+        treated_times = df_plot[df_plot["treatment"] == 1]["time"]
+        if not treated_times.empty:
+            t_date = treated_times.iloc[0]
 
     fig, ax = plt.subplots(figsize=figsize)
 

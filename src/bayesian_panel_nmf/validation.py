@@ -342,9 +342,12 @@ def validate_predictions(
             f"predictions must be 5D (C,S,K,D,N), got shape {predictions.shape}"
         )
 
-    if samples is not None and "mu_ctrl" in samples:
-        if predictions.shape != samples["mu_ctrl"].shape:
-            raise DataError(
-                f"predictions shape {predictions.shape} != "
-                f"samples['mu_ctrl'] shape {samples['mu_ctrl'].shape}"
-            )
+    if (
+        samples is not None
+        and "mu_ctrl" in samples
+        and predictions.shape != samples["mu_ctrl"].shape
+    ):
+        raise DataError(
+            f"predictions shape {predictions.shape} != "
+            f"samples['mu_ctrl'] shape {samples['mu_ctrl'].shape}"
+        )
