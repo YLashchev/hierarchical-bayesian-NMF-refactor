@@ -19,9 +19,7 @@ import argparse
 import json
 import os
 import shutil
-import sys
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 # numpyro.set_host_device_count() only takes effect before JAX's backend is
@@ -98,26 +96,6 @@ def _format_elapsed(seconds: float) -> str:
     if minutes:
         return f"{minutes}m {secs}s"
     return f"{secs}s"
-
-
-def _resolve_workers(config: dict, num_chains: int, n_types: int) -> int:
-    """Resolve ``parallel.analysis_workers`` against CPU count and chain count.
-
-    ``analysis_workers``: 1 = sequential (default), -1 = auto (max safe), N = explicit.
-    Caps so ``workers x num_chains`` does not oversubscribe the machine, and never
-    exceeds the number of model types being run.
-    """
-    raw_requested = config.get("parallel", {}).get("analysis_workers", 1)
-    try:
-        requested = 1 if raw_requested is None else int(raw_requested)
-    except (TypeError, ValueError) as e:
-        raise ConfigError("parallel.analysis_workers must be -1 or >= 1") from e
-    if requested != -1 and requested < 1:
-        raise ConfigError("parallel.analysis_workers must be -1 or >= 1")
-
-    max_safe = max(1, (os.cpu_count() or 1) // max(1, num_chains))
-    workers = max_safe if requested == -1 else requested
-    return max(1, min(workers, max_safe, n_types))
 
 
 def _get_outcome_name(config: dict) -> str:
@@ -291,22 +269,10 @@ def run_model_type(
     save_traces: bool = False,
     log_level: str = "INFO",
     configure_logging: bool = True,
-    disable_progress_bar: bool = False,
 ) -> None:
     """Run analysis for a single model type across specified ranks."""
     if configure_logging:
         setup_logging(level=log_level)
-
-    if disable_progress_bar:
-        # Mutate a shallow copy so parallel workers don't race on shared state.
-        config = {
-            **config,
-            "mcmc": {**config.get("mcmc", {}), "progress_bar": False},
-        }
-        # Parallel worker: this process's own logger only, filtered to WARNING
-        # so per-model stage logs don't interleave across concurrent workers.
-        logger.remove()
-        logger.add(sys.stderr, level="WARNING")
 
     base_output_dir = Path(config["data"]["output_dir"])
     output_config = config.get("output", {})
@@ -448,38 +414,6 @@ def _run_sequential(
         )
 
 
-def _run_parallel(
-    types_to_run: dict,
-    config: dict,
-    args: argparse.Namespace,
-    save_traces: bool,
-    log_level: str,
-    workers: int,
-) -> None:
-    """Run model types across a process pool (each worker reconfigures its
-    own logger + disables progress bars to keep stdout readable when
-    N>1 subprocesses print concurrently)."""
-    with ProcessPoolExecutor(max_workers=workers) as pool:
-        futures = {
-            pool.submit(
-                run_model_type,
-                model_type=model_type,
-                type_config=type_config,
-                config=config,
-                rank_override=args.rank,
-                save_traces=save_traces,
-                log_level=log_level,
-                configure_logging=True,
-                disable_progress_bar=True,
-            ): model_type
-            for model_type, type_config in types_to_run.items()
-        }
-        for i, fut in enumerate(as_completed(futures), 1):
-            mt = futures[fut]
-            fut.result()  # re-raises worker exceptions
-            logger.info(f"{mt} finished ({i}/{len(futures)})")
-
-
 def main():
     args = _parse_args()
 
@@ -505,22 +439,9 @@ def main():
     # Resolve save_traces: CLI flag overrides config
     save_traces = args.save_traces or config.get("output", {}).get("save_traces", False)
 
-    # Resolve analysis-level parallelism against num_chains and CPU count
-    try:
-        num_chains = int(config.get("mcmc", {}).get("num_chains", 4))
-    except (TypeError, ValueError) as e:
-        raise ConfigError("mcmc.num_chains must be an integer") from e
-    workers = _resolve_workers(config, num_chains=num_chains, n_types=len(types_to_run))
-    logger.info(
-        f"Running {len(types_to_run)} model type(s) with {workers} worker(s) "
-        f"(num_chains={num_chains})"
-    )
+    logger.info(f"Running {len(types_to_run)} model type(s)")
 
-    # Sequential path (preserves rich logging for single-type or workers=1)
-    if workers == 1:
-        _run_sequential(types_to_run, config, args, save_traces, log_level)
-    else:
-        _run_parallel(types_to_run, config, args, save_traces, log_level, workers)
+    _run_sequential(types_to_run, config, args, save_traces, log_level)
 
     logger.info(f"Analysis complete. Results saved to: {output_dir}")
 
