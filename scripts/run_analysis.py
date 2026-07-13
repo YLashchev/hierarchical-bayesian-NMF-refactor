@@ -13,6 +13,7 @@ Usage:
     python scripts/run_analysis.py --config configs/nativity_config.yaml --type groups --rank 10
     python scripts/run_analysis.py --config configs/nativity_config.yaml --verbose
     python scripts/run_analysis.py --config configs/nativity_config.yaml --log-file logs/analysis.log
+    python scripts/run_analysis.py --config configs/nativity_config.yaml --chains 4 --chain-method sequential
 """
 
 import argparse
@@ -332,6 +333,34 @@ def load_config(config_path: str) -> dict:
     return config
 
 
+def _apply_mcmc_overrides(config: dict, args: argparse.Namespace) -> None:
+    """Apply --chains / --chain-method overrides to config['mcmc'] in place.
+
+    --chain-method forces auto_parallelism=false (manual mode) and sets
+    chain_method. --chains then sets num_chains (manual) or max_chains (auto).
+    Without --chain-method, --chains just overrides max_chains under auto.
+    """
+    if args.chains is None and args.chain_method is None:
+        return
+
+    mcmc = config.setdefault("mcmc", {})
+    if args.chain_method is not None:
+        mcmc["auto_parallelism"] = False
+        mcmc["chain_method"] = args.chain_method
+        if args.chains is not None:
+            mcmc["num_chains"] = args.chains
+        logger.info(
+            f"CLI override: auto_parallelism=false, "
+            f"num_chains={mcmc.get('num_chains', 4)}, "
+            f"chain_method={args.chain_method!r}"
+        )
+    else:
+        mcmc["max_chains"] = args.chains
+        logger.info(
+            f"CLI override: max_chains={args.chains} (auto_parallelism stays on)"
+        )
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse run_analysis.py's CLI arguments."""
     parser = argparse.ArgumentParser(description="Run Bayesian Panel NMF analysis")
@@ -366,6 +395,25 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--save-traces",
         action="store_true",
         help="Save full posterior draws as NetCDF sidecar (arviz InferenceData)",
+    )
+    parser.add_argument(
+        "--chains",
+        type=int,
+        default=None,
+        help=(
+            "Override MCMC chain count. With --chain-method, sets the literal "
+            "num_chains; without it, overrides mcmc.max_chains under auto_parallelism."
+        ),
+    )
+    parser.add_argument(
+        "--chain-method",
+        type=str,
+        choices=["sequential", "parallel", "vectorized"],
+        default=None,
+        help=(
+            "Force chain_method (disables auto_parallelism). Use for timing "
+            "comparisons, e.g. --chains 4 --chain-method sequential."
+        ),
     )
     if argv is None:
         return parser.parse_args()
@@ -432,6 +480,9 @@ def main():
     except OSError as e:
         logger.error(f"Failed to create directory {output_dir}: {e}")
         raise
+
+    # Apply CLI overrides to the mcmc config section.
+    _apply_mcmc_overrides(config, args)
 
     # Select which model types to run
     types_to_run = _select_types_to_run(config["model"]["types"], args.type)
