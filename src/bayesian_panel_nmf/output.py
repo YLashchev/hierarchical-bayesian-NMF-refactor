@@ -6,12 +6,12 @@ int8/int32 for integer cols, float32 for predictions).
 
 import numpy as np
 import pandas as pd
-
 from loguru import logger
+
 from bayesian_panel_nmf.validation import (
-    validate_samples,
-    validate_predictions,
     DataError,
+    validate_predictions,
+    validate_samples,
 )
 
 

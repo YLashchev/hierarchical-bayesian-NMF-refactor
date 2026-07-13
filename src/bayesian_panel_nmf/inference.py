@@ -4,19 +4,20 @@ All settings read from a config dict rather than passed as individual kwargs.
 """
 
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import numpy as np
-from jax import block_until_ready, random
-from numpyro.infer import MCMC, NUTS, Predictive
 import numpyro
 import numpyro.infer.initialization  # noqa: F401 — binds attr arviz's from_numpyro needs
+from jax import block_until_ready, random
 from loguru import logger
+from numpyro.infer import MCMC, NUTS, Predictive
 
 from bayesian_panel_nmf.validation import (
+    DataError,
     validate_data_dict,
     validate_rank,
-    DataError,
 )
 
 
@@ -39,9 +40,7 @@ def convergence_summary(idata) -> dict[str, Any]:
         "divergences": divergences,
     }
     result["converged"] = bool(
-        result["rhat_max"] < 1.01
-        and result["ess_bulk_min"] > 400
-        and divergences == 0
+        result["rhat_max"] < 1.01 and result["ess_bulk_min"] > 400 and divergences == 0
     )
     return result
 

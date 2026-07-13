@@ -1,11 +1,10 @@
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import pytest
 from rich.console import Console
-
-import numpy as np
 
 from bayesian_panel_nmf import visualization
 from bayesian_panel_nmf.reporting import (

@@ -1,8 +1,8 @@
-from jax import numpy as jnp
 import numpy as np
+import numpyro
 import numpyro.distributions as dist
 import numpyro.distributions.constraints as constraints
-import numpyro
+from jax import numpy as jnp
 from numpyro.handlers import scope
 
 from .utils import missingness_adjustment
@@ -10,13 +10,10 @@ from .utils import missingness_adjustment
 
 def _define_time_factors_and_fe(K, D, rank, N, time_fac_alpha):
     with numpyro.plate("K", K):
-        with numpyro.plate("F", rank):
-            with numpyro.plate("N", N):
-                raw_time_factor = jnp.log(
-                    numpyro.sample(
-                        "time_fac", dist.Gamma(time_fac_alpha, time_fac_alpha)
-                    )
-                )
+        with numpyro.plate("F", rank), numpyro.plate("N", N):
+            raw_time_factor = jnp.log(
+                numpyro.sample("time_fac", dist.Gamma(time_fac_alpha, time_fac_alpha))
+            )
         with numpyro.plate("D", D):
             state_fe_sample = numpyro.sample(
                 "state_fe", dist.ImproperUniform(constraints.positive, (), ())

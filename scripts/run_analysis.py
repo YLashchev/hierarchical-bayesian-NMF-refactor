@@ -21,23 +21,23 @@ import os
 import shutil
 import sys
 import time
-import arviz as az
-import yaml  # type: ignore[import-untyped]
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
+import arviz as az
+import yaml  # type: ignore[import-untyped]
 from loguru import logger
 
 from bayesian_panel_nmf.data import load_and_prepare
-from bayesian_panel_nmf.output import format_draws
 from bayesian_panel_nmf.inference import (
-    run_mcmc_inference,
-    generate_predictions,
     convergence_summary,
+    generate_predictions,
+    run_mcmc_inference,
 )
-from bayesian_panel_nmf.models import model
-from bayesian_panel_nmf.validation import ConfigError, validate_config
 from bayesian_panel_nmf.logging_config import setup_logging
+from bayesian_panel_nmf.models import model
+from bayesian_panel_nmf.output import format_draws
+from bayesian_panel_nmf.validation import ConfigError, validate_config
 
 
 def _validate_run_analysis_config(config: dict) -> None:
@@ -283,7 +283,9 @@ def run_model_type(
         draws_file = type_output_dir / f"{filename}.csv"
         draws_df.to_csv(draws_file, index=False)
         size_mb = draws_file.stat().st_size / 1024**2
-        logger.info(f"{model_type} rank {rank}: wrote draws to {draws_file} ({size_mb:.1f} MB)")
+        logger.info(
+            f"{model_type} rank {rank}: wrote draws to {draws_file} ({size_mb:.1f} MB)"
+        )
 
         # Multi-rank runs nest under rank_<rank>/ so figs don't collide
         report_dir = (
@@ -301,7 +303,7 @@ def run_model_type(
 
 def load_config(config_path: str) -> dict:
     """Load configuration from YAML file."""
-    with open(config_path, "r") as f:
+    with open(config_path) as f:
         config = yaml.safe_load(f)
     return config
 

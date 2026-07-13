@@ -18,7 +18,7 @@ Outputs placed under ``<output_dir>/figs/``:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, cast
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -34,7 +34,6 @@ from .visualization import (
     make_unit_fit_plot,
     make_unit_gap_plot,
 )
-
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -55,7 +54,7 @@ def _compute_quantiles(draws_df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def _auto_detect_target(draws_df: pd.DataFrame) -> Optional[str]:
+def _auto_detect_target(draws_df: pd.DataFrame) -> str | None:
     """Pick the unit with the most post-treatment observations."""
     treated = draws_df[draws_df["treatment"] == 1]
     if treated.empty:
@@ -77,15 +76,15 @@ def _slug(s: str) -> str:
 def generate_reports(
     draws_df: pd.DataFrame,
     output_dir: str | Path,
-    target_unit: Optional[str] = None,
-    groups: Optional[list[str]] = None,
+    target_unit: str | None = None,
+    groups: list[str] | None = None,
     print_tables: bool = True,
     print_target_table: bool = True,
-    aggregate_units: Optional[list[dict]] = None,
-    ppc_units: Optional[list[str]] = None,
-    ppc_acf_lags: Optional[list[int]] = None,
-    ppc_unit_corr_max_time: Optional[str] = None,
-    ppc_exclude_units: Optional[list[str]] = None,
+    aggregate_units: list[dict] | None = None,
+    ppc_units: list[str] | None = None,
+    ppc_acf_lags: list[int] | None = None,
+    ppc_unit_corr_max_time: str | None = None,
+    ppc_exclude_units: list[str] | None = None,
 ) -> dict:
     """Generate all figures and tables from posterior draws.
 

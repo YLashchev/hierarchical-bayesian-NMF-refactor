@@ -5,18 +5,17 @@ Accepts both standardized (unit/group/denominator/treatment) and legacy
 D=units, N=time periods.
 """
 
-from pathlib import Path
-from typing import Optional, List, Tuple, Dict, cast
 import warnings
+from pathlib import Path
+from typing import cast
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
 import seaborn as sns
 from loguru import logger
-
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 
 # Legacy → standardized column name map
 _COLUMN_MAPPING = {
@@ -72,7 +71,7 @@ def _detect_outcome_column(df: pd.DataFrame) -> str:
     )
 
 
-def _identify_treated_units(df: pd.DataFrame) -> List[str]:
+def _identify_treated_units(df: pd.DataFrame) -> list[str]:
     """
     Identify units that have treatment at any time point.
 
@@ -108,8 +107,8 @@ def _identify_treated_units(df: pd.DataFrame) -> List[str]:
 def _filter_ppc_units(
     df: pd.DataFrame,
     treated_units: list[str],
-    ppc_units: Optional[List[str]] = None,
-    ppc_exclude_units: Optional[List[str]] = None,
+    ppc_units: list[str] | None = None,
+    ppc_exclude_units: list[str] | None = None,
 ) -> pd.DataFrame:
     """Filter DataFrame to units selected for PPC."""
     unit_values = set(cast(pd.Series, df["unit"]).drop_duplicates().tolist())
@@ -199,8 +198,8 @@ def _create_faceted_histograms(
     x_col: str,
     title: str,
     xlabel: str,
-    facet_cols: List[str],
-    figsize: Tuple[int, int],
+    facet_cols: list[str],
+    figsize: tuple[int, int],
     ncol: int = 3,
 ) -> Figure:
     """
@@ -329,11 +328,11 @@ def _create_faceted_histograms(
 def make_abs_ppc_plot(
     draws_df: pd.DataFrame,
     outcome_col: str = "outcome",
-    categories: Optional[List[str]] = None,
-    figsize: Tuple[int, int] = (12, 8),
-    ppc_units: Optional[List[str]] = None,
-    ppc_exclude_units: Optional[List[str]] = None,
-) -> Tuple[Figure, pd.DataFrame]:
+    categories: list[str] | None = None,
+    figsize: tuple[int, int] = (12, 8),
+    ppc_units: list[str] | None = None,
+    ppc_exclude_units: list[str] | None = None,
+) -> tuple[Figure, pd.DataFrame]:
     """
     Posterior Predictive Check: Maximum Absolute Residual.
 
@@ -446,11 +445,11 @@ def make_acf_ppc_plot(
     draws_df: pd.DataFrame,
     lag: int = 6,
     outcome_col: str = "outcome",
-    categories: Optional[List[str]] = None,
-    figsize: Tuple[int, int] = (12, 8),
-    ppc_units: Optional[List[str]] = None,
-    ppc_exclude_units: Optional[List[str]] = None,
-) -> Tuple[Figure, pd.DataFrame]:
+    categories: list[str] | None = None,
+    figsize: tuple[int, int] = (12, 8),
+    ppc_units: list[str] | None = None,
+    ppc_exclude_units: list[str] | None = None,
+) -> tuple[Figure, pd.DataFrame]:
     """
     Posterior Predictive Check: Autocorrelation of Residuals.
 
@@ -567,11 +566,11 @@ def make_acf_ppc_plot(
 def make_rmse_ppc_plot(
     draws_df: pd.DataFrame,
     outcome_col: str = "outcome",
-    categories: Optional[List[str]] = None,
-    figsize: Tuple[int, int] = (12, 8),
-    ppc_units: Optional[List[str]] = None,
-    ppc_exclude_units: Optional[List[str]] = None,
-) -> Tuple[Figure, pd.DataFrame]:
+    categories: list[str] | None = None,
+    figsize: tuple[int, int] = (12, 8),
+    ppc_units: list[str] | None = None,
+    ppc_exclude_units: list[str] | None = None,
+) -> tuple[Figure, pd.DataFrame]:
     """
     Posterior Predictive Check: RMSE of Residuals.
 
@@ -678,14 +677,14 @@ def make_rmse_ppc_plot(
 
 def make_unit_corr_ppc_plot(
     draws_df: pd.DataFrame,
-    max_treat_date: Optional[str] = None,
+    max_treat_date: str | None = None,
     outcome_col: str = "outcome",
-    categories: Optional[List[str]] = None,
+    categories: list[str] | None = None,
     ndraws: int = 1000,
-    figsize: Tuple[int, int] = (10, 6),
-    ppc_units: Optional[List[str]] = None,
-    ppc_exclude_units: Optional[List[str]] = None,
-) -> Tuple[Figure, pd.DataFrame]:
+    figsize: tuple[int, int] = (10, 6),
+    ppc_units: list[str] | None = None,
+    ppc_exclude_units: list[str] | None = None,
+) -> tuple[Figure, pd.DataFrame]:
     """
     Posterior Predictive Check: Cross-Unit Correlation (Spectral Norm).
 
@@ -887,15 +886,15 @@ def make_unit_corr_ppc_plot(
 
 def make_raw_rate_plot(
     df: pd.DataFrame,
-    group: Optional[str] = None,
+    group: str | None = None,
     unit_col: str = "unit",
     rate_multiplier: float = 1000,
-    treatment_dates: Optional[Dict[str, str]] = None,
-    separate_unit: Optional[str] = None,
-    smooth_window: Optional[int] = None,
+    treatment_dates: dict[str, str] | None = None,
+    separate_unit: str | None = None,
+    smooth_window: int | None = None,
     plot_type: str = "rate",  # 'rate' or 'count'
-    figsize: Tuple[int, int] = (10, 6),
-) -> Tuple[Figure, Axes]:
+    figsize: tuple[int, int] = (10, 6),
+) -> tuple[Figure, Axes]:
     """
     Create a time series plot showing rates by treatment group.
 
@@ -940,16 +939,16 @@ def make_raw_rate_plot(
 
     Examples
     --------
-    >>> fig, ax = make_raw_rate_plot(df, group='total', rate_multiplier=1000)
-    >>> fig.savefig('rate_plot.png')
+    >>> fig, ax = make_raw_rate_plot(df, group="total", rate_multiplier=1000)
+    >>> fig.savefig("rate_plot.png")
 
     >>> # Separate a specific unit
     >>> fig, ax = make_raw_rate_plot(
     ...     df,
-    ...     group='total',
-    ...     treatment_dates={'Policy': '2022-06-24'},
-    ...     separate_unit='TX',
-    ...     smooth_window=3
+    ...     group="total",
+    ...     treatment_dates={"Policy": "2022-06-24"},
+    ...     separate_unit="TX",
+    ...     smooth_window=3,
     ... )
     """
     _setup_plot_style()
@@ -1104,12 +1103,12 @@ def make_raw_rate_plot(
 
 def make_group_comparison_plot(
     df: pd.DataFrame,
-    groups: Optional[List[str]] = None,
+    groups: list[str] | None = None,
     rate_multiplier: float = 1000,
-    treatment_dates: Optional[Dict[str, str]] = None,
+    treatment_dates: dict[str, str] | None = None,
     plot_type: str = "rate",  # 'rate' or 'count'
-    figsize: Tuple[int, int] = (12, 8),
-) -> Tuple[Figure, np.ndarray]:
+    figsize: tuple[int, int] = (12, 8),
+) -> tuple[Figure, np.ndarray]:
     """
     Create a faceted plot comparing rates across different outcome groups.
 
@@ -1142,11 +1141,9 @@ def make_group_comparison_plot(
     Examples
     --------
     >>> fig, axes = make_group_comparison_plot(
-    ...     df,
-    ...     groups=['usborn', 'foreign'],
-    ...     treatment_dates={'Policy': '2022-06-24'}
+    ...     df, groups=["usborn", "foreign"], treatment_dates={"Policy": "2022-06-24"}
     ... )
-    >>> fig.savefig('group_comparison.png')
+    >>> fig.savefig("group_comparison.png")
     """
     _setup_plot_style()
 
@@ -1292,8 +1289,8 @@ def make_unit_fit_plot(
     unit_name: str,
     group: str = "total",
     outcome_col: str = "outcome",
-    figsize: Tuple[int, int] = (10, 6),
-) -> Tuple[Figure, Axes]:
+    figsize: tuple[int, int] = (10, 6),
+) -> tuple[Figure, Axes]:
     """
     Make fit plot showing observed vs predicted over time for a specific unit.
 
@@ -1415,8 +1412,8 @@ def make_unit_gap_plot(
     unit_name: str,
     group: str = "total",
     outcome_col: str = "outcome",
-    figsize: Tuple[int, int] = (10, 6),
-) -> Tuple[Figure, Axes]:
+    figsize: tuple[int, int] = (10, 6),
+) -> tuple[Figure, Axes]:
     """
     Make gap plot showing difference between observed and predicted relative to prediction
     for a specific unit.
@@ -1541,18 +1538,18 @@ def make_unit_gap_plot(
 
 def make_interval_plot(
     merged_df: pd.DataFrame,
-    units: Optional[List[str]] = None,
+    units: list[str] | None = None,
     group_var: str = "unit",
-    categories: Optional[List[str]] = None,
+    categories: list[str] | None = None,
     outcome_col: str = "outcome",
     denom_col: str = "denominator",
     rate_normalizer: float = 1000.0,
     estimand: str = "diff",
     method: str = "mu",
     x_var: str = "unit",
-    color_group: Optional[str] = None,
-    figsize: Tuple[int, int] = (12, 10),
-) -> Tuple[Figure, Axes]:
+    color_group: str | None = None,
+    figsize: tuple[int, int] = (12, 10),
+) -> tuple[Figure, Axes]:
     """
     Generate interval plots showing causal effects with credible intervals using seaborn aesthetics.
 
@@ -1909,17 +1906,17 @@ def make_summary_table(
 
 def make_all_ppc_plots(
     draws_df: pd.DataFrame,
-    output_dir: Optional[str] = None,
+    output_dir: str | None = None,
     outcome_col: str = "outcome",
-    categories: Optional[List[str]] = None,
-    figsize: Tuple[int, int] = (12, 8),
+    categories: list[str] | None = None,
+    figsize: tuple[int, int] = (12, 8),
     acf_lag: int = 6,
-    acf_lags: Optional[List[int]] = None,
-    max_treat_date: Optional[str] = None,
+    acf_lags: list[int] | None = None,
+    max_treat_date: str | None = None,
     ndraws: int = 1000,
-    ppc_units: Optional[List[str]] = None,
-    ppc_exclude_units: Optional[List[str]] = None,
-) -> Dict[str, Dict]:
+    ppc_units: list[str] | None = None,
+    ppc_exclude_units: list[str] | None = None,
+) -> dict[str, dict]:
     """
     Generate all PPC plots and optionally save to files.
 

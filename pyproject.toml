@@ -40,6 +40,50 @@ filterwarnings = ["ignore::DeprecationWarning"]
 [tool.hatch.build.targets.wheel]
 packages = ["src/bayesian_panel_nmf"]
 
+[tool.ruff]
+# Project-owned config (previously implicit via pi-lens's bundled fallback,
+# applied only when no [tool.ruff] exists — now explicit so `uv run ruff` and
+# any tool/agent get identical behavior).
+line-length = 88 # Black/Ruff default; matches AGENTS.md's documented commands
+target-version = "py312" # floor of requires-python (>=3.12,<3.14)
+
+[tool.ruff.format]
+# https://docs.astral.sh/ruff/formatter/ — Black-compatible defaults, made
+# explicit rather than left to Ruff's own implicit defaults.
+quote-style = "double" # PEP 8/257-preferred; also normalizes the existing
+# single/double quote mix across data.py, inference.py, aggregate_units.py
+indent-style = "space" # PEP 8
+skip-magic-trailing-comma = false # keep multi-arg NumPyro sample()/config
+# dicts expanded one-arg-per-line rather than collapsed — readability for
+# the model file's many keyword arguments
+line-ending = "auto"
+docstring-code-format = true # visualization.py has live `>>> f(x)` doctest
+# examples in its numpydoc docstrings; keep them auto-formatted so they can't
+# silently drift out of the project's own style
+docstring-code-line-length = "dynamic"
+
+[tool.ruff.lint]
+# Explicit restatement of the rule set previously supplied only implicitly by
+# pi-lens's bundled fallback (config/ruff/core.toml) — now the project's own
+# source of truth, identical behavior, no longer contingent on an external
+# tool's config being present.
+select = [
+  "E",   # pycodestyle errors
+  "W",   # pycodestyle warnings
+  "F",   # pyflakes (undefined names, unused imports)
+  "I",   # isort (import ordering)
+  "B",   # flake8-bugbear (likely bugs and design issues)
+  "UP",  # pyupgrade (modernize syntax for target Python version)
+  "SIM", # flake8-simplify (simplifiable constructs)
+  "C4",  # flake8-comprehensions (unnecessary comprehension patterns)
+  "PIE", # flake8-pie (misc lints)
+]
+ignore = [
+  "E501",   # line too long — the formatter handles wrapping, not the linter
+  "B008",   # function call in default argument — common FastAPI/typer pattern
+  "SIM108", # if/else -> ternary — readability is subjective
+]
+
 [tool.mypy]
 ignore_missing_imports = true
 

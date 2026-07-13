@@ -13,13 +13,12 @@ import pandas as pd
 from loguru import logger
 
 from bayesian_panel_nmf.validation import (
-    validate_filepath,
-    validate_config,
-    validate_groups,
-    DataError,
     ConfigError,
+    DataError,
+    validate_config,
+    validate_filepath,
+    validate_groups,
 )
-
 
 # Standard column names (fixed after loading)
 UNIT_COL = "unit"

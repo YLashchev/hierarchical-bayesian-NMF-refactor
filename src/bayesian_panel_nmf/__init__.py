@@ -2,21 +2,21 @@
 
 __version__ = "0.1.0"
 
-from bayesian_panel_nmf.logging_config import setup_logging, logger
+from bayesian_panel_nmf.data import load_and_prepare
+from bayesian_panel_nmf.inference import (
+    convergence_summary,
+    generate_predictions,
+    run_mcmc_inference,
+)
+from bayesian_panel_nmf.logging_config import logger, setup_logging
+from bayesian_panel_nmf.models import model
+from bayesian_panel_nmf.output import format_draws
 from bayesian_panel_nmf.validation import (
     ConfigError,
     DataError,
     validate_config,
     validate_data_dict,
 )
-from bayesian_panel_nmf.data import load_and_prepare
-from bayesian_panel_nmf.inference import (
-    run_mcmc_inference,
-    generate_predictions,
-    convergence_summary,
-)
-from bayesian_panel_nmf.output import format_draws
-from bayesian_panel_nmf.models import model
 
 # Visualization (optional — requires pip install bayesian_panel_nmf[viz])
 try:
@@ -26,8 +26,8 @@ try:
     if _HAS_VIZ:
         from bayesian_panel_nmf.visualization import (  # noqa: F401
             make_all_ppc_plots,
-            make_raw_rate_plot,
             make_group_comparison_plot,
+            make_raw_rate_plot,
         )
 except ImportError:
     _HAS_VIZ = False

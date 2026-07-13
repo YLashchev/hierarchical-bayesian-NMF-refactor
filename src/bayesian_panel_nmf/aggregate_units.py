@@ -14,7 +14,6 @@ import pandas as pd
 
 from bayesian_panel_nmf.validation import ConfigError
 
-
 _INCLUDE_SELECTORS = (
     "include_treated_units",
     "include_all_units",

@@ -7,9 +7,7 @@ import pytest
 
 from bayesian_panel_nmf.inference import generate_predictions
 from bayesian_panel_nmf.models import model
-from bayesian_panel_nmf.validation import ConfigError
-from bayesian_panel_nmf.validation import DataError
-
+from bayesian_panel_nmf.validation import ConfigError, DataError
 
 RUN_ANALYSIS_PATH = Path(__file__).resolve().parents[1] / "scripts" / "run_analysis.py"
 RUN_ANALYSIS_SPEC = importlib.util.spec_from_file_location(
@@ -153,7 +151,6 @@ def test_model_rejects_none_control_idx_when_model_treated_true():
         )
 
 
-
 def test_run_model_type_without_figures_does_not_import_viz(
     monkeypatch, tmp_path: Path
 ):
@@ -234,8 +231,9 @@ def test_run_model_type_without_figures_does_not_import_viz(
     assert (output_dir / "total" / "NB_births_total_1.csv").exists()
 
 
-
-def test_main_parallel_branch_disables_worker_progress_bars(monkeypatch, tmp_path: Path):
+def test_main_parallel_branch_disables_worker_progress_bars(
+    monkeypatch, tmp_path: Path
+):
     import yaml  # type: ignore[import-untyped]
 
     config_path = tmp_path / "cfg.yaml"

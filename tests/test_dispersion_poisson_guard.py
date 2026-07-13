@@ -1,8 +1,9 @@
-import pytest
 import jax.numpy as jnp
 import jax.random as random
 import numpy as np
+import pytest
 from numpyro.infer import MCMC, NUTS
+
 from bayesian_panel_nmf.models.panel_nmf_model import model
 
 

@@ -7,7 +7,8 @@ boolean values.
 """
 
 import pytest
-from bayesian_panel_nmf.validation import validate_config, ConfigError
+
+from bayesian_panel_nmf.validation import ConfigError, validate_config
 
 BOOL_PATHS = [
     ("data", "allow_unbalanced_panel"),

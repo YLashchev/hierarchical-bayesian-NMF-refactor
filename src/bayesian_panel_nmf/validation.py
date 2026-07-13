@@ -1,7 +1,8 @@
 """Config and data validation. Raises ConfigError or DataError with concise messages."""
 
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any
+
 import numpy as np
 
 
@@ -215,7 +216,7 @@ def validate_filepath(filepath: str) -> Path:
     return path
 
 
-def validate_groups(groups: List[str]) -> None:
+def validate_groups(groups: list[str]) -> None:
     """Require groups to be a non-empty list of strings."""
     if not groups or not isinstance(groups, list):
         raise DataError("groups must be non-empty list")
@@ -313,7 +314,7 @@ def validate_samples(samples: dict[str, np.ndarray]) -> None:
 
 
 def validate_predictions(
-    predictions: np.ndarray, samples: Optional[dict[str, Any]] = None
+    predictions: np.ndarray, samples: dict[str, Any] | None = None
 ) -> None:
     """
     Validate predictions array.
@@ -347,4 +348,3 @@ def validate_predictions(
                 f"predictions shape {predictions.shape} != "
                 f"samples['mu_ctrl'] shape {samples['mu_ctrl'].shape}"
             )
-
