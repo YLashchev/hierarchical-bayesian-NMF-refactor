@@ -83,7 +83,14 @@ def run_mcmc_inference(
         - config['model']['sample_disp']: whether to sample dispersion
         - config['model']['adjust_for_missingness']: handle censored data
         - config['model']['model_treated']: model treatment effects
-        - config['mcmc']['num_chains']: number of MCMC chains
+        - config['mcmc']['auto_parallelism']: pick num_chains/chain_method
+          from visible JAX devices via choose_mcmc_parallelism (default True)
+        - config['mcmc']['max_chains']: upper bound on chain count, used
+          only when auto_parallelism is true
+        - config['mcmc']['num_chains']: literal chain count, used only
+          when auto_parallelism is false
+        - config['mcmc']['chain_method']: literal chain_method, used only
+          when auto_parallelism is false (defaults to "sequential")
         - config['mcmc']['num_warmup']: warmup iterations
         - config['mcmc']['num_samples']: sampling iterations
         - config['mcmc']['thinning']: thinning interval
