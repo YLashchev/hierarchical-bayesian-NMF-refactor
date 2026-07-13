@@ -96,9 +96,16 @@ def _resolve_workers(config: dict, num_chains: int, n_types: int) -> int:
     Caps so ``workers x num_chains`` does not oversubscribe the machine, and never
     exceeds the number of model types being run.
     """
-    requested = int(config.get("parallel", {}).get("analysis_workers", 1) or 1)
+    raw_requested = config.get("parallel", {}).get("analysis_workers", 1)
+    try:
+        requested = 1 if raw_requested is None else int(raw_requested)
+    except (TypeError, ValueError) as e:
+        raise ConfigError("parallel.analysis_workers must be -1 or >= 1") from e
+    if requested != -1 and requested < 1:
+        raise ConfigError("parallel.analysis_workers must be -1 or >= 1")
+
     max_safe = max(1, (os.cpu_count() or 1) // max(1, num_chains))
-    workers = max_safe if requested == -1 else max(1, requested)
+    workers = max_safe if requested == -1 else requested
     return max(1, min(workers, max_safe, n_types))
 
 
@@ -261,8 +268,12 @@ def run_model_type(
                 f"min tail ESS={gate['ess_tail_min']:.0f}, divergences={gate['divergences']}"
             )
         convergence_file = type_output_dir / f"{filename}_convergence.json"
-        with open(convergence_file, "w") as f:
-            json.dump(gate, f, indent=2)
+        try:
+            with open(convergence_file, "w") as f:
+                json.dump(gate, f, indent=2)
+        except OSError as e:
+            logger.error(f"Failed to write convergence file {convergence_file}: {e}")
+            raise
 
         if save_traces:
             traces_file = type_output_dir / f"{filename}_traces.nc"
@@ -303,8 +314,11 @@ def run_model_type(
 
 def load_config(config_path: str) -> dict:
     """Load configuration from YAML file."""
-    with open(config_path) as f:
-        config = yaml.safe_load(f)
+    try:
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+    except OSError as e:
+        raise ConfigError(f"failed to load config {config_path}: {e}") from e
     return config
 
 
@@ -375,7 +389,10 @@ def main():
     save_traces = args.save_traces or config.get("output", {}).get("save_traces", False)
 
     # Resolve analysis-level parallelism against num_chains and CPU count
-    num_chains = int(config.get("mcmc", {}).get("num_chains", 4))
+    try:
+        num_chains = int(config.get("mcmc", {}).get("num_chains", 4))
+    except (TypeError, ValueError) as e:
+        raise ConfigError("mcmc.num_chains must be an integer") from e
     workers = _resolve_workers(config, num_chains=num_chains, n_types=len(types_to_run))
     logger.info(
         f"Running {len(types_to_run)} model type(s) with {workers} worker(s) "

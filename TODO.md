@@ -30,20 +30,12 @@
   - Verified: upstream `afranks86/dobbs_fertility` and our model have **identical data, prepared arrays, and log-joint**.
   - Verified: upstream **never computed R-hat/ESS/divergences** — no MCMC convergence diagnostics exist in their repository.
 - Step 6 (final suite + ruff + mypy): all green (190 passed, ruff clean, mypy clean).
-- Step 4 (delete baseline fixtures): **not yet done** — fixtures still present.
-- Step 7 (Engram session summary): not yet done.
-
-### Remaining cleanup steps
-
-- [ ] Delete `tests/fixtures/pre_refactor_*` and `tests/fixtures/compare_posterior.py`.
-- [ ] Decide on the uncommitted `configs/fertility_config.yaml` change (4 chains / 1000 warmup — diagnostic settings).
-- [ ] Commit `AGENTS.md` update (uncommitted in main checkout).
-- [ ] Commit `TODO.md` (untracked in main checkout).
-- [ ] Write final Engram session summary.
+- Step 4 (delete baseline fixtures): done.
+- Step 7 (Engram session summary): done.
 
 ---
 
-## Model convergence diagnosis
+## Model convergence diagnosis — pinned for later
 
 ### Root cause: state/time fixed-effect scale non-identifiability
 
@@ -216,14 +208,8 @@ Infant deaths are rare (low counts per cell). At low means, overdispersion's qua
 
 ---
 
-## Known issues and minor notes from reviews
+## Known minor notes from reviews
 
-1. **analysis_workers silent coercion** (Task 5): `analysis_workers: 0` or `<-1` now silently coerces to 1 instead of raising `ValueError`. Spec-intent but the behavior change was not disclosed in the commit message. Consider adding a warning or validation if safety matters.
+1. **_format_elapsed retention** (Task 4): The brief listed `_format_elapsed` for deletion, but it's still called by the per-type "complete in Xm Ys" timing line. Accepted deviation (brief was internally inconsistent).
 
-2. **_format_elapsed retention** (Task 4): The brief listed `_format_elapsed` for deletion, but it's still called by the per-type "complete in Xm Ys" timing line. Accepted deviation (brief was internally inconsistent).
-
-3. **Visualization sites 5-8 deferred** (Task 9): The `_detect_outcome_column` helper was routed through only 4 of 8 call sites. Sites 5-8 (`make_unit_fit_plot`, `make_unit_gap_plot`, `make_interval_plot`, `make_summary_table`) never raise on absence and don't check `"outcome"` explicitly — routing them through the always-raising helper would be a behavior change. Deferred as future work.
-
-4. **README heartbeat scope creep** (Task 8): Two stale README sentences about the Task-4-deleted heartbeat were updated. Accurate, harmless, self-flagged, kept.
-
-5. **AGENTS.md** (main checkout): Updated but uncommitted. Changes: removed check_diagnostics.py, --save-diagnostics, parallel.py; added always-on convergence JSON; fixed stale comment.
+2. **README heartbeat scope creep** (Task 8): Two stale README sentences about the Task-4-deleted heartbeat were updated. Accurate, harmless, self-flagged, kept.

@@ -81,6 +81,16 @@ def test_resolve_workers_minus_one_uses_maximum_safe_count(monkeypatch):
     assert workers == 4
 
 
+@pytest.mark.parametrize("analysis_workers", [0, -2])
+def test_resolve_workers_rejects_invalid_counts(analysis_workers):
+    with pytest.raises(ConfigError, match="parallel.analysis_workers"):
+        run_analysis._resolve_workers(
+            {"parallel": {"analysis_workers": analysis_workers}},
+            num_chains=2,
+            n_types=10,
+        )
+
+
 def test_safe_rmtree_refuses_project_root(tmp_path: Path):
     project_root = tmp_path / "project"
     project_root.mkdir()
@@ -280,7 +290,7 @@ def test_main_parallel_branch_disables_worker_progress_bars(
         def __enter__(self):
             return self
 
-        def __exit__(self, *a):
+        def __exit__(self, exc_type, exc_value, traceback):
             return False
 
         def submit(self, fn, **kwargs):
@@ -355,7 +365,7 @@ def test_main_dispatches_types_to_process_pool_when_workers_gt_one(
         def __enter__(self):
             return self
 
-        def __exit__(self, *a):
+        def __exit__(self, exc_type, exc_value, traceback):
             return False
 
         def submit(self, fn, **kwargs):

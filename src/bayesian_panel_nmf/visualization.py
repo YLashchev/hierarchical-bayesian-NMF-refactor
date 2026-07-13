@@ -1324,12 +1324,10 @@ def make_unit_fit_plot(
     sns.set_palette("husl")
     df = _standardize_columns(quantiles_df)
 
-    if outcome_col not in df.columns:
-        legacy_names = ["births", "count", "y"]
-        for lname in legacy_names:
-            if lname in df.columns:
-                outcome_col = lname
-                break
+    if outcome_col not in df.columns and any(
+        col in df.columns for col in ("outcome", "births", "count", "y")
+    ):
+        outcome_col = _detect_outcome_column(df)
 
     df_plot = df[(df["group"] == group) & (df["unit"] == unit_name)].copy()
     if df_plot.empty:
@@ -1450,12 +1448,10 @@ def make_unit_gap_plot(
     _setup_plot_style()
     df = _standardize_columns(quantiles_df)
 
-    if outcome_col not in df.columns:
-        legacy_names = ["births", "count", "y"]
-        for lname in legacy_names:
-            if lname in df.columns:
-                outcome_col = lname
-                break
+    if outcome_col not in df.columns and any(
+        col in df.columns for col in ("outcome", "births", "count", "y")
+    ):
+        outcome_col = _detect_outcome_column(df)
 
     df_plot = df[(df["group"] == group) & (df["unit"] == unit_name)].copy()
     if df_plot.empty:
@@ -1598,12 +1594,10 @@ def make_interval_plot(
     if color_group is None:
         color_group = "group" if group_var == "unit" else "unit"
 
-    if outcome_col not in df.columns:
-        legacy_names = ["births", "count", "y"]
-        for lname in legacy_names:
-            if lname in df.columns:
-                outcome_col = lname
-                break
+    if outcome_col not in df.columns and any(
+        col in df.columns for col in ("outcome", "births", "count", "y")
+    ):
+        outcome_col = _detect_outcome_column(df)
 
     if denom_col not in df.columns and "population" in df.columns:
         denom_col = "population"
@@ -1812,12 +1806,10 @@ def make_summary_table(
     """
     df = _standardize_columns(merged_df)
 
-    if outcome_col not in df.columns:
-        legacy_names = ["births", "count", "y"]
-        for lname in legacy_names:
-            if lname in df.columns:
-                outcome_col = lname
-                break
+    if outcome_col not in df.columns and any(
+        col in df.columns for col in ("outcome", "births", "count", "y")
+    ):
+        outcome_col = _detect_outcome_column(df)
 
     if denom_col not in df.columns and "population" in df.columns:
         denom_col = "population"
