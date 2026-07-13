@@ -6,6 +6,7 @@ from literal config values when explicitly false. No real MCMC sampling
 tests/test_inference_timing.py."""
 
 import numpy as np
+from loguru import logger
 
 from bayesian_panel_nmf import inference
 
@@ -132,3 +133,68 @@ def test_auto_parallelism_false_defaults_chain_method_to_sequential(monkeypatch)
 
     assert mcmc.kwargs["num_chains"] == 4
     assert mcmc.kwargs["chain_method"] == "sequential"
+
+
+def _patch_for_call(monkeypatch):
+    """Shared monkeypatching: mock MCMC/NUTS/block_until_ready so no real
+    sampling runs. Caller patches jax.local_device_count separately."""
+    monkeypatch.setattr(inference, "MCMC", _DummyMCMC)
+    monkeypatch.setattr(inference, "NUTS", lambda model_fn: model_fn)
+    monkeypatch.setattr(inference, "block_until_ready", lambda value: value)
+
+
+def test_parallel_on_single_device_warns_silent_fallback(monkeypatch):
+    """chain_method='parallel' with 1 visible device warns that NumPyro
+    will silently fall back to sequential execution."""
+    _patch_for_call(monkeypatch)
+    monkeypatch.setattr(inference.jax, "local_device_count", lambda: 1)
+
+    warnings: list[str] = []
+    sink_id = logger.add(warnings.append, level="WARNING")
+    try:
+        inference.run_mcmc_inference(
+            _minimal_data_dict(),
+            model_fn=lambda **kwargs: None,
+            rank=1,
+            config={
+                "model": {},
+                "mcmc": {
+                    "auto_parallelism": False,
+                    "num_chains": 4,
+                    "chain_method": "parallel",
+                },
+            },
+        )
+    finally:
+        logger.remove(sink_id)
+
+    warning_text = " ".join(warnings)
+    assert "silently fall back to sequential" in warning_text
+    assert "local_device_count()=1" in warning_text
+
+
+def test_parallel_on_multi_device_does_not_warn(monkeypatch):
+    """chain_method='parallel' with >1 visible device emits no fallback warning."""
+    _patch_for_call(monkeypatch)
+    monkeypatch.setattr(inference.jax, "local_device_count", lambda: 8)
+
+    warnings: list[str] = []
+    sink_id = logger.add(warnings.append, level="WARNING")
+    try:
+        inference.run_mcmc_inference(
+            _minimal_data_dict(),
+            model_fn=lambda **kwargs: None,
+            rank=1,
+            config={
+                "model": {},
+                "mcmc": {
+                    "auto_parallelism": False,
+                    "num_chains": 4,
+                    "chain_method": "parallel",
+                },
+            },
+        )
+    finally:
+        logger.remove(sink_id)
+
+    assert not any("silently fall back" in w for w in warnings)

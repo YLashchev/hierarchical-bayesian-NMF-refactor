@@ -134,6 +134,14 @@ def run_mcmc_inference(
             f"auto_parallelism=false -> num_chains={num_chains}, "
             f"chain_method={chain_method!r}"
         )
+    # Guard: a literal 'parallel' on a 1-device host silently runs sequential.
+    if chain_method == "parallel" and jax.local_device_count() < 2:
+        logger.warning(
+            "chain_method='parallel' requested but "
+            f"jax.local_device_count()={jax.local_device_count()}; "
+            "NumPyro will silently fall back to sequential execution. "
+            "Verify numpyro.set_host_device_count() ran before JAX import."
+        )
     num_warmup = mcmc_config.get("num_warmup", 1000)
     num_samples = mcmc_config.get("num_samples", 2500)
     thinning = mcmc_config.get("thinning", 10)
