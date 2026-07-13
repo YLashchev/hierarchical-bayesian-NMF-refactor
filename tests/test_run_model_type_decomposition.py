@@ -133,6 +133,11 @@ def test_convergence_gate_failure_logs_warning_but_does_not_abort(
             "converged": False,
         },
     )
+
+    warnings_logged: list[str] = []
+    monkeypatch.setattr(
+        run_analysis.logger, "warning", lambda msg: warnings_logged.append(msg)
+    )
     monkeypatch.setattr(
         run_analysis,
         "_run_reporting",
@@ -167,3 +172,9 @@ def test_convergence_gate_failure_logs_warning_but_does_not_abort(
     written_gate = json.loads(convergence_file.read_text())
     assert written_gate["converged"] is False
     assert written_gate["rhat_max"] == 2.5
+
+    # The failure warning must actually fire, naming the gate metrics.
+    assert len(warnings_logged) == 1
+    assert "convergence gate FAILED" in warnings_logged[0]
+    assert "R-hat=2.5000" in warnings_logged[0]
+    assert "divergences=12" in warnings_logged[0]
