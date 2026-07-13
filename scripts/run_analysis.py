@@ -24,20 +24,31 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
-import arviz as az
-import yaml  # type: ignore[import-untyped]
-from loguru import logger
+# numpyro.set_host_device_count() only takes effect before JAX's backend is
+# lazily initialized (it sets an XLA_FLAGS env var that XLA reads once, at
+# first use). It MUST run before any jax/numpyro/arviz import — including
+# the imports below and inside bayesian_panel_nmf.inference — or it is a
+# silent no-op and NUTS's MCMC(..., chain_method="parallel") falls back to
+# sequential chain execution (root cause of the mcmc.num_chains chains not
+# actually running concurrently on multi-core CPUs).
+import numpyro  # noqa: E402
 
-from bayesian_panel_nmf.data import load_and_prepare
-from bayesian_panel_nmf.inference import (
+numpyro.set_host_device_count(os.cpu_count() or 1)
+
+import arviz as az  # noqa: E402
+import yaml  # type: ignore[import-untyped]  # noqa: E402
+from loguru import logger  # noqa: E402
+
+from bayesian_panel_nmf.data import load_and_prepare  # noqa: E402
+from bayesian_panel_nmf.inference import (  # noqa: E402
     convergence_summary,
     generate_predictions,
     run_mcmc_inference,
 )
-from bayesian_panel_nmf.logging_config import setup_logging
-from bayesian_panel_nmf.models import model
-from bayesian_panel_nmf.output import format_draws
-from bayesian_panel_nmf.validation import ConfigError, validate_config
+from bayesian_panel_nmf.logging_config import setup_logging  # noqa: E402
+from bayesian_panel_nmf.models import model  # noqa: E402
+from bayesian_panel_nmf.output import format_draws  # noqa: E402
+from bayesian_panel_nmf.validation import ConfigError, validate_config  # noqa: E402
 
 
 def _validate_run_analysis_config(config: dict) -> None:
