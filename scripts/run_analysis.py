@@ -322,7 +322,8 @@ def load_config(config_path: str) -> dict:
     return config
 
 
-def main():
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse run_analysis.py's CLI arguments."""
     parser = argparse.ArgumentParser(description="Run Bayesian Panel NMF analysis")
     parser.add_argument(
         "--config",
@@ -356,7 +357,87 @@ def main():
         action="store_true",
         help="Save full posterior draws as NetCDF sidecar (arviz InferenceData)",
     )
-    args = parser.parse_args()
+    if argv is None:
+        return parser.parse_args()
+    return parser.parse_args(argv)
+
+
+def _select_types_to_run(all_types: dict, requested_type: str | None) -> dict:
+    """Return the subset of configured model types to run: just the
+    requested one if --type was given, otherwise every configured type.
+
+    Raises
+    ------
+    ConfigError
+        If requested_type is set but not present in all_types.
+    """
+    if requested_type:
+        if requested_type not in all_types:
+            raise ConfigError(
+                f"--type={requested_type!r} not found in config; "
+                f"available: {list(all_types)}"
+            )
+        return {requested_type: all_types[requested_type]}
+    return all_types
+
+
+def _run_sequential(
+    types_to_run: dict,
+    config: dict,
+    args: argparse.Namespace,
+    save_traces: bool,
+    log_level: str,
+) -> None:
+    """Run each model type one at a time in this process (preserves rich
+    per-type logging; used when workers == 1)."""
+    total_count = len(types_to_run)
+    for index, (model_type, type_config) in enumerate(types_to_run.items(), start=1):
+        logger.info(f"RUNNING MODEL TYPE: {model_type.upper()} ({index}/{total_count})")
+        run_model_type(
+            model_type=model_type,
+            type_config=type_config,
+            config=config,
+            rank_override=args.rank,
+            save_traces=save_traces,
+            log_level=log_level,
+            configure_logging=False,
+        )
+
+
+def _run_parallel(
+    types_to_run: dict,
+    config: dict,
+    args: argparse.Namespace,
+    save_traces: bool,
+    log_level: str,
+    workers: int,
+) -> None:
+    """Run model types across a process pool (each worker reconfigures its
+    own logger + disables progress bars to keep stdout readable when
+    N>1 subprocesses print concurrently)."""
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        futures = {
+            pool.submit(
+                run_model_type,
+                model_type=model_type,
+                type_config=type_config,
+                config=config,
+                rank_override=args.rank,
+                save_traces=save_traces,
+                log_level=log_level,
+                configure_logging=True,
+                disable_progress_bar=True,
+            ): model_type
+            for model_type, type_config in types_to_run.items()
+        }
+        for i, fut in enumerate(as_completed(futures), 1):
+            mt = futures[fut]
+            fut.result()  # re-raises worker exceptions
+            logger.info(f"{mt} finished ({i}/{len(futures)})")
+
+
+def main():
+    args = _parse_args()
 
     # Setup logging
     log_level = "DEBUG" if args.verbose else "INFO"
@@ -375,15 +456,7 @@ def main():
         raise
 
     # Select which model types to run
-    all_types = config["model"]["types"]
-    if args.type:
-        if args.type not in all_types:
-            raise ConfigError(
-                f"--type={args.type!r} not found in config; available: {list(all_types)}"
-            )
-        types_to_run = {args.type: all_types[args.type]}
-    else:
-        types_to_run = all_types
+    types_to_run = _select_types_to_run(config["model"]["types"], args.type)
 
     # Resolve save_traces: CLI flag overrides config
     save_traces = args.save_traces or config.get("output", {}).get("save_traces", False)
@@ -401,44 +474,9 @@ def main():
 
     # Sequential path (preserves rich logging for single-type or workers=1)
     if workers == 1:
-        total_count = len(types_to_run)
-        for index, (model_type, type_config) in enumerate(
-            types_to_run.items(), start=1
-        ):
-            logger.info(
-                f"RUNNING MODEL TYPE: {model_type.upper()} ({index}/{total_count})"
-            )
-            run_model_type(
-                model_type=model_type,
-                type_config=type_config,
-                config=config,
-                rank_override=args.rank,
-                save_traces=save_traces,
-                log_level=log_level,
-                configure_logging=False,
-            )
+        _run_sequential(types_to_run, config, args, save_traces, log_level)
     else:
-        # Parallel path: each worker reconfigures its own logger + progress bars
-        # disabled to keep stdout readable when N>1 subprocesses print concurrently.
-        with ProcessPoolExecutor(max_workers=workers) as pool:
-            futures = {
-                pool.submit(
-                    run_model_type,
-                    model_type=model_type,
-                    type_config=type_config,
-                    config=config,
-                    rank_override=args.rank,
-                    save_traces=save_traces,
-                    log_level=log_level,
-                    configure_logging=True,
-                    disable_progress_bar=True,
-                ): model_type
-                for model_type, type_config in types_to_run.items()
-            }
-            for i, fut in enumerate(as_completed(futures), 1):
-                mt = futures[fut]
-                fut.result()  # re-raises worker exceptions
-                logger.info(f"{mt} finished ({i}/{len(futures)})")
+        _run_parallel(types_to_run, config, args, save_traces, log_level, workers)
 
     logger.info(f"Analysis complete. Results saved to: {output_dir}")
 
