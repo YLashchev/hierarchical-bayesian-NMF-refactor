@@ -118,8 +118,22 @@ model:
 # MCMC Settings
 # -----------------------------------------------------------------------------
 mcmc:
-  # Number of parallel chains
-  num_chains: 4
+  # Automatically pick num_chains and chain_method from the visible JAX
+  # devices (see choose_mcmc_parallelism in mcmc_utils.py). This is the
+  # recommended default -- set to false only if you need to pin an exact
+  # chain count/method regardless of hardware (see the manual override
+  # example in README.md).
+  auto_parallelism: true
+
+  # Upper bound on chain count when auto_parallelism is true. Actual
+  # chain count may be lower on multi-device hosts (capped to the
+  # visible device count). Ignored when auto_parallelism is false --
+  # use num_chains below instead.
+  max_chains: 4
+
+  # Manual override values, used only when auto_parallelism: false.
+  # num_chains: 4
+  # chain_method: "sequential"  # "sequential", "parallel", or "vectorized"
 
   # Warmup iterations (burn-in)
   num_warmup: 1000
@@ -136,15 +150,6 @@ mcmc:
 
   # Show progress bar during sampling
   progress_bar: true
-
-# -----------------------------------------------------------------------------
-# Parallelization Settings
-# -----------------------------------------------------------------------------
-parallel:
-  # Number of model types to run at once.
-  # This is separate from mcmc.num_chains, which controls chains within one fit.
-  # Set to 1 for sequential execution, or -1 to use the maximum safe count.
-  analysis_workers: 1
 
 # -----------------------------------------------------------------------------
 # Output Settings
