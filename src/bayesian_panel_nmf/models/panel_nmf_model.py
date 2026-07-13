@@ -9,6 +9,26 @@ from .utils import missingness_adjustment
 
 
 def _define_time_factors_and_fe(K, D, rank, N, time_fac_alpha):
+    """Sample the low-rank time factors and state/time fixed effects.
+
+    Parameters
+    ----------
+    K, D, N : int
+        Group, unit, and time-period dimensions.
+    rank : int
+        Number of latent factors for the low-rank time/unit decomposition.
+    time_fac_alpha : float
+        Shape/rate parameter for the Gamma prior on raw time factors.
+
+    Returns
+    -------
+    state_fe : jnp.ndarray
+        Log-space state fixed effects, shape (D, K).
+    time_fe : jnp.ndarray
+        Log-space time fixed effects, shape (N, K).
+    time_factor : jnp.ndarray
+        Log-space combined low-rank time/unit factor surface.
+    """
     with numpyro.plate("K", K):
         with numpyro.plate("F", rank), numpyro.plate("N", N):
             raw_time_factor = jnp.log(
@@ -49,9 +69,50 @@ def model(
     sample_disp=False,
     model_treated=False,
 ):
-    # if enforce_joint_consistency and (y_totals is None):
-    #     raise Exception("Totals must be passed in for joint consistency.")
+    """NumPyro model: low-rank Bayesian panel NMF with optional treatment effects.
 
+    Decomposes the log-rate surface into a low-rank state/time factor
+    structure plus state and time fixed effects, then adds an optional
+    treatment-effect term (state x category x time interactions) when
+    ``model_treated=True``. The outcome is Poisson or Negative Binomial,
+    with an optional adjustment for small suppressed/censored counts.
+
+    Parameters
+    ----------
+    denominators : array, shape (K, D, N)
+        Population/exposure denominators per group, unit, and time period.
+    control_idx_array : array of bool, shape (K, D, N), or None
+        True where a cell is in the untreated (control) period/unit.
+        Required when ``model_treated=True``; may be None for pure
+        counterfactual prediction with ``model_treated=False``.
+    missing_idx_array : array of bool, shape (K, D, N), or None
+        True where a cell's observed count is known to be suppressed/
+        censored to a small range (see ``adjust_for_missingness``).
+    y : array, shape (K, D, N), optional
+        Observed outcome counts. None for prior/posterior predictive
+        sampling (no likelihood conditioning).
+    rank : int
+        Number of latent factors for the low-rank time/unit decomposition.
+    outcome_dist : {"NB", "Poisson"}
+        Outcome likelihood family.
+    adjust_for_missingness : bool
+        Whether to add the censored-count log-likelihood adjustment via
+        ``missingness_adjustment`` for small suppressed counts.
+    nb_disp : float
+        Fixed Negative Binomial dispersion, used when ``sample_disp`` is
+        False and ``outcome_dist == "NB"``.
+    sample_disp : bool
+        Whether to sample NB dispersion per unit instead of using the
+        fixed ``nb_disp`` value. Ignored for ``outcome_dist == "Poisson"``.
+    model_treated : bool
+        Whether to add the treatment-effect term. Requires
+        ``control_idx_array`` when True.
+
+    Raises
+    ------
+    ValueError
+        If ``model_treated=True`` but ``control_idx_array`` is None.
+    """
     if model_treated and control_idx_array is None:
         raise ValueError(
             "model_treated=True requires control_idx_array to identify treated "
@@ -89,7 +150,7 @@ def model(
         + fixed_effects
         +
         # we want births per 10k
-        jnp.log(denominators),  # .sum(0)[None, ...]) #+
+        jnp.log(denominators),
     )
 
     if model_treated:
@@ -126,9 +187,6 @@ def model(
                 "category_treatment_effect", dist.Normal(scale=treatment_category_scale)
             )
 
-        # treatment_kt_tensor = numpyro.deterministic('tkt', jnp.zeros_like(control_idx_array))
-        # treatment_kt_tensor[~control_idx_array] = treatment_kt
-        # print(treatment_kt_tensor.shape)
         te = numpyro.deterministic(
             "te",
             jnp.zeros_like(control_idx_array, dtype=float)
@@ -141,7 +199,6 @@ def model(
             ),
         )
         mu = numpyro.deterministic("mu", f_all + te)
-        # mu = numpyro.deterministic('mu', f_all.at[~control_idx_array].add(treatment_kt) + (~control_idx_array) * state_treatment_effect[None, :, None] + (~control_idx_array) * category_treatment_effect[:, None, None])
     else:
         mu = numpyro.deterministic("mu", f_all)
 
@@ -161,12 +218,6 @@ def model(
     else:
         dispersion = None
 
-    # Do low-rank approximation of the proportion model so:
-    # \alpha_i, \alpha_k ~ \theta_i \theta_j where theta i,j are low rank factors drawn over time
-    # priors for theta (Beta distributions?)
-    # then use \alpha as concentration parameters in the Dirichlet
-    # mu ~ treatment_effect + observed
-    # each category is ~ mu * Dirichlet(\alpha_it, .. \alpha_ik)
     if y is not None:
         if model_treated:
             mask = ~missing_idx
