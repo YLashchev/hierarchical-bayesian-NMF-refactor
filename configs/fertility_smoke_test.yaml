@@ -1,7 +1,7 @@
 # =============================================================================
 # Fertility Smoke Test — minimal MCMC settings for quick verification
 # =============================================================================
-# Single model type, rank 3, 2 chains, 200 warmup + 200 samples.
+# Single model type, rank 3, 4 chains, 200 warmup + 200 samples.
 # Runs in ~4 min on a laptop. Not for inference — only proves the pipeline works.
 
 data:
@@ -39,7 +39,7 @@ model:
 
 mcmc:
   auto_parallelism: true
-  max_chains: 2
+  max_chains: 4
   num_warmup: 200
   num_samples: 200
   thinning: 1
