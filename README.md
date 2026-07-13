@@ -33,7 +33,7 @@ When that finishes cleanly, run the full analysis:
 uv run scripts/run_analysis.py --config configs/fertility_config.yaml
 ```
 
-Full fertility runs default to `parallel.analysis_workers: 1` so progress remains visible and only one large draws/reporting job sits in memory at a time. You can set it to `-1` to auto-cap model-type workers against `mcmc.num_chains` and CPU count. Progress bars are disabled for multi-model parallel runs so subprocess output does not interleave; the parent process logs a line each time a model type finishes.
+Chain-level parallelism is chosen automatically from the visible JAX devices (`mcmc.auto_parallelism: true`, the default): a single-CPU host runs `mcmc.max_chains` chains sequentially, a single GPU runs them vectorized on that device, and a multi-device host (multiple CPUs exposed via `numpyro.set_host_device_count`, or multiple GPUs/TPUs) runs them in parallel across devices, capped at the visible device count. See `src/bayesian_panel_nmf/mcmc_utils.py::choose_mcmc_parallelism` for the exact rules. Model types configured under `model.types` always run sequentially, one after another, in a single process.
 
 Both write posterior draws + preprocessed data to `results/<type>/` (and figures under `results/<type>/figs/` when `output.figures: true`).
 
@@ -153,14 +153,21 @@ model:
 ### Parallelism
 
 ```yaml
-parallel:
-  analysis_workers: 1 # 1 = sequential, -1 = auto-cap
-
 mcmc:
-  num_chains: 4 # chains within one fit
+  auto_parallelism: true  # default: pick num_chains/chain_method from devices
+  max_chains: 4             # upper bound on chain count
 ```
 
-`analysis_workers × num_chains` is capped against CPU count automatically. With `analysis_workers: -1`, the runner uses the largest safe model-type worker count. For easier progress visibility or lower memory/disk pressure, set `analysis_workers: 1`. Parallel runs disable worker progress bars; each model type logs a line when it finishes.
+By default, `choose_mcmc_parallelism` picks the chain count and execution method from `jax.devices()`: sequential on a single CPU, vectorized on a single GPU, parallel (capped at device count) on multiple CPUs/GPUs/TPUs.
+
+To pin exact values manually instead (e.g. to force `vectorized` on a CPU for testing, or guarantee a specific chain count regardless of detected hardware), set `auto_parallelism: false` and provide both `num_chains` and `chain_method` explicitly:
+
+```yaml
+mcmc:
+  auto_parallelism: false
+  num_chains: 4
+  chain_method: "sequential"  # "sequential", "parallel", or "vectorized"
+```
 
 ### Figures, diagnostics + cleanup
 
@@ -259,7 +266,7 @@ Built-in but still being hardened:
 - [ ] **Add MCMC diagnostics** - trace plots (log postperior), ESS, Rhats
 - [ ] **Unit test coverage** — current suite is mostly integration / regression against synthetic CSVs; add targeted unit tests for functions in `models/`, `inference.py`, and `output.py`
 - [ ] **GPU support** — JAX already runs on GPU; surface a config flag + verify chain parallelism against `numpyro.set_host_device_count`
-- [ ] **Server/HPC parallel profiles** — add config profiles for laptop vs server runs, and optional reference-style task granularity (`model_type × rank`) so server runs can parallelize many independent fits safely. Guard cleanup/output races, keep diagnostics off for full parallel runs, and cap `analysis_workers × mcmc.num_chains` by CPU/RAM.
+- [ ] **Server/HPC multi-model-type parallelism** — model types currently always run sequentially in one process (chain-level parallelism via `mcmc.auto_parallelism` is automatic within each fit). If running many independent model types on a server/HPC host becomes a bottleneck, revisit process-level parallelism across model types, with the same CPU/RAM oversubscription guards the removed `analysis_workers` mechanism had.
 - [ ] **Reference-style post-hoc diagnostics** — optionally save selected latent draws (`te`, treatment effects, `unit_weight`, `time_fac`, `disp`) so R-hat/ESS can be computed after a run without calling NumPyro `summary()` during production. Prefer Parquet or compact sidecar files over widening the main CSV; keep full-run diagnostics off by default.
 - [ ] **Spillover analysis** — diagnostics for contamination between treated and neighboring control units
 - [ ] **Donor-pool sensitivity** — systematic leave-one-out / leave-region-out robustness checks
