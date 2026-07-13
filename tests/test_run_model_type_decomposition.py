@@ -107,7 +107,6 @@ def test_clean_true_removes_existing_type_output_dir_before_rerun(
         rank_override=None,
         log_level="INFO",
         configure_logging=False,
-        disable_progress_bar=True,
     )
 
     assert not stale_file.exists()
@@ -160,7 +159,6 @@ def test_convergence_gate_failure_logs_warning_but_does_not_abort(
         rank_override=None,
         log_level="INFO",
         configure_logging=False,
-        disable_progress_bar=True,
     )
 
     # Pipeline must NOT abort: draws CSV still written despite failed gate.

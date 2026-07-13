@@ -31,6 +31,9 @@ def test_run_mcmc_inference_blocks_until_samples_ready(monkeypatch):
     monkeypatch.setattr(inference, "NUTS", lambda model_fn: ("kernel", model_fn))
     monkeypatch.setattr(inference, "MCMC", DummyMCMC)
     monkeypatch.setattr(
+        inference, "choose_mcmc_parallelism", lambda max_chains: (1, "sequential")
+    )
+    monkeypatch.setattr(
         inference,
         "block_until_ready",
         lambda value: seen.append(("blocked", value)) or value,
@@ -64,7 +67,7 @@ def test_run_mcmc_inference_blocks_until_samples_ready(monkeypatch):
 
     assert isinstance(mcmc, DummyMCMC)
     assert seen == [False, ("blocked", samples)]
-    assert mcmc.kwargs["chain_method"] == "parallel"
+    assert mcmc.kwargs["chain_method"] == "sequential"
 
 
 def test_generate_predictions_blocks_until_predictions_ready(monkeypatch):

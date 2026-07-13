@@ -140,10 +140,13 @@ notebooks/                   # Exploratory only — not source of truth
   `model.adjust_for_missingness`, `model.model_treated`,
   `model.types.<name>.total_all`, `mcmc.progress_bar`, `output.figures`,
   `output.clean`.
-- `parallel.analysis_workers × mcmc.num_chains` must not exceed the CPU count.
-  Worker count is resolved inline in `run_analysis.py::main()` from
-  `parallel.analysis_workers` (1 = sequential, -1 = auto, N = explicit); there
-  is no separate `parallel.py` module or `num_workers` alias.
+- Chain-level parallelism (`mcmc.auto_parallelism`, default true) is
+  resolved by `choose_mcmc_parallelism()` in
+  `src/bayesian_panel_nmf/mcmc_utils.py` from the visible JAX devices --
+  sequential on 1 CPU device, vectorized on 1 GPU device, parallel
+  (capped at device count) on multiple devices. Model types always run
+  sequentially, one process, one after another -- there is no
+  analysis-level process pool (removed; was `parallel.analysis_workers`).
 - Every MCMC run always writes `<draws-stem>_convergence.json` next to the
   draws CSV (rank-normalized R-hat, bulk/tail ESS, divergences via
   `inference.convergence_summary()`; thresholds: R-hat < 1.01, ESS > 400, 0

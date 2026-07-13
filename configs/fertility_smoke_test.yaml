@@ -38,15 +38,13 @@ model:
   model_treated: true
 
 mcmc:
-  num_chains: 2
+  auto_parallelism: true
+  max_chains: 2
   num_warmup: 200
   num_samples: 200
   thinning: 1
   random_seed: 8675309
   progress_bar: false
-
-parallel:
-  analysis_workers: 1
 
 output:
   figures: true

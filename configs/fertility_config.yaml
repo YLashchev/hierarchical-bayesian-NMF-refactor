@@ -62,17 +62,16 @@ model:
   adjust_for_missingness: true
   model_treated: true
 
-# Full production config: 4 chains x 2000 warmup x 2000 samples, thinning 5.
+# Full production config: chain count/method auto-detected from JAX devices
+# (see mcmc.auto_parallelism below); 2000 warmup x 2000 samples, thinning 5.
 mcmc:
-  num_chains: 2
+  auto_parallelism: true
+  max_chains: 2
   num_warmup: 2000
   num_samples: 2000
   thinning: 5
   random_seed: 8675309
   progress_bar: true
-
-parallel:
-  analysis_workers: -1
 
 output:
   figures: true

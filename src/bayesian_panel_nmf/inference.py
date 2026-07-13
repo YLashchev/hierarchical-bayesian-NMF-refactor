@@ -13,6 +13,7 @@ from jax import block_until_ready, random
 from loguru import logger
 from numpyro.infer import MCMC, NUTS, Predictive
 
+from bayesian_panel_nmf.mcmc_utils import choose_mcmc_parallelism
 from bayesian_panel_nmf.validation import (
     DataError,
     validate_data_dict,
@@ -82,7 +83,14 @@ def run_mcmc_inference(
         - config['model']['sample_disp']: whether to sample dispersion
         - config['model']['adjust_for_missingness']: handle censored data
         - config['model']['model_treated']: model treatment effects
-        - config['mcmc']['num_chains']: number of MCMC chains
+        - config['mcmc']['auto_parallelism']: pick num_chains/chain_method
+          from visible JAX devices via choose_mcmc_parallelism (default True)
+        - config['mcmc']['max_chains']: upper bound on chain count, used
+          only when auto_parallelism is true
+        - config['mcmc']['num_chains']: literal chain count, used only
+          when auto_parallelism is false
+        - config['mcmc']['chain_method']: literal chain_method, used only
+          when auto_parallelism is false (defaults to "sequential")
         - config['mcmc']['num_warmup']: warmup iterations
         - config['mcmc']['num_samples']: sampling iterations
         - config['mcmc']['thinning']: thinning interval
@@ -109,7 +117,13 @@ def run_mcmc_inference(
     rank = validate_rank(rank)
 
     mcmc_config = config.get("mcmc", {})
-    num_chains = mcmc_config.get("num_chains", 4)
+    auto_parallelism = mcmc_config.get("auto_parallelism", True)
+    if auto_parallelism:
+        max_chains = mcmc_config.get("max_chains", 4)
+        num_chains, chain_method = choose_mcmc_parallelism(max_chains=max_chains)
+    else:
+        num_chains = mcmc_config.get("num_chains", 4)
+        chain_method = mcmc_config.get("chain_method", "sequential")
     num_warmup = mcmc_config.get("num_warmup", 1000)
     num_samples = mcmc_config.get("num_samples", 2500)
     thinning = mcmc_config.get("thinning", 10)
@@ -128,12 +142,6 @@ def run_mcmc_inference(
     rng_key = random.PRNGKey(random_seed)
     rng_key, rng_key_ = random.split(rng_key)
 
-    # chain_method="parallel" requires jax.local_device_count() >= num_chains,
-    # which requires numpyro.set_host_device_count() to have run before JAX's
-    # backend was initialized — see scripts/run_analysis.py's module-level
-    # call for why this can't be done here. Explicit rather than relying on
-    # MCMC's own "parallel" default silently falling back to "sequential"
-    # when the device count requirement isn't met.
     kernel = NUTS(model_fn)
     mcmc = MCMC(
         kernel,
@@ -142,7 +150,7 @@ def run_mcmc_inference(
         num_chains=num_chains,
         progress_bar=progress_bar,
         thinning=thinning,
-        chain_method="parallel",
+        chain_method=chain_method,
     )
 
     start_time = time.time()
