@@ -18,6 +18,8 @@ from loguru import logger
 
 
 def main():
+    """CLI: compute ArviZ R-hat/ESS diagnostics from a saved NetCDF trace file
+    and print pass/warn/fail per parameter."""
     parser = argparse.ArgumentParser(
         description="Compute diagnostics natively via ArviZ NetCDF."
     )
