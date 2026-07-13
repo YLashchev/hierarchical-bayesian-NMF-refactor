@@ -21,23 +21,55 @@ from bayesian_panel_nmf.validation import (
     validate_rank,
 )
 
+# Identifiable deterministic quantities the convergence gate assesses.
+# The raw low-rank factors (time_fac, unit_weight) and fixed effects
+# (state_fe, time_fe) are NON-identifiable: the factorization
+#   log(sum_k exp(time_fac[k] + unit_weight[k]))
+# is rotation/permutation-invariant, so R-hat/ESS on the latent factors is
+# meaningless and can flag "non-convergence" while the identifiable log-rate
+# surface (mu_ctrl, mu) and treatment effect (te) are well mixed. te is only
+# present when model_treated=True; mu_ctrl and mu are always present.
+IDENTIFIABLE_VARS: tuple[str, ...] = ("mu", "mu_ctrl", "te")
 
-def convergence_summary(idata) -> dict[str, Any]:
+
+def convergence_summary(
+    idata,
+    var_names: tuple[str, ...] = IDENTIFIABLE_VARS,
+) -> dict[str, Any]:
     """Rank-normalized R-hat / bulk+tail ESS gate (Vehtari et al. 2021 via ArviZ).
+
+    Diagnostics are computed only on identifiable deterministic variables
+    (``mu``, ``mu_ctrl``, ``te`` by default) for the reason documented on
+    ``IDENTIFIABLE_VARS``. If none of the requested ``var_names`` are present
+    in ``idata`` (e.g. a model variant without these sites, or a unit test with
+    a placeholder variable), fall back to summarizing every variable so the
+    gate still produces a useful diagnostic rather than an empty one.
 
     Thresholds: R-hat < 1.01, bulk ESS > 400, zero divergences.
     """
     import arviz as az
 
     stats = az.summary(idata, kind="diagnostics", round_to="none")
+    # ArviZ flattens multi-dim sites as "mu[0,0,0]"; split off the base name.
+    base_names = stats.index.map(lambda name: name.split("[", 1)[0])
+    mask = base_names.isin(var_names)
+    if not mask.any():
+        logger.warning(
+            f"convergence_summary: none of {var_names} present in posterior; "
+            "falling back to diagnostics over all variables."
+        )
+        identifiable_stats = stats
+    else:
+        identifiable_stats = stats[mask]
+
     divergences = 0
     if hasattr(idata, "sample_stats") and "diverging" in idata.sample_stats:
         divergences = int(np.asarray(idata.sample_stats["diverging"]).sum())
 
     result = {
-        "rhat_max": float(stats["r_hat"].max()),
-        "ess_bulk_min": float(stats["ess_bulk"].min()),
-        "ess_tail_min": float(stats["ess_tail"].min()),
+        "rhat_max": float(identifiable_stats["r_hat"].max()),
+        "ess_bulk_min": float(identifiable_stats["ess_bulk"].min()),
+        "ess_tail_min": float(identifiable_stats["ess_tail"].min()),
         "divergences": divergences,
     }
     result["converged"] = bool(
