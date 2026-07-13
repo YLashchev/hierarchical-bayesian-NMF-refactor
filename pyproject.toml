@@ -42,3 +42,13 @@ packages = ["src/bayesian_panel_nmf"]
 
 [tool.mypy]
 ignore_missing_imports = true
+
+[tool.pyright]
+# Suppress only reportMissingImports (pyright's openFilesOnly LSP mode can't
+# see the uv .venv when analysing a single file, so it occasionally guesses
+# wrong on installed packages like matplotlib). Do NOT point pyright at the
+# venv or change typeCheckingMode: verified that resolving the real venv makes
+# pyright infer numpyro/jax/pandas call sites confidently WRONG (144 new
+# errors incl. panel_nmf_model.py) rather than skipping them the way mypy's
+# ignore_missing_imports does. mypy remains the enforced type-check gate.
+reportMissingImports = false
