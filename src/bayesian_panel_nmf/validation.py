@@ -158,6 +158,56 @@ def _validate_config_boolean_flags(
             )
 
 
+def _validate_inference_mode_and_cut(config: dict, model_cfg: dict) -> None:
+    """Validate model.inference_mode and the optional cut: section."""
+    mode = model_cfg.get("inference_mode")
+    if mode is not None and mode not in ("joint", "cut"):
+        raise ConfigError(
+            f"config['model']['inference_mode'] must be 'joint' or 'cut', got {mode!r}"
+        )
+    if mode == "cut" and model_cfg.get("model_treated") is False:
+        raise ConfigError(
+            "model.inference_mode='cut' requires model_treated=true "
+            "(the cut model estimates treatment effects)"
+        )
+
+    cut_cfg = config.get("cut")
+    if cut_cfg is None:
+        return
+    if not isinstance(cut_cfg, dict):
+        raise ConfigError(f"config['cut'] must be dict, got {type(cut_cfg).__name__}")
+
+    for key in ("num_stage1_draws", "stage2_draws_per_component"):
+        value = cut_cfg.get(key)
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, int) or value < 1
+        ):
+            raise ConfigError(
+                f"config['cut']['{key}'] must be a positive integer, got {value!r}"
+            )
+    for key in ("selection_seed", "stage2_seed"):
+        value = cut_cfg.get(key)
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, int)
+        ):
+            raise ConfigError(
+                f"config['cut']['{key}'] must be an integer, got {value!r}"
+            )
+
+    stage2_mcmc = cut_cfg.get("stage2_mcmc")
+    if stage2_mcmc is not None:
+        if not isinstance(stage2_mcmc, dict):
+            raise ConfigError(
+                f"config['cut']['stage2_mcmc'] must be dict, "
+                f"got {type(stage2_mcmc).__name__}"
+            )
+        if "random_seed" in stage2_mcmc:
+            raise ConfigError(
+                "config['cut']['stage2_mcmc'] must not set random_seed; "
+                "cut.stage2_seed is the Stage-2 seed authority"
+            )
+
+
 def _validate_data_schema(config: dict) -> tuple[dict, dict]:
     if "data" not in config:
         raise ConfigError("config missing 'data' section")
@@ -202,6 +252,7 @@ def validate_config(config: dict) -> None:
 
     _validate_schema_outcomes(schema)
     _validate_config_boolean_flags(config, data_config, config.get("model", {}) or {})
+    _validate_inference_mode_and_cut(config, config.get("model", {}) or {})
 
 
 def validate_filepath(filepath: str) -> Path:
