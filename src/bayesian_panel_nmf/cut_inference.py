@@ -16,10 +16,18 @@ parameters only through those quantities.
 
 from dataclasses import dataclass
 
+import jax.numpy as jnp
 import numpy as np
+import numpyro.distributions as dist
+from jax import random
 from loguru import logger
+from numpyro.infer import MCMC, NUTS
 
-from .validation import ConfigError, DataError
+from .inference import _resolve_model_settings, convergence_summary
+from .mcmc_utils import choose_mcmc_parallelism
+from .models.cut_stage1_model import stage1_model
+from .models.cut_stage2_model import stage2_model
+from .validation import ConfigError, DataError, validate_data_dict, validate_rank
 
 DEFAULT_NUM_STAGE1_DRAWS = 25
 DEFAULT_STAGE2_DRAWS_PER_COMPONENT = 100
@@ -213,3 +221,134 @@ def subsample_component_draws(
             np.linspace(0, retained_per_chain - 1, quota).round().astype(int)
         )
     return indices
+
+
+def _resolve_chains(mcmc_cfg: dict) -> tuple[int, str]:
+    """Chain count/method: auto (device-based) or literal config values."""
+    if mcmc_cfg.get("auto_parallelism", True):
+        return choose_mcmc_parallelism(max_chains=mcmc_cfg.get("max_chains", 4))
+    return mcmc_cfg.get("num_chains", 4), mcmc_cfg.get("chain_method", "sequential")
+
+
+def _extract_fit(mcmc: MCMC) -> MCMCFit:
+    """Convert one MCMC run to host arrays; strip scoped low_births/* keys
+    (xarray rejects '/' in variable names -- same rule as run_analysis's
+    _clean_scoped_samples)."""
+    grouped = mcmc.get_samples(group_by_chain=True)
+    samples = {k: np.asarray(v) for k, v in grouped.items() if "/" not in k}
+    diverging = np.asarray(mcmc.get_extra_fields()["diverging"]).reshape(
+        mcmc.num_chains, -1
+    )
+    num_retained = int(next(iter(samples.values())).shape[1])
+    return MCMCFit(
+        samples=samples,
+        diverging=diverging,
+        num_chains=int(mcmc.num_chains),
+        num_retained=num_retained,
+    )
+
+
+def run_stage1_mcmc(data_dict: dict, rank: int, config: dict) -> MCMCFit:
+    """Fit the untreated baseline to observed untreated cells (Stage 1)."""
+    validate_data_dict(data_dict)
+    rank = validate_rank(rank)
+    mcmc_cfg = config.get("mcmc", {}) or {}
+    model_cfg = config.get("model", {}) or {}
+    model_settings = _resolve_model_settings(config)
+    num_chains, chain_method = _resolve_chains(mcmc_cfg)
+    logger.info(f"cut Stage 1: num_chains={num_chains}, chain_method={chain_method!r}")
+    mcmc = MCMC(
+        NUTS(stage1_model),
+        num_warmup=mcmc_cfg.get("num_warmup", 1000),
+        num_samples=mcmc_cfg.get("num_samples", 2500),
+        num_chains=num_chains,
+        thinning=mcmc_cfg.get("thinning", 10),
+        progress_bar=mcmc_cfg.get("progress_bar", True),
+        chain_method=chain_method,
+    )
+    _, run_key = random.split(random.PRNGKey(int(mcmc_cfg.get("random_seed", 8675309))))
+    mcmc.run(
+        run_key,
+        extra_fields=("diverging",),
+        y=data_dict["Y"],
+        denominators=data_dict["denominators"],
+        control_idx_array=data_dict["control_idx_array"],
+        missing_idx_array=data_dict["missing_idx_array"],
+        rank=rank,
+        outcome_dist=model_settings["outcome_dist"],
+        adjust_for_missingness=model_cfg.get("adjust_for_missingness", True),
+        nb_disp=model_settings["nb_disp"],
+        sample_disp=model_settings["sample_disp"],
+    )
+    return _extract_fit(mcmc)
+
+
+def run_stage2_mcmc(
+    data_dict: dict,
+    ref: Stage1DrawRef,
+    config: dict,
+    stage2_mcmc: dict,
+    rng_key,
+) -> MCMCFit:
+    """One complete multi-chain conditional Stage-2 fit for one baseline draw.
+
+    Uses the same ``stage2_model`` callable and constant array shapes for
+    every component so XLA can reuse compilation. Never call
+    ``jax.clear_caches()`` here.
+    """
+    model_cfg = config.get("model", {}) or {}
+    model_settings = _resolve_model_settings(config)
+    num_chains, chain_method = _resolve_chains(stage2_mcmc)
+    mcmc = MCMC(
+        NUTS(stage2_model),
+        num_warmup=stage2_mcmc.get("num_warmup", 1000),
+        num_samples=stage2_mcmc.get("num_samples", 2500),
+        num_chains=num_chains,
+        thinning=stage2_mcmc.get("thinning", 10),
+        progress_bar=stage2_mcmc.get("progress_bar", True),
+        chain_method=chain_method,
+    )
+    mcmc.run(
+        rng_key,
+        extra_fields=("diverging",),
+        mu_ctrl=ref.mu_ctrl,
+        control_idx_array=data_dict["control_idx_array"],
+        missing_idx_array=data_dict["missing_idx_array"],
+        y=data_dict["Y"],
+        outcome_dist=model_settings["outcome_dist"],
+        nb_concentration=ref.nb_concentration,
+        adjust_for_missingness=model_cfg.get("adjust_for_missingness", True),
+    )
+    return _extract_fit(mcmc)
+
+
+def sample_untreated_predictions(
+    mu_ctrl, nb_concentration, outcome_dist: str, rng_key
+) -> np.ndarray:
+    """Draw untreated posterior-predictive counts for given baseline surfaces.
+
+    ``nb_concentration`` must already be broadcastable against ``mu_ctrl``
+    (e.g. ``(D, 1)`` against ``(..., K, D, N)``); ``None`` for Poisson.
+    """
+    rate = jnp.exp(jnp.asarray(mu_ctrl))
+    if outcome_dist == "Poisson":
+        draws = dist.Poisson(rate).sample(rng_key)
+    else:
+        draws = dist.NegativeBinomial2(rate, jnp.asarray(nb_concentration)).sample(
+            rng_key
+        )
+    return np.asarray(draws)
+
+
+def summarize_mcmc(fit: MCMCFit) -> dict:
+    """Per-fit convergence gate via the existing ArviZ-based summary.
+
+    Diagnostics are computed on exactly one real MCMC target -- never across
+    pooled cut components.
+    """
+    import arviz as az
+
+    idata = az.from_dict(
+        {"posterior": fit.samples, "sample_stats": {"diverging": fit.diverging}}
+    )
+    return convergence_summary(idata)
