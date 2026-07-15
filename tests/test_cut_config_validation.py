@@ -84,3 +84,43 @@ def test_valid_cut_block_accepted():
         "stage2_mcmc": {"num_warmup": 500, "num_samples": 500},
     }
     validate_config(cfg)
+
+
+from loguru import logger  # noqa: E402
+
+from bayesian_panel_nmf.cut_inference import resolve_cut_settings  # noqa: E402
+
+
+def test_defaults_resolved_from_minimal_config():
+    s = resolve_cut_settings({"mcmc": {"random_seed": 100}})
+    assert s.num_stage1_draws == 25
+    assert s.selection_seed == 102
+    assert s.stage2_seed == 103
+    assert s.stage2_draws_per_component == 100
+
+
+def test_explicit_null_per_component_means_keep_all():
+    s = resolve_cut_settings({"cut": {"stage2_draws_per_component": None}})
+    assert s.stage2_draws_per_component is None
+
+
+def test_stage2_mcmc_overlay_inherits_base():
+    cfg = {
+        "mcmc": {"num_warmup": 2000, "thinning": 5, "max_chains": 4, "random_seed": 1},
+        "cut": {"stage2_mcmc": {"num_warmup": 100}},
+    }
+    s = resolve_cut_settings(cfg)
+    assert s.stage2_mcmc["num_warmup"] == 100
+    assert s.stage2_mcmc["thinning"] == 5
+    assert s.stage2_mcmc["max_chains"] == 4
+    assert "random_seed" not in s.stage2_mcmc
+
+
+def test_seed_collision_warns():
+    messages: list[str] = []
+    sink_id = logger.add(lambda m: messages.append(str(m)), level="WARNING")
+    try:
+        resolve_cut_settings({"mcmc": {"random_seed": 7}, "cut": {"selection_seed": 7}})
+    finally:
+        logger.remove(sink_id)
+    assert any("collides" in m for m in messages)
