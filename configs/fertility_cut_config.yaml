@@ -1,0 +1,105 @@
+# =============================================================================
+# Fertility Analysis Configuration
+# =============================================================================
+# Uses the schema `outcomes_from_prefixes` shortcut (new convention) instead
+# of listing every births_<label> / pop_<label> pair explicitly.
+
+data:
+  input_file: "data/raw/fertility_data.csv"
+  output_dir: "results"
+
+  schema:
+    unit_col: "state"
+    time_col: "time"
+    treatment_col: "exposed_births"
+
+    # Derive all outcomes from shared column prefixes. Labels are the suffix
+    # after the prefix, so `births_age1524` / `pop_age1524` → label "age1524".
+    outcomes_from_prefixes:
+      outcome_prefix: "births_"
+      denominator_prefix: "pop_"
+      include:
+        - total
+        - age1524
+        - age2534
+        - age3544
+        - nohs
+        - hs
+        - somecoll
+        - coll
+        - nhblack
+        - nhwhite
+        - hisp
+        - otherraceeth
+
+  date_format: "%Y-%m-%d"
+  start_date: "2016-01-01"
+  end_date: "2024-01-01"
+
+  aggregation:
+    enabled: true
+    period: "bimonthly"
+
+model:
+  outcome_distribution: "NB"
+
+  types:
+    total:
+      groups: ["total"]
+      ranks_to_test: [5]
+    age:
+      groups: ["age1524", "age2534", "age3544"]
+      ranks_to_test: [5]
+    education:
+      groups: ["nohs", "hs", "somecoll", "coll"]
+      ranks_to_test: [5]
+    race:
+      groups: ["nhblack", "nhwhite", "hisp", "otherraceeth"]
+      ranks_to_test: [5]
+
+  nb_disp: 1.0e-4
+  sample_disp: false
+  adjust_for_missingness: true
+  model_treated: true
+
+  # Two-stage pure cut posterior: Stage 1 fits untreated cells only; selected
+  # Stage-1 draws each condition a complete multi-chain Stage-2 fit.
+  inference_mode: "cut"
+
+# Full production config: chain count/method auto-detected from JAX devices
+# (see mcmc.auto_parallelism below); 2000 warmup x 2000 samples, thinning 5.
+mcmc:
+  auto_parallelism: true
+  max_chains: 2
+  num_warmup: 2000
+  num_samples: 2000
+  thinning: 5
+  random_seed: 8675309
+  progress_bar: true
+
+output:
+  figures: true
+  clean: true
+
+  # Optional reporting-only aggregate/PPC example. Names and dates below are
+  # dataset-specific examples of generic mechanisms; aggregate units are not
+  # added to model training input.
+  # aggregate_units:
+  #   - unit: "Treated units excluding Texas"
+  #     include_treated_units: true
+  #     exclude_units: ["Texas"]
+  # ppc_units:
+  #   - "Texas"
+  #   - "Treated units excluding Texas"
+  # ppc_acf_lags: [6, 3, 1]
+  # ppc_unit_corr_max_time: "2022-04-01"
+  # ppc_exclude_units: []
+
+# Cut-mode settings. Seeds default to mcmc.random_seed + 2 / + 3.
+cut:
+  num_stage1_draws: 25 # >= 50 recommended for publication runs
+  stage2_draws_per_component: 100
+  stage2_mcmc: # overlay on mcmc: cheaper conditional fits
+    num_warmup: 1000
+    num_samples: 1000
+    thinning: 5
