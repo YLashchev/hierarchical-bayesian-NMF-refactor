@@ -47,11 +47,11 @@ An ArviZ-based convergence gate (rank-normalized R-hat, bulk/tail ESS,
 divergences) always runs after MCMC and is written to `*_convergence.json`
 next to the draws CSV.
 
-To compute full post-hoc diagnostics from saved trace sidecars (all latent
-parameters), or limited diagnostics from saved draws (mu / mu_treated / ypred only):
+To inspect saved trace sidecars (written with `--save-traces`) after a run:
 
 ```bash
-uv run python scripts/compute_posthoc_diagnostics.py results/total/NB_births_total_5.csv --param-filter mu
+uv run scripts/analyze_traces.py results/total/NB_births_total_3_traces.nc            # R-hat/ESS pass-fail table
+uv run python scripts/make_trace_plots.py results/total/NB_births_total_3_traces.nc  # visual trace plots
 ```
 
 ## Using Your Own Data
@@ -169,6 +169,38 @@ mcmc:
   chain_method: "sequential"  # "sequential", "parallel", or "vectorized"
 ```
 
+### Cut-mode inference (two-stage posterior)
+
+By default the treatment effect and untreated baseline are fit jointly. Set
+`model.inference_mode: "cut"` to fit them in two stages instead: Stage 1 fits
+the untreated baseline on control cells only, then each of a chain-stratified
+subset of Stage-1 draws conditions a complete Stage-2 treatment-effect fit.
+Exposed outcomes never feed back into the baseline.
+
+```yaml
+model:
+  inference_mode: "cut" # default: "joint"
+
+cut: # all optional
+  num_stage1_draws: 25 # baseline draws carried to Stage 2 (>= 50 for publication runs)
+  stage2_draws_per_component: 100 # output thinning; null keeps all retained draws
+  stage2_mcmc: # overlay on mcmc: for the cheaper conditional fits
+    num_warmup: 500
+```
+
+Seeds: Stage-1 MCMC uses `mcmc.random_seed`, the Stage-1 PPC stream uses
+`+1`, draw selection defaults to `+2` (`cut.selection_seed`), and Stage-2
+uses `+3` (`cut.stage2_seed`). The streams must stay distinct so which draws
+get selected is independent of the draws themselves; an explicit
+`cut.stage2_mcmc.random_seed` is rejected for the same reason.
+
+Cut runs write `{stem}_cut.csv` (combined draws with `cut_component` +
+`stage1_*` provenance columns), `{stem}_cut_stage1_ppc.csv` (full Stage-1
+posterior-predictive draws), `{stem}_cut_convergence.json` (per-stage
+manifest), and with `--save-traces` also `{stem}_cut_stage1_traces.nc` +
+`{stem}_cut_stage2_traces/component_*.nc`. See
+`configs/fertility_cut_config.yaml` for a working example.
+
 ### Figures, diagnostics + cleanup
 
 ```yaml
@@ -243,7 +275,7 @@ draws_df = format_draws(mcmc.get_samples(group_by_chain=True), predictions, data
 ## Development
 
 ```bash
-uv run pytest              # 155 regression + integration tests, ~15s
+uv run pytest              # 290 regression + integration tests
 uv run ruff check .
 uv run ruff format .
 ```
@@ -263,6 +295,7 @@ TBD
 ## Roadmap
 
 Built-in but still being hardened:
+
 - [ ] **Add MCMC diagnostics** - trace plots (log postperior), ESS, Rhats
 - [ ] **Unit test coverage** — current suite is mostly integration / regression against synthetic CSVs; add targeted unit tests for functions in `models/`, `inference.py`, and `output.py`
 - [ ] **GPU support** — JAX already runs on GPU; surface a config flag + verify chain parallelism against `numpyro.set_host_device_count`

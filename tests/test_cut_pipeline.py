@@ -8,9 +8,9 @@ import importlib.util
 import json
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import pytest
+from cut_fixtures import RANK, D, K, N, make_cut_data_dict
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -19,47 +19,13 @@ def _load_run_analysis():
     spec = importlib.util.spec_from_file_location(
         "run_analysis_cut_test", ROOT / "scripts" / "run_analysis.py"
     )
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-K, D, N, RANK = 2, 3, 6, 2
-
-
-def _data_dict():
-    rng = np.random.default_rng(0)
-    Y = rng.poisson(50, size=(K, D, N)).astype(float)
-    control = np.ones((K, D, N), dtype=bool)
-    control[:, 0, 3:] = False
-    missing = np.zeros((K, D, N), dtype=bool)
-    groups = ["g0", "g1"]
-    units = ["u0", "u1", "u2"]
-    times = list(pd.date_range("2020-01-01", periods=N, freq="MS"))
-    rows = []
-    for k, g in enumerate(groups):
-        for d_i, u in enumerate(units):
-            for n_i, t in enumerate(times):
-                rows.append(
-                    {
-                        "unit": u,
-                        "time": t,
-                        "group": g,
-                        "outcome": Y[k, d_i, n_i],
-                        "denominator": 2.0,
-                        "treatment": int(not control[k, d_i, n_i]),
-                    }
-                )
-    return {
-        "Y": Y,
-        "denominators": np.full((K, D, N), 2.0),
-        "control_idx_array": control,
-        "missing_idx_array": missing,
-        "groups": groups,
-        "units": units,
-        "times": times,
-        "df_preprocessed": pd.DataFrame(rows),
-    }
+_data_dict = make_cut_data_dict
 
 
 def _config():

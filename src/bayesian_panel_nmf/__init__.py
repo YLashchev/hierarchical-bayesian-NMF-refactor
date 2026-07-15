@@ -17,20 +17,11 @@ from bayesian_panel_nmf.validation import (
     validate_config,
     validate_data_dict,
 )
-
-# Visualization (optional — requires pip install bayesian_panel_nmf[viz])
-try:
-    import importlib.util
-
-    _HAS_VIZ = importlib.util.find_spec("bayesian_panel_nmf.visualization") is not None
-    if _HAS_VIZ:
-        from bayesian_panel_nmf.visualization import (  # noqa: F401
-            make_all_ppc_plots,
-            make_group_comparison_plot,
-            make_raw_rate_plot,
-        )
-except ImportError:
-    _HAS_VIZ = False
+from bayesian_panel_nmf.visualization import (
+    make_all_ppc_plots,
+    make_group_comparison_plot,
+    make_raw_rate_plot,
+)
 
 __all__ = [
     # Logging
@@ -52,13 +43,8 @@ __all__ = [
     "format_draws",
     # Models
     "model",
-]
-
-# Extend __all__ with viz names only if available
-_VIZ_NAMES = [
+    # Visualization
     "make_all_ppc_plots",
     "make_raw_rate_plot",
     "make_group_comparison_plot",
 ]
-if _HAS_VIZ:
-    __all__.extend(_VIZ_NAMES)

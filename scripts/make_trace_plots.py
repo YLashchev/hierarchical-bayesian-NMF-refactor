@@ -119,9 +119,7 @@ def _select_informative_coords(
             if informative_idx.size == 0:
                 continue
             k = min(per_dim, informative_idx.size)
-            chosen = sorted(
-                rng.choice(informative_idx, size=k, replace=False).tolist()
-            )
+            chosen = sorted(rng.choice(informative_idx, size=k, replace=False).tolist())
             coords[dim] = da[dim].values[chosen]
             logger.debug(
                 f"  {da.name}: dim '{dim}' → {k} informative coords of {informative_idx.size}"

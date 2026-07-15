@@ -1,6 +1,8 @@
 # =============================================================================
-# Fertility Analysis Configuration
+# Fertility Analysis Configuration — CUT MODE
 # =============================================================================
+# Diff of fertility_config.yaml: adds model.inference_mode: "cut" + the cut:
+# block and adjusts mcmc settings. Keep the shared sections in sync manually.
 # Uses the schema `outcomes_from_prefixes` shortcut (new convention) instead
 # of listing every births_<label> / pop_<label> pair explicitly.
 
@@ -47,15 +49,15 @@ model:
     total:
       groups: ["total"]
       ranks_to_test: [5]
-    age:
-      groups: ["age1524", "age2534", "age3544"]
-      ranks_to_test: [5]
-    education:
-      groups: ["nohs", "hs", "somecoll", "coll"]
-      ranks_to_test: [5]
-    race:
-      groups: ["nhblack", "nhwhite", "hisp", "otherraceeth"]
-      ranks_to_test: [5]
+    # age:
+    #   groups: ["age1524", "age2534", "age3544"]
+    #   ranks_to_test: [5]
+    # education:
+    #   groups: ["nohs", "hs", "somecoll", "coll"]
+    #   ranks_to_test: [5]
+    # race:
+    #   groups: ["nhblack", "nhwhite", "hisp", "otherraceeth"]
+    #   ranks_to_test: [5]
 
   nb_disp: 1.0e-4
   sample_disp: false
@@ -67,13 +69,13 @@ model:
   inference_mode: "cut"
 
 # Full production config: chain count/method auto-detected from JAX devices
-# (see mcmc.auto_parallelism below); 2000 warmup x 2000 samples, thinning 5.
+# (see mcmc.auto_parallelism below); 1000 warmup x 2500 samples, thinning 10.
 mcmc:
   auto_parallelism: true
-  max_chains: 2
-  num_warmup: 2000
-  num_samples: 2000
-  thinning: 5
+  max_chains: 4
+  num_warmup: 1000
+  num_samples: 2500
+  thinning: 10
   random_seed: 8675309
   progress_bar: true
 
@@ -97,9 +99,9 @@ output:
 
 # Cut-mode settings. Seeds default to mcmc.random_seed + 2 / + 3.
 cut:
-  num_stage1_draws: 25 # >= 50 recommended for publication runs
-  stage2_draws_per_component: 100
+  num_stage1_draws: 50 # >= 50 recommended for publication runs
+  stage2_draws_per_component: 250
   stage2_mcmc: # overlay on mcmc: cheaper conditional fits
-    num_warmup: 1000
+    num_warmup: 500
     num_samples: 1000
-    thinning: 5
+    thinning: 1

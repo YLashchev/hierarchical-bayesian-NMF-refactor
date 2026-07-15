@@ -114,6 +114,36 @@ model:
   # Set to false for control-only model (counterfactual estimation)
   model_treated: true
 
+  # Inference mode: "joint" (default) fits baseline + treatment together;
+  # "cut" runs the two-stage cut posterior (Stage 1 fits the untreated
+  # baseline, then each selected Stage-1 draw conditions a complete Stage-2
+  # treatment-effect fit; exposed outcomes never feed back into the
+  # baseline). Requires model_treated: true. See the cut: block below and
+  # configs/fertility_cut_config.yaml for a working example.
+  # inference_mode: "cut"
+
+# -----------------------------------------------------------------------------
+# Cut-mode settings (only read when model.inference_mode: "cut"; all optional)
+# -----------------------------------------------------------------------------
+# cut:
+#   # Stage-1 baseline draws carried to Stage 2 (>= 50 for publication runs)
+#   num_stage1_draws: 25
+#
+#   # Deterministic per-component output thinning; null keeps all retained draws
+#   stage2_draws_per_component: 100
+#
+#   # Seeds default to mcmc.random_seed + 2 (draw selection) and + 3 (Stage 2).
+#   # Base seed drives Stage-1 MCMC and +1 is the Stage-1 PPC stream; streams
+#   # must stay distinct so draw selection is independent of the draws.
+#   # An explicit stage2_mcmc.random_seed is rejected for the same reason.
+#   # selection_seed: ...
+#   # stage2_seed: ...
+#
+#   # Overlay on the global mcmc block for the cheaper conditional Stage-2 fits
+#   stage2_mcmc:
+#     num_warmup: 500
+#     num_samples: 1000
+
 # -----------------------------------------------------------------------------
 # MCMC Settings
 # -----------------------------------------------------------------------------

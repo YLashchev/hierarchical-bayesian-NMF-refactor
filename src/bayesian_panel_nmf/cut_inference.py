@@ -232,10 +232,11 @@ def _resolve_chains(mcmc_cfg: dict) -> tuple[int, str]:
 
 def _extract_fit(mcmc: MCMC) -> MCMCFit:
     """Convert one MCMC run to host arrays; strip scoped low_births/* keys
-    (xarray rejects '/' in variable names -- same rule as run_analysis's
-    _clean_scoped_samples)."""
+    via output.drop_scoped_samples (xarray rejects '/' in variable names)."""
+    from .output import drop_scoped_samples
+
     grouped = mcmc.get_samples(group_by_chain=True)
-    samples = {k: np.asarray(v) for k, v in grouped.items() if "/" not in k}
+    samples = {k: np.asarray(v) for k, v in drop_scoped_samples(grouped).items()}
     diverging = np.asarray(mcmc.get_extra_fields()["diverging"]).reshape(
         mcmc.num_chains, -1
     )

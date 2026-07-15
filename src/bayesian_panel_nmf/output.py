@@ -15,6 +15,16 @@ from bayesian_panel_nmf.validation import (
 )
 
 
+def drop_scoped_samples(samples: dict) -> dict:
+    """Drop sample keys containing '/' (from numpyro.handlers.scope).
+
+    xarray DataTree rejects '/' in variable names (path-separator conflict),
+    so the convergence gate and trace sidecars need this filter before
+    handing samples to az.from_dict.
+    """
+    return {k: v for k, v in samples.items() if "/" not in k}
+
+
 def _optimize_dtypes(df: pd.DataFrame) -> pd.DataFrame:
     """Downcast string/int/float columns in place for smaller memory footprint."""
     initial_mem = df.memory_usage(deep=True).sum() / 1024**2

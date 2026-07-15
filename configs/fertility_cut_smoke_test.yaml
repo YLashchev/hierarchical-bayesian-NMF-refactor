@@ -1,6 +1,8 @@
 # =============================================================================
-# Fertility Smoke Test — minimal MCMC settings for quick verification
+# Fertility Smoke Test — CUT MODE — minimal MCMC settings for quick verification
 # =============================================================================
+# Diff of fertility_smoke_test.yaml: adds model.inference_mode: "cut" + the
+# cut: block. Keep the shared sections in sync manually.
 # Single model type, rank 3, 4 chains, 200 warmup + 200 samples.
 # Runs in ~4 min on a laptop. Not for inference — only proves the pipeline works.
 

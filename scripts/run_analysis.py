@@ -131,14 +131,12 @@ def _draws_filename(config: dict, model_type: str, rank: int) -> str:
 
 
 def _clean_scoped_samples(mcmc, model_type: str, rank: int) -> dict:
-    """Drop sample keys containing '/' (from numpyro.handlers.scope).
+    """Filter scoped ('/') sample keys via output.drop_scoped_samples, with
+    per-run debug logging of what was dropped."""
+    from bayesian_panel_nmf.output import drop_scoped_samples
 
-    xarray DataTree rejects '/' in variable names (path-separator conflict),
-    so both the convergence gate and the trace sidecar need this filter
-    before handing samples to az.from_dict.
-    """
     raw_samples = mcmc.get_samples(group_by_chain=True)
-    clean_samples = {k: v for k, v in raw_samples.items() if "/" not in k}
+    clean_samples = drop_scoped_samples(raw_samples)
     if len(clean_samples) < len(raw_samples):
         dropped = set(raw_samples) - set(clean_samples)
         logger.debug(
