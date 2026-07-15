@@ -14,6 +14,7 @@ from numpyro.infer.initialization import init_to_uniform
 from numpyro.infer.util import log_density
 
 from bayesian_panel_nmf.models.cut_stage1_model import stage1_model
+from bayesian_panel_nmf.models.cut_stage2_model import stage2_model
 from bayesian_panel_nmf.models.panel_nmf_model import model as joint_model
 
 
@@ -113,3 +114,44 @@ def test_stage1_poisson_has_no_disp_site():
     kwargs = {**_stage1_kwargs(d), "outcome_dist": "Poisson"}
     t_cut = trace(_traceable(stage1_model, 0)).get_trace(**kwargs)
     assert "disp" not in t_cut
+
+
+TREATMENT_SITES = [
+    "treatment_it_scale",
+    "treatment_state_scale",
+    "treatment_category_scale",
+    "state_category_scale",
+    "treatment_kt",
+    "state_treatment_effect",
+    "state_category_te",
+    "category_treatment_effect",
+]
+
+
+def test_stage2_te_mu_and_priors_match_joint_treatment_block():
+    d = _tiny_data()
+    t_joint = trace(_traceable(joint_model, 0)).get_trace(
+        model_treated=True, **_stage1_kwargs(d)
+    )
+    sub = {name: t_joint[name]["value"] for name in TREATMENT_SITES}
+    t_cut = trace(
+        substitute(seed(stage2_model, jax.random.PRNGKey(1)), data=sub)
+    ).get_trace(
+        mu_ctrl=np.asarray(t_joint["mu_ctrl"]["value"]),
+        control_idx_array=d["control_idx_array"],
+        missing_idx_array=d["missing_idx_array"],
+        y=d["Y"],
+        outcome_dist="NB",
+        nb_concentration=np.ones(D) / 1e-4,
+        adjust_for_missingness=True,
+    )
+    np.testing.assert_array_equal(
+        np.asarray(t_cut["te"]["value"]), np.asarray(t_joint["te"]["value"])
+    )
+    np.testing.assert_array_equal(
+        np.asarray(t_cut["mu"]["value"]), np.asarray(t_joint["mu"]["value"])
+    )
+    for name in TREATMENT_SITES:
+        lp_joint = np.asarray(t_joint[name]["fn"].log_prob(t_joint[name]["value"]))
+        lp_cut = np.asarray(t_cut[name]["fn"].log_prob(t_cut[name]["value"]))
+        np.testing.assert_array_equal(lp_cut, lp_joint, err_msg=name)
