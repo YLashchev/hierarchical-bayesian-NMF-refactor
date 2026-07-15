@@ -85,6 +85,7 @@ def generate_reports(
     ppc_acf_lags: list[int] | None = None,
     ppc_unit_corr_max_time: str | None = None,
     ppc_exclude_units: list[str] | None = None,
+    ppc_draws_df: pd.DataFrame | None = None,
 ) -> dict:
     """Generate all figures and tables from posterior draws.
 
@@ -113,6 +114,11 @@ def generate_reports(
     print_target_table : bool, default True
         Print the target-unit headline table (Table 1). Ignored if
         ``print_tables`` is ``False``.
+    ppc_draws_df : pd.DataFrame, optional
+        Alternative posterior product for the PPC suite only (cut mode: the
+        full Stage-1 posterior with untreated ypred). All other figures and
+        tables continue to use ``draws_df``. Reporting-only aggregate units
+        are applied to it before plotting.
 
     Returns
     -------
@@ -204,8 +210,12 @@ def generate_reports(
     logger.debug("  ppc/*")
     ppc_dir = figs_dir / "ppc"
     ppc_dir.mkdir(parents=True, exist_ok=True)
+    if ppc_draws_df is not None:
+        ppc_source = add_aggregate_units(ppc_draws_df, aggregate_units or [])
+    else:
+        ppc_source = draws_for_reporting
     make_all_ppc_plots(
-        draws_for_reporting,
+        ppc_source,
         output_dir=str(ppc_dir),
         acf_lags=ppc_acf_lags or [6],
         max_treat_date=ppc_unit_corr_max_time,

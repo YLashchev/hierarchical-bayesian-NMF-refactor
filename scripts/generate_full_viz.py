@@ -30,6 +30,15 @@ def main() -> None:
         help="Path to the draws CSV produced by run_analysis.py",
     )
     ap.add_argument(
+        "--ppc-results",
+        type=Path,
+        default=None,
+        help=(
+            "Optional Stage-1 PPC draws CSV (cut mode: <stem>_cut_stage1_ppc.csv); "
+            "routes the JAMA PPC suite to the full Stage-1 posterior"
+        ),
+    )
+    ap.add_argument(
         "--target",
         type=str,
         default=None,
@@ -47,11 +56,13 @@ def main() -> None:
 
     draws_df = pd.read_csv(args.results)
     output_dir = args.results.parent
+    ppc_draws_df = pd.read_csv(args.ppc_results) if args.ppc_results else None
     generate_reports(
         draws_df,
         output_dir=output_dir,
         target_unit=args.target,
         groups=args.group,
+        ppc_draws_df=ppc_draws_df,
     )
 
 
