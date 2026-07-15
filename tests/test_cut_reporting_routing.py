@@ -43,15 +43,29 @@ def test_ppc_source_routing(monkeypatch, tmp_path, use_ppc_frame):
 
     monkeypatch.setattr(reporting, "make_all_ppc_plots", fake_ppc)
 
+    # Lazy import: AGENTS.md forbids top-level matplotlib outside
+    # visualization.py. generate_reports() creates real matplotlib figures
+    # and calls seaborn's set_palette(), which mutates global rcParams
+    # (axes.prop_cycle etc.) in addition to opening figures. rc_context()
+    # isolates the rcParams mutation and plt.close("all") drops the
+    # figures, so neither leaks into other test modules run in the same
+    # session.
+    import matplotlib
+    import matplotlib.pyplot as plt
+
     draws_df = _draws_frame(units=("u0", "u1"))
     ppc_df = _draws_frame(units=("p0", "p1")) if use_ppc_frame else None
-    reporting.generate_reports(
-        draws_df,
-        output_dir=tmp_path,
-        target_unit="u0",
-        print_tables=False,
-        ppc_draws_df=ppc_df,
-    )
+    try:
+        with matplotlib.rc_context():
+            reporting.generate_reports(
+                draws_df,
+                output_dir=tmp_path,
+                target_unit="u0",
+                print_tables=False,
+                ppc_draws_df=ppc_df,
+            )
+    finally:
+        plt.close("all")
     if use_ppc_frame:
         assert captured["units"] == {"p0", "p1"}
     else:
