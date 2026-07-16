@@ -101,6 +101,10 @@ class DataConfig(BaseModel):
     end_date: str | None = None
     aggregation: AggregationConfig = Field(default_factory=AggregationConfig)
     allow_unbalanced_panel: StrictBool = False
+    # Explicit override for run_analysis.py's _get_outcome_name() filename
+    # placeholder; undocumented but tested (test_run_analysis_parallel.py).
+    # Falls back to deriving from outcomes_from_prefixes, then "births".
+    outcome: str | None = None
 
 
 class TypeConfig(BaseModel):

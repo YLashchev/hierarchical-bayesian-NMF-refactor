@@ -23,7 +23,8 @@ from jax import random
 from loguru import logger
 from numpyro.infer import MCMC, NUTS
 
-from .inference import _resolve_model_settings, convergence_summary
+from .config import Config
+from .inference import convergence_summary
 from .models.cut_baseline import stage1_model
 from .models.cut_treatment import stage2_model
 from .parallelism import choose_mcmc_parallelism
@@ -73,30 +74,34 @@ class MCMCFit:
     num_retained: int
 
 
-def resolve_cut_settings(config: dict) -> CutSettings:
+def resolve_cut_settings(config: Config) -> CutSettings:
     """Overlay cut defaults; derive seeds; warn on stream collisions."""
-    mcmc_cfg = config.get("mcmc", {}) or {}
-    base_seed = int(mcmc_cfg.get("random_seed", 8675309))
-    cut_cfg = config.get("cut", {}) or {}
+    mcmc_cfg = config.mcmc.model_dump()
+    base_seed = int(config.mcmc.random_seed)
+    cut_cfg = config.cut
 
-    selection_seed = cut_cfg.get("selection_seed")
+    selection_seed = cut_cfg.selection_seed if cut_cfg is not None else None
     selection_seed = (
         base_seed + SELECTION_SEED_OFFSET
         if selection_seed is None
         else int(selection_seed)
     )
-    stage2_seed = cut_cfg.get("stage2_seed")
+    stage2_seed = cut_cfg.stage2_seed if cut_cfg is not None else None
     stage2_seed = (
         base_seed + STAGE2_SEED_OFFSET if stage2_seed is None else int(stage2_seed)
     )
 
-    per_component = cut_cfg.get(
-        "stage2_draws_per_component", DEFAULT_STAGE2_DRAWS_PER_COMPONENT
-    )
+    if cut_cfg is not None:
+        per_component = cut_cfg.stage2_draws_per_component
+    else:
+        per_component = DEFAULT_STAGE2_DRAWS_PER_COMPONENT
     if per_component is not None:
         per_component = int(per_component)
 
-    stage2_mcmc = {**mcmc_cfg, **(cut_cfg.get("stage2_mcmc", {}) or {})}
+    stage2_overlay = (
+        cut_cfg.stage2_mcmc if cut_cfg is not None and cut_cfg.stage2_mcmc else {}
+    )
+    stage2_mcmc = {**mcmc_cfg, **stage2_overlay}
     # cut.stage2_seed is the only Stage-2 seed authority (validation rejects
     # an explicit stage2_mcmc.random_seed; the inherited base value is unused).
     stage2_mcmc.pop("random_seed", None)
@@ -116,8 +121,11 @@ def resolve_cut_settings(config: dict) -> CutSettings:
             )
         claimed[seed_value] = name
 
+    num_stage1_draws = (
+        cut_cfg.num_stage1_draws if cut_cfg is not None else DEFAULT_NUM_STAGE1_DRAWS
+    )
     return CutSettings(
-        num_stage1_draws=int(cut_cfg.get("num_stage1_draws", DEFAULT_NUM_STAGE1_DRAWS)),
+        num_stage1_draws=int(num_stage1_draws),
         selection_seed=selection_seed,
         stage2_seed=stage2_seed,
         stage2_draws_per_component=per_component,
@@ -249,25 +257,24 @@ def _extract_fit(mcmc: MCMC) -> MCMCFit:
     )
 
 
-def run_stage1_mcmc(data_dict: dict, rank: int, config: dict) -> MCMCFit:
+def run_stage1_mcmc(data_dict: dict, rank: int, config: Config) -> MCMCFit:
     """Fit the untreated baseline to observed untreated cells (Stage 1)."""
     validate_data_dict(data_dict)
     rank = validate_rank(rank)
-    mcmc_cfg = config.get("mcmc", {}) or {}
-    model_cfg = config.get("model", {}) or {}
-    model_settings = _resolve_model_settings(config)
-    num_chains, chain_method = _resolve_chains(mcmc_cfg)
+    mcmc_cfg = config.mcmc
+    model_cfg = config.model
+    num_chains, chain_method = _resolve_chains(mcmc_cfg.model_dump())
     logger.info(f"cut Stage 1: num_chains={num_chains}, chain_method={chain_method!r}")
     mcmc = MCMC(
         NUTS(stage1_model),
-        num_warmup=mcmc_cfg.get("num_warmup", 1000),
-        num_samples=mcmc_cfg.get("num_samples", 2500),
+        num_warmup=mcmc_cfg.num_warmup,
+        num_samples=mcmc_cfg.num_samples,
         num_chains=num_chains,
-        thinning=mcmc_cfg.get("thinning", 10),
-        progress_bar=mcmc_cfg.get("progress_bar", True),
+        thinning=mcmc_cfg.thinning,
+        progress_bar=mcmc_cfg.progress_bar,
         chain_method=chain_method,
     )
-    _, run_key = random.split(random.PRNGKey(int(mcmc_cfg.get("random_seed", 8675309))))
+    _, run_key = random.split(random.PRNGKey(int(mcmc_cfg.random_seed)))
     mcmc.run(
         run_key,
         extra_fields=("diverging",),
@@ -276,10 +283,10 @@ def run_stage1_mcmc(data_dict: dict, rank: int, config: dict) -> MCMCFit:
         control_idx_array=data_dict["control_idx_array"],
         missing_idx_array=data_dict["missing_idx_array"],
         rank=rank,
-        outcome_dist=model_settings["outcome_dist"],
-        adjust_for_missingness=model_cfg.get("adjust_for_missingness", True),
-        nb_disp=model_settings["nb_disp"],
-        sample_disp=model_settings["sample_disp"],
+        outcome_dist=model_cfg.outcome_distribution,
+        adjust_for_missingness=model_cfg.adjust_for_missingness,
+        nb_disp=model_cfg.nb_disp,
+        sample_disp=model_cfg.sample_disp,
     )
     return _extract_fit(mcmc)
 
@@ -287,7 +294,7 @@ def run_stage1_mcmc(data_dict: dict, rank: int, config: dict) -> MCMCFit:
 def run_stage2_mcmc(
     data_dict: dict,
     ref: Stage1DrawRef,
-    config: dict,
+    config: Config,
     stage2_mcmc: dict,
     rng_key,
 ) -> MCMCFit:
@@ -297,8 +304,7 @@ def run_stage2_mcmc(
     every component so XLA can reuse compilation. Never call
     ``jax.clear_caches()`` here.
     """
-    model_cfg = config.get("model", {}) or {}
-    model_settings = _resolve_model_settings(config)
+    model_cfg = config.model
     num_chains, chain_method = _resolve_chains(stage2_mcmc)
     mcmc = MCMC(
         NUTS(stage2_model),
@@ -316,9 +322,9 @@ def run_stage2_mcmc(
         control_idx_array=data_dict["control_idx_array"],
         missing_idx_array=data_dict["missing_idx_array"],
         y=data_dict["Y"],
-        outcome_dist=model_settings["outcome_dist"],
+        outcome_dist=model_cfg.outcome_distribution,
         nb_concentration=ref.nb_concentration,
-        adjust_for_missingness=model_cfg.get("adjust_for_missingness", True),
+        adjust_for_missingness=model_cfg.adjust_for_missingness,
     )
     return _extract_fit(mcmc)
 

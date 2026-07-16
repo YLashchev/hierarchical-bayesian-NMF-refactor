@@ -6,16 +6,18 @@ outcome, denominator, treatment.
 
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
 from loguru import logger
 
+if TYPE_CHECKING:
+    from bayesian_panel_nmf.config import Config
+
 from bayesian_panel_nmf.validation import (
     ConfigError,
     DataError,
-    validate_config,
     validate_filepath,
     validate_groups,
 )
@@ -31,7 +33,7 @@ TREATMENT_COL = "treatment"
 
 def load_and_prepare(
     filepath: str,
-    config: dict,
+    config: "Config | dict",
     groups: list[str],
     exclude_units: list[str] | None = None,
     type_config: dict | None = None,
@@ -47,8 +49,9 @@ def load_and_prepare(
     ----------
     filepath : str
         Path to input CSV file
-    config : dict
-        Full config dict with 'data', 'model', 'mcmc' sections
+    config : Config or dict
+        Typed ``Config`` (preferred) or a raw config dict (validated/coerced
+        to ``Config`` on entry for back-compat).
     groups : list of str
         Which outcome groups to include (e.g., ["total"] or ["usborn", "foreign"])
     exclude_units : list of str, optional
@@ -77,21 +80,23 @@ def load_and_prepare(
     ConfigError
         If config is missing required sections or keys
     """
+    from bayesian_panel_nmf.config import Config
+
     validate_filepath(filepath)
-    validate_config(config)
+    if isinstance(config, dict):
+        config = Config.model_validate(config)
     validate_groups(groups)
 
-    data_config = config.get("data", {})
+    data_config = config.data
+    config_dict = config.to_legacy_dict()
 
     # Peek at CSV columns to resolve prefix-based outcomes
     _header = pd.read_csv(filepath, nrows=0)
     available_columns = _header.columns.tolist()
 
-    schema_info = _parse_schema(config, available_columns=available_columns)
+    schema_info = _parse_schema(config_dict, available_columns=available_columns)
 
-    df = _load_and_standardize(
-        filepath, schema_info, data_config.get("date_format", "auto")
-    )
+    df = _load_and_standardize(filepath, schema_info, data_config.date_format)
 
     total_from_labels = _validate_and_resolve_total(
         groups, schema_info["outcomes"], type_config
@@ -108,8 +113,8 @@ def load_and_prepare(
             f"(e.g., units: {sample_units})"
         )
 
-    start_date = data_config.get("start_date")
-    end_date = data_config.get("end_date")
+    start_date = data_config.start_date
+    end_date = data_config.end_date
     df = _filter_time_range(df, start_date, end_date)
 
     if exclude_units:
@@ -120,13 +125,12 @@ def load_and_prepare(
             f"Excluded units {exclude_units}: {before_count} → {after_count} units"
         )
 
-    agg_config = data_config.get("aggregation", {})
-    if agg_config.get("enabled", False):
-        period = agg_config.get("period", "bimonthly")
+    if data_config.aggregation.enabled:
+        period = data_config.aggregation.period
         df = _aggregate_temporal(df, period)
         logger.info(f"Aggregated to {period}: {len(df)} rows")
 
-    allow_unbalanced = data_config.get("allow_unbalanced_panel", False)
+    allow_unbalanced = data_config.allow_unbalanced_panel
     data_dict = _build_model_arrays(df, groups, allow_unbalanced_panel=allow_unbalanced)
 
     K, D, N = data_dict["Y"].shape

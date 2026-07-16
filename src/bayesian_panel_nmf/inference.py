@@ -1,6 +1,7 @@
 """MCMC sampling, posterior prediction, and convergence diagnostics.
 
-All settings read from a config dict rather than passed as individual kwargs.
+All settings read from a typed ``Config`` object (see ``config.py``) via
+attribute access rather than an untyped dict.
 """
 
 import time
@@ -14,6 +15,7 @@ from jax import block_until_ready, random
 from loguru import logger
 from numpyro.infer import MCMC, NUTS, Predictive
 
+from bayesian_panel_nmf.config import Config
 from bayesian_panel_nmf.parallelism import choose_mcmc_parallelism
 from bayesian_panel_nmf.validation import (
     DataError,
@@ -46,21 +48,8 @@ def convergence_summary(idata) -> dict[str, Any]:
     return result
 
 
-def _resolve_model_settings(config: dict) -> dict:
-    """Resolve the outcome-distribution settings shared by
-    run_mcmc_inference and generate_predictions, with defaults matching
-    the model's own signature defaults (outcome_dist='NB', nb_disp=1e-4,
-    sample_disp=False)."""
-    model_config = config.get("model", {})
-    return {
-        "outcome_dist": model_config.get("outcome_distribution", "NB"),
-        "nb_disp": model_config.get("nb_disp", 1e-4),
-        "sample_disp": model_config.get("sample_disp", False),
-    }
-
-
 def run_mcmc_inference(
-    data_dict: dict[str, np.ndarray], model_fn: Callable, rank: int, config: dict
+    data_dict: dict[str, np.ndarray], model_fn: Callable, rank: int, config: Config
 ) -> MCMC:
     """
     Run MCMC inference on the panel NMF model.
@@ -77,26 +66,12 @@ def run_mcmc_inference(
         NumPyro model function
     rank : int
         Rank for matrix factorization
-    config : dict
-        Configuration dict with 'model' and 'mcmc' sections:
-        - config['model']['outcome_distribution']: "NB" or "Poisson"
-        - config['model']['nb_disp']: negative binomial dispersion
-        - config['model']['sample_disp']: whether to sample dispersion
-        - config['model']['adjust_for_missingness']: handle censored data
-        - config['model']['model_treated']: model treatment effects
-        - config['mcmc']['auto_parallelism']: pick num_chains/chain_method
-          from visible JAX devices via choose_mcmc_parallelism (default True)
-        - config['mcmc']['max_chains']: upper bound on chain count, used
-          only when auto_parallelism is true
-        - config['mcmc']['num_chains']: literal chain count, used only
-          when auto_parallelism is false
-        - config['mcmc']['chain_method']: literal chain_method, used only
-          when auto_parallelism is false (defaults to "sequential")
-        - config['mcmc']['num_warmup']: warmup iterations
-        - config['mcmc']['num_samples']: sampling iterations
-        - config['mcmc']['thinning']: thinning interval
-        - config['mcmc']['random_seed']: random seed
-        - config['mcmc']['progress_bar']: show progress bar
+    config : Config
+        Typed configuration (see ``config.py``). Reads ``config.model``
+        (outcome_distribution, nb_disp, sample_disp, adjust_for_missingness,
+        model_treated) and ``config.mcmc`` (auto_parallelism, max_chains,
+        num_chains, chain_method, num_warmup, num_samples, thinning,
+        random_seed, progress_bar).
 
     Returns
     -------
@@ -117,10 +92,10 @@ def run_mcmc_inference(
     validate_data_dict(data_dict)
     rank = validate_rank(rank)
 
-    mcmc_config = config.get("mcmc", {})
-    auto_parallelism = mcmc_config.get("auto_parallelism", True)
+    mcmc_cfg = config.mcmc
+    auto_parallelism = mcmc_cfg.auto_parallelism
     if auto_parallelism:
-        max_chains = mcmc_config.get("max_chains", 4)
+        max_chains = mcmc_cfg.max_chains
         num_chains, chain_method = choose_mcmc_parallelism(max_chains=max_chains)
         logger.info(
             f"auto_parallelism: max_chains={max_chains} -> "
@@ -128,8 +103,10 @@ def run_mcmc_inference(
             f"(jax.local_device_count()={jax.local_device_count()})"
         )
     else:
-        num_chains = mcmc_config.get("num_chains", 4)
-        chain_method = mcmc_config.get("chain_method", "sequential")
+        num_chains = mcmc_cfg.num_chains if mcmc_cfg.num_chains is not None else 4
+        chain_method = (
+            mcmc_cfg.chain_method if mcmc_cfg.chain_method is not None else "sequential"
+        )
         logger.info(
             f"auto_parallelism=false -> num_chains={num_chains}, "
             f"chain_method={chain_method!r}"
@@ -142,20 +119,18 @@ def run_mcmc_inference(
             "NumPyro will silently fall back to sequential execution. "
             "Verify numpyro.set_host_device_count() ran before JAX import."
         )
-    num_warmup = mcmc_config.get("num_warmup", 1000)
-    num_samples = mcmc_config.get("num_samples", 2500)
-    thinning = mcmc_config.get("thinning", 10)
-    random_seed = mcmc_config.get("random_seed", 8675309)
-    progress_bar = mcmc_config.get("progress_bar", True)
+    num_warmup = mcmc_cfg.num_warmup
+    num_samples = mcmc_cfg.num_samples
+    thinning = mcmc_cfg.thinning
+    random_seed = mcmc_cfg.random_seed
+    progress_bar = mcmc_cfg.progress_bar
 
-    model_settings = _resolve_model_settings(config)
-    outcome_dist = model_settings["outcome_dist"]
-    nb_disp = model_settings["nb_disp"]
-    sample_disp = model_settings["sample_disp"]
-
-    model_config = config.get("model", {})
-    adjust_for_missingness = model_config.get("adjust_for_missingness", True)
-    model_treated = model_config.get("model_treated", True)
+    model_cfg = config.model
+    outcome_dist = model_cfg.outcome_distribution
+    nb_disp = model_cfg.nb_disp
+    sample_disp = model_cfg.sample_disp
+    adjust_for_missingness = model_cfg.adjust_for_missingness
+    model_treated = model_cfg.model_treated
 
     rng_key = random.PRNGKey(random_seed)
     rng_key, rng_key_ = random.split(rng_key)
@@ -199,7 +174,7 @@ def generate_predictions(
     data_dict: dict[str, np.ndarray],
     model_fn: Callable,
     rank: int,
-    config: dict,
+    config: Config,
 ) -> np.ndarray:
     """
     Generate posterior predictive samples (counterfactual predictions).
@@ -218,12 +193,9 @@ def generate_predictions(
         NumPyro model function
     rank : int
         Rank used in model fitting
-    config : dict
-        Configuration dict with 'model' and 'mcmc' sections:
-        - config['model']['outcome_distribution']: "NB" or "Poisson"
-        - config['model']['nb_disp']: negative binomial dispersion
-        - config['model']['sample_disp']: whether dispersion was sampled
-        - config['mcmc']['random_seed']: random seed
+    config : Config
+        Typed configuration. Reads ``config.model`` (outcome_distribution,
+        nb_disp, sample_disp) and ``config.mcmc.random_seed``.
 
     Returns
     -------
@@ -240,13 +212,11 @@ def generate_predictions(
     if "denominators" not in data_dict:
         raise DataError("data_dict missing 'denominators'")
 
-    mcmc_config = config.get("mcmc", {})
-    random_seed = mcmc_config.get("random_seed", 8675309)
+    random_seed = config.mcmc.random_seed
 
-    model_settings = _resolve_model_settings(config)
-    outcome_dist = model_settings["outcome_dist"]
-    nb_disp = model_settings["nb_disp"]
-    sample_disp = model_settings["sample_disp"]
+    outcome_dist = config.model.outcome_distribution
+    nb_disp = config.model.nb_disp
+    sample_disp = config.model.sample_disp
 
     # Offset seed from inference key so posterior predictive uses a different stream
     rng_key = random.PRNGKey(random_seed + 1)
