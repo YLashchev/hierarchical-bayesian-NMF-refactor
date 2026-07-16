@@ -36,6 +36,7 @@ numpyro.set_host_device_count(os.cpu_count() or 1)
 
 import arviz as az  # noqa: E402
 import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
 from loguru import logger  # noqa: E402
 
 from bayesian_panel_nmf.config import Config, OutputConfig, TypeConfig  # noqa: E402
@@ -49,6 +50,33 @@ from bayesian_panel_nmf.logging_config import setup_logging  # noqa: E402
 from bayesian_panel_nmf.models import model  # noqa: E402
 from bayesian_panel_nmf.results import format_draws  # noqa: E402
 from bayesian_panel_nmf.validation import ConfigError  # noqa: E402
+
+
+def _write_draws(df: pd.DataFrame, stem: Path, fmt: str) -> Path:
+    """Write the (large) draws artifact as csv or parquet; return the path written.
+
+    Additive, opt-in via ``output.draws_format`` (default ``"csv"``). Only
+    ever applied to the two big draws artifacts, never the small human-facing
+    summary/table CSVs.
+    """
+    if fmt == "parquet":
+        path = stem.with_suffix(".parquet")
+        df.to_parquet(path, index=False)
+    else:
+        path = stem.with_suffix(".csv")
+        df.to_csv(path, index=False)
+    return path
+
+
+def _read_draws(stem: Path) -> pd.DataFrame:
+    """Read a draws artifact written by ``_write_draws``, trying .parquet then .csv."""
+    parquet_path = stem.with_suffix(".parquet")
+    if parquet_path.exists():
+        return pd.read_parquet(parquet_path)
+    csv_path = stem.with_suffix(".csv")
+    if csv_path.exists():
+        return pd.read_csv(csv_path)
+    raise FileNotFoundError(f"no draws file found at {stem} (.parquet or .csv)")
 
 
 def _validate_run_analysis_config(config: Config) -> None:
@@ -263,8 +291,9 @@ def _run_single_rank(
     samples = mcmc.get_samples(group_by_chain=True)
     draws_df = format_draws(samples, predictions, data_dict)
 
-    draws_file = type_output_dir / f"{filename}.csv"
-    draws_df.to_csv(draws_file, index=False)
+    draws_file = _write_draws(
+        draws_df, type_output_dir / filename, output_config.draws_format
+    )
     size_mb = draws_file.stat().st_size / 1024**2
     logger.info(
         f"{model_type} rank {rank}: wrote draws to {draws_file} ({size_mb:.1f} MB)"
@@ -279,11 +308,15 @@ def _run_single_rank(
 
 
 def _publish_cut_artifacts(
-    staging: Path, dest_dir: Path, filename: str, save_traces: bool
+    staging: Path,
+    dest_dir: Path,
+    filename: str,
+    save_traces: bool,
+    draws_suffix: str = ".csv",
 ) -> None:
     """Atomically promote staged cut artifacts into the type output dir."""
     names = [
-        f"{filename}.csv",
+        f"{filename}{draws_suffix}",
         f"{filename}_stage1_ppc.csv",
         f"{filename}_convergence.json",
     ]
@@ -408,8 +441,11 @@ def _run_cut_rank(
         if save_traces:
             traces_dir.mkdir()
 
-        combined_path = staging / f"{filename}.csv"
+        draws_format = output_config.draws_format
+        combined_stem = staging / filename
+        combined_path = combined_stem.with_suffix(".csv")
         component_records: list[dict] = []
+        component_dfs: list[pd.DataFrame] = []
         output_counts: set[int] = set()
         draw_offset = 0
 
@@ -472,9 +508,17 @@ def _run_cut_rank(
             df = format_cut_component_draws(
                 te_flat, ypred, chain_ids, ref, data_dict, draw_offset
             )
-            df.to_csv(
-                combined_path, mode="w" if i == 0 else "a", header=(i == 0), index=False
-            )
+            if draws_format == "parquet":
+                # parquet has no cheap append mode; buffer components and
+                # write once below via _write_draws.
+                component_dfs.append(df)
+            else:
+                df.to_csv(
+                    combined_path,
+                    mode="w" if i == 0 else "a",
+                    header=(i == 0),
+                    index=False,
+                )
 
             component_records.append(
                 {
@@ -489,7 +533,15 @@ def _run_cut_rank(
             )
             output_counts.add(n_out)
             draw_offset += n_out
-            del fit, te_flat, ypred, df
+            if draws_format != "parquet":
+                del df
+            del fit, te_flat, ypred
+
+        if draws_format == "parquet":
+            combined_path = _write_draws(
+                pd.concat(component_dfs, ignore_index=True), combined_stem, "parquet"
+            )
+            component_dfs.clear()
 
         if len(output_counts) > 1:
             raise DataError(
@@ -506,23 +558,23 @@ def _run_cut_rank(
                 "(see manifest)"
             )
 
-        _publish_cut_artifacts(staging, type_output_dir, filename, save_traces)
+        _publish_cut_artifacts(
+            staging, type_output_dir, filename, save_traces, combined_path.suffix
+        )
     except Exception:
         _safe_rmtree(staging, type_output_dir)
         raise
 
     logger.info(
         f"{model_type} rank {rank} cut: wrote draws to "
-        f"{type_output_dir / (filename + '.csv')}"
+        f"{type_output_dir / (filename + combined_path.suffix)}"
     )
 
     # ---- Reporting from published artifacts (same as re-render path) ----
     report_dir = type_output_dir / f"rank_{rank}" if len(ranks) > 1 else type_output_dir
     report_dir.mkdir(parents=True, exist_ok=True)
     if output_config.figures:
-        import pandas as pd
-
-        draws_df = pd.read_csv(type_output_dir / f"{filename}.csv")
+        draws_df = _read_draws(type_output_dir / filename)
         ppc_df = pd.read_csv(type_output_dir / f"{filename}_stage1_ppc.csv")
         _run_reporting(draws_df, report_dir, output_config, ppc_draws_df=ppc_df)
 

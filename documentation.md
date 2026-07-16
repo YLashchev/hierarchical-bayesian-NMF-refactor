@@ -25,7 +25,7 @@ This installs the full stack, pinned in `pyproject.toml` and locked in
 `uv.lock`:
 
 | Package | Floor | Notes |
-|---------|-------|-------|
+| --------- | ------- | ------- |
 | JAX / jaxlib | `>=0.10.2,<0.11` | jaxlib resolves transitively via jax — not pinned directly |
 | NumPyro | `>=0.21,<0.22` | |
 | ArviZ | `>=1.2,<1.3` | 1.x uses `xarray.DataTree` (not the legacy `InferenceData`) |
@@ -60,7 +60,7 @@ the schema — so a value you omit resolves identically everywhere.
 ### `data` (required)
 
 | Key | Type | Default | Notes |
-|-----|------|---------|-------|
+| ----- | ------ | --------- | ------- |
 | `input_file` | str | — (required) | CSV path |
 | `output_dir` | str | — (required) | results root |
 | `schema` | object | — (required) | column roles (below) |
@@ -78,7 +78,7 @@ of `outcomes` (explicit list of `{outcome_col, label, denominator_col?}`) or
 ### `model`
 
 | Key | Type | Default | Notes |
-|-----|------|---------|-------|
+| ----- | ------ | --------- | ------- |
 | `outcome_distribution` | str | `"NB"` | `"NB"` or `"Poisson"` |
 | `nb_disp` | float | `1e-4` | fixed NB dispersion (NB path only) |
 | `sample_disp` | bool | `false` | sample dispersion per unit instead |
@@ -90,7 +90,7 @@ of `outcomes` (explicit list of `{outcome_col, label, denominator_col?}`) or
 ### `mcmc`
 
 | Key | Default | Notes |
-|-----|---------|-------|
+| ----- | --------- | ------- |
 | `auto_parallelism` | `true` | pick chains/method from devices |
 | `max_chains` | `4` | cap under auto_parallelism |
 | `num_chains` / `chain_method` | null | only used when auto_parallelism=false |
@@ -104,7 +104,10 @@ of `outcomes` (explicit list of `{outcome_col, label, denominator_col?}`) or
 `figures` (false), `clean` (false), `save_traces` (false), `print_tables` (true),
 `print_target_table` (true); optional reporting filters `target_unit`, `report_groups`,
 `aggregate_units`, `ppc_units`, `ppc_exclude_units`, `ppc_acf_lags` (default `[6]`),
-`ppc_unit_corr_max_time`.
+`ppc_unit_corr_max_time`. `draws_format` (`"csv"` default, or `"parquet"`) controls
+only the large draws artifact (joint draws / cut combined draws); human-facing
+tables (`df_{type}.csv`, `summary_table*.csv`, `expected_vs_observed.csv`,
+`post_treatment_summary.csv`, `ppc_pvalues.csv`, `stage1_ppc.csv`) always stay CSV.
 
 ### `cut` (only read when `model.inference_mode: "cut"`)
 

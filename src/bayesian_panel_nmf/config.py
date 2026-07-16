@@ -14,7 +14,7 @@ separate, later task.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import yaml  # type: ignore[import-untyped]
 from pydantic import (
@@ -197,6 +197,7 @@ class OutputConfig(BaseModel):
     ppc_exclude_units: list[str] | None = None
     ppc_acf_lags: list[int] | None = None
     ppc_unit_corr_max_time: str | None = None
+    draws_format: Literal["csv", "parquet"] = "csv"
 
 
 class CutConfig(BaseModel):
