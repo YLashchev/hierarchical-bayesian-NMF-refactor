@@ -255,6 +255,48 @@ def _setup_plot_style():
     )
 
 
+def _new_fig(figsize: tuple[int, int], **kwargs) -> tuple[Figure, Axes]:
+    """Thin wrapper around ``plt.subplots`` for the single-axes case —
+    mechanical figure/axis creation scaffolding shared by every make_*
+    function below."""
+    return plt.subplots(figsize=figsize, **kwargs)
+
+
+def _new_grid_fig(
+    figsize: tuple[int, int], nrows: int, ncols: int, **kwargs
+) -> tuple[Figure, np.ndarray]:
+    """Thin wrapper around ``plt.subplots`` for the faceted-grid case —
+    always returns a 2D ndarray of Axes (``squeeze=False``-style shape)."""
+    return plt.subplots(nrows, ncols, figsize=figsize, **kwargs)
+
+
+def _empty_placeholder_fig(
+    figsize: tuple[int, int], message: str, title: str | None = None
+) -> tuple[Figure, Axes]:
+    """Blank figure/axes with a centered placeholder message, used by every
+    make_* function's empty-data early-return branch."""
+    fig, ax = _new_fig(figsize)
+    ax.text(0.5, 0.5, message, ha="center", va="center", transform=ax.transAxes)
+    if title is not None:
+        ax.set_title(title)
+    return fig, ax
+
+
+def _finalize(
+    fig: Figure,
+    axes: Axes | list[Axes] | np.ndarray | None = None,
+    *,
+    rotate_xticks: bool = False,
+) -> Figure:
+    """Common plot teardown: optional x-tick rotation, then ``tight_layout``."""
+    if rotate_xticks and axes is not None:
+        ax_list = axes if isinstance(axes, (list, np.ndarray)) else [axes]
+        for ax in ax_list:
+            plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
+    plt.tight_layout()
+    return fig
+
+
 def _create_faceted_histograms(
     stats_df: pd.DataFrame,
     pvals_df: pd.DataFrame,
@@ -304,22 +346,12 @@ def _create_faceted_histograms(
 
     n_facets = len(facet_keys)
     if n_facets == 0:
-        # No data to plot
-        fig, ax = plt.subplots(figsize=figsize)
-        ax.text(
-            0.5,
-            0.5,
-            "No data available",
-            ha="center",
-            va="center",
-            transform=ax.transAxes,
-        )
-        ax.set_title(title)
+        fig, _ = _empty_placeholder_fig(figsize, "No data available", title=title)
         return fig
 
     nrow = int(np.ceil(n_facets / ncol))
 
-    fig, axes = plt.subplots(nrow, ncol, figsize=figsize, squeeze=False)
+    fig, axes = _new_grid_fig(figsize, nrow, ncol, squeeze=False)
     axes = axes.flatten()
 
     for i, (facet_key, facet_label) in enumerate(
@@ -391,9 +423,7 @@ def _create_faceted_histograms(
     fig.supxlabel(xlabel, fontsize=12)
     fig.supylabel("Count", fontsize=12)
 
-    plt.tight_layout()
-
-    return fig
+    return _finalize(fig)
 
 
 def make_abs_ppc_plot(
@@ -837,16 +867,11 @@ def make_unit_corr_ppc_plot(
     eval_stats = eval_stats.dropna(subset=["eval_diff"])
 
     if len(eval_stats) == 0:
-        fig, ax = plt.subplots(figsize=figsize)
-        ax.text(
-            0.5,
-            0.5,
+        fig, _ = _empty_placeholder_fig(
+            figsize,
             "Insufficient data for spectral norm computation",
-            ha="center",
-            va="center",
-            transform=ax.transAxes,
+            title="Difference in Unit Correlations",
         )
-        ax.set_title("Difference in Unit Correlations")
         return fig, pd.DataFrame(columns=["group", "pval"])
 
     # Compute p-values
@@ -1010,7 +1035,7 @@ def make_raw_rate_plot(
         colors[separate_unit] = "#FF7F00"  # Orange
 
     # Create plot
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, ax = _new_fig(figsize)
 
     # Plot order: Control first (in back), then Treated, then separate_unit
     plot_order = ["Control", "Treated"]
@@ -1082,11 +1107,7 @@ def make_raw_rate_plot(
     )
     ax.legend(loc="best", frameon=True, fancybox=True)
 
-    # Rotate x-axis labels for readability
-    plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
-
-    plt.tight_layout()
-
+    _finalize(fig, ax, rotate_xticks=True)
     return fig, ax
 
 
@@ -1149,22 +1170,14 @@ def make_group_comparison_plot(
 
     n_groups = len(groups)
     if n_groups == 0:
-        fig, ax = plt.subplots(figsize=figsize)
-        ax.text(
-            0.5,
-            0.5,
-            "No groups to plot",
-            ha="center",
-            va="center",
-            transform=ax.transAxes,
-        )
+        fig, ax = _empty_placeholder_fig(figsize, "No groups to plot")
         return fig, np.array([ax])
 
     # Determine subplot layout
     ncols = min(2, n_groups)
     nrows = int(np.ceil(n_groups / ncols))
 
-    fig, axes = plt.subplots(nrows, ncols, figsize=figsize, squeeze=False, sharex=True)
+    fig, axes = _new_grid_fig(figsize, nrows, ncols, squeeze=False, sharex=True)
     axes_flat = axes.flatten()
 
     # Identify treated units
@@ -1264,12 +1277,7 @@ def make_group_comparison_plot(
         f"{title_type} Comparison by Group", fontsize=13, fontweight="bold", y=1.02
     )
 
-    # Rotate x-axis labels
-    for ax in axes_flat[: len(groups)]:
-        plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
-
-    plt.tight_layout()
-
+    _finalize(fig, axes_flat[: len(groups)], rotate_xticks=True)
     return fig, axes
 
 
@@ -1312,11 +1320,11 @@ def make_unit_fit_plot(
 
     df_plot = df[(df["group"] == group) & (df["unit"] == unit_name)].copy()
     if df_plot.empty:
-        fig, ax = plt.subplots(figsize=figsize)
-        ax.text(
-            0.5, 0.5, f"No data for {unit_name} / {group}", ha="center", va="center"
+        fig, ax = _empty_placeholder_fig(
+            figsize,
+            f"No data for {unit_name} / {group}",
+            title=f"{unit_name} ({group})",
         )
-        ax.set_title(f"{unit_name} ({group})")
         return fig, ax
 
     if "time" in df_plot.columns and not pd.api.types.is_datetime64_any_dtype(
@@ -1330,7 +1338,7 @@ def make_unit_fit_plot(
     df_pred = df_plot.dropna(subset=["ypred_mean", "ypred_lower", "ypred_upper"])
     df_obs = df_plot.dropna(subset=[outcome_col])
 
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, ax = _new_fig(figsize)
 
     # Credible Interval (only over timepoints with predictions)
     if not df_pred.empty:
@@ -1391,9 +1399,7 @@ def make_unit_fit_plot(
     ax.set_ylabel(outcome_col.capitalize(), fontsize=12)
     ax.legend(loc="best", frameon=True)
 
-    plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
-    plt.tight_layout()
-
+    _finalize(fig, ax, rotate_xticks=True)
     return fig, ax
 
 
@@ -1436,11 +1442,11 @@ def make_unit_gap_plot(
 
     df_plot = df[(df["group"] == group) & (df["unit"] == unit_name)].copy()
     if df_plot.empty:
-        fig, ax = plt.subplots(figsize=figsize)
-        ax.text(
-            0.5, 0.5, f"No data for {unit_name} / {group}", ha="center", va="center"
+        fig, ax = _empty_placeholder_fig(
+            figsize,
+            f"No data for {unit_name} / {group}",
+            title=f"Gap: {unit_name} ({group})",
         )
-        ax.set_title(f"Gap: {unit_name} ({group})")
         return fig, ax
 
     if "time" in df_plot.columns and not pd.api.types.is_datetime64_any_dtype(
@@ -1461,8 +1467,7 @@ def make_unit_gap_plot(
     ]
 
     if df_plot.empty:
-        fig, ax = plt.subplots(figsize=figsize)
-        ax.text(0.5, 0.5, "No valid data points", ha="center", va="center")
+        fig, ax = _empty_placeholder_fig(figsize, "No valid data points")
         return fig, ax
 
     # Treatment Date
@@ -1476,7 +1481,7 @@ def make_unit_gap_plot(
         if not treated_times.empty:
             t_date = treated_times.iloc[0]
 
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, ax = _new_fig(figsize)
 
     gap_mean = df_plot[outcome_col] / df_plot["ypred_mean"] - 1
     gap_lower = df_plot[outcome_col] / df_plot["ypred_upper"] - 1
@@ -1521,9 +1526,7 @@ def make_unit_gap_plot(
     ax.set_xlabel("Time", fontsize=12)
     ax.set_ylabel("Observed / Predicted - 1", fontsize=12)
 
-    plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
-    plt.tight_layout()
-
+    _finalize(fig, ax, rotate_xticks=True)
     return fig, ax
 
 
@@ -1674,7 +1677,7 @@ def make_interval_plot(
     plot_df[x_var] = pd.Categorical(plot_df[x_var], categories=sort_order, ordered=True)
     plot_df = plot_df.sort_values(x_var)
 
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, ax = _new_fig(figsize)
     y_positions = np.arange(len(sort_order))
     ax.set_yticks(y_positions)
     ax.set_yticklabels(sort_order)
@@ -1760,8 +1763,7 @@ def make_interval_plot(
     ax.set_ylabel("")
     ax.set_title("Causal Intervals", fontsize=14, fontweight="bold")
 
-    plt.tight_layout()
-    return fig, ax
+    return _finalize(fig), ax
 
 
 def make_summary_table(
