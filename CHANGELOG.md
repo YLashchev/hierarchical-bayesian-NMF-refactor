@@ -6,6 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `tables.print_run_summary_panel()`: a rich terminal panel summarizing one
+  completed rank run (model type, rank, chains/method, outcome distribution,
+  convergence gate PASS/FAIL, selected figures, artifact paths). Called from
+  `scripts/run_analysis.py` after a rank's artifacts are written, in both the
+  joint (`_run_single_rank`) and cut (`_run_cut_rank`) paths. Purely additive
+  terminal output — no file or data side effects, so golden output is
+  unaffected.
 - Typed config schema (`bayesian_panel_nmf.config.Config`, pydantic v2):
   validates configs, fills defaults from one place, and rejects unknown keys
   and quoted-boolean YAML footguns with clear errors. `validate_config` now

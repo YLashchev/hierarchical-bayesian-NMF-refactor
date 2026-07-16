@@ -134,6 +134,14 @@ plotting primitives), `tables.py` (pure pandas/numpy table computation plus rich
 terminal rendering — no matplotlib), and `reports.py` (`generate_reports()`,
 the orchestration entry point that calls into both).
 
+After each rank's artifacts are written, `scripts/run_analysis.py` calls
+`tables.print_run_summary_panel()`: a rich terminal panel echoing that run's
+config (model type, rank, chains/method, outcome distribution), the
+convergence gate verdict (green PASS / red FAIL, plus R-hat/ESS/divergences
+when present), the selected figures, and the written artifact paths. Purely
+additive terminal output — no file or data side effects, so it never touches
+a golden-checked artifact.
+
 | Registry name | Function | Artifact |
 | --- | --- | --- |
 | `unit_fit` | `make_unit_fit_plot` | `fit_<target>.png` |

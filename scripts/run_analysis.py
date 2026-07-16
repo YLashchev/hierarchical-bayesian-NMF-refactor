@@ -307,6 +307,20 @@ def _run_single_rank(
     if output_config.figures:
         _run_reporting(draws_df, report_dir, output_config)
 
+    from bayesian_panel_nmf.tables import print_run_summary_panel
+
+    print_run_summary_panel(
+        model_type=model_type,
+        rank=rank,
+        num_chains=mcmc.num_chains,
+        chain_method=str(mcmc.chain_method),
+        outcome_distribution=config.model.outcome_distribution,
+        convergence=gate,
+        figures=output_config.figures,
+        artifact_paths=[str(draws_file), str(convergence_file)]
+        + ([str(report_dir)] if output_config.figures else []),
+    )
+
 
 def _publish_cut_artifacts(
     staging: Path,
@@ -356,6 +370,7 @@ def _run_cut_rank(
     from jax import random as jax_random
 
     from bayesian_panel_nmf.cut import (
+        _resolve_chains,
         resolve_cut_settings,
         run_stage1_mcmc,
         run_stage2_mcmc,
@@ -370,6 +385,7 @@ def _run_cut_rank(
         format_cut_component_draws,
         format_stage1_ppc_draws,
     )
+    from bayesian_panel_nmf.tables import print_run_summary_panel
     from bayesian_panel_nmf.validation import DataError
 
     filename = f"{_draws_filename(config, model_type, rank)}_cut"
@@ -431,6 +447,7 @@ def _run_cut_rank(
             )
 
         refs = select_stage1_draws(stage1.samples, settings, config.model.model_dump())
+        stage1_num_chains = stage1.num_chains
         del stage1, mu1  # release the full Stage-1 posterior; refs hold copies
 
         # ---- Stage 2: one conditional multi-chain fit per component ----
@@ -574,10 +591,27 @@ def _run_cut_rank(
     # ---- Reporting from published artifacts (same as re-render path) ----
     report_dir = type_output_dir / f"rank_{rank}" if len(ranks) > 1 else type_output_dir
     report_dir.mkdir(parents=True, exist_ok=True)
+    artifact_paths = [
+        str(type_output_dir / f"{filename}{combined_path.suffix}"),
+        str(type_output_dir / f"{filename}_convergence.json"),
+    ]
     if output_config.figures:
         draws_df = _read_draws(type_output_dir / filename)
         ppc_df = pd.read_csv(type_output_dir / f"{filename}_stage1_ppc.csv")
         _run_reporting(draws_df, report_dir, output_config, ppc_draws_df=ppc_df)
+        artifact_paths.append(str(report_dir))
+
+    _, cut_chain_method = _resolve_chains(config.mcmc.model_dump())
+    print_run_summary_panel(
+        model_type=model_type,
+        rank=rank,
+        num_chains=stage1_num_chains,
+        chain_method=cut_chain_method,
+        outcome_distribution=outcome_dist,
+        convergence=manifest,
+        figures=output_config.figures,
+        artifact_paths=artifact_paths,
+    )
 
 
 def run_model_type(

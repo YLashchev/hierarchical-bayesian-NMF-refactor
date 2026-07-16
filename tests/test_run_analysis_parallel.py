@@ -144,6 +144,9 @@ def test_run_model_type_without_figures_does_not_import_viz(
     )
 
     class DummyMCMC:
+        num_chains = 1
+        chain_method = "sequential"
+
         def get_samples(self, group_by_chain=True):
             return {"mu": __import__("numpy").zeros((1, 1, 1, 1))}
 

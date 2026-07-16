@@ -44,6 +44,9 @@ def _config(**overrides) -> Config:
 
 
 class _DummyMCMC:
+    num_chains = 1
+    chain_method = "sequential"
+
     def get_samples(self, group_by_chain=True):
         return {"mu": np.zeros((1, 1, 1, 1))}
 

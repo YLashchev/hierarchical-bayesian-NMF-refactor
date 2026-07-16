@@ -287,4 +287,3 @@ def generate_reports(
         "figs_dir": figs_dir,
         "treated_units": treated_units,
     }
-

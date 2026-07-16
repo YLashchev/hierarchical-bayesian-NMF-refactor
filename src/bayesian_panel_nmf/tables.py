@@ -16,6 +16,7 @@ from typing import cast
 
 import numpy as np
 import pandas as pd
+from loguru import logger
 
 from .plots import _detect_outcome_column, _standardize_columns
 
@@ -371,3 +372,90 @@ def _print_rich_tables(
             style=style,
         )
     console.print(t)
+
+
+# -----------------------------------------------------------------------------
+# Run-summary panel (additive terminal output — no file/data side effects)
+# -----------------------------------------------------------------------------
+
+
+def print_run_summary_panel(
+    model_type: str,
+    rank: int,
+    num_chains: int,
+    chain_method: str,
+    outcome_distribution: str,
+    convergence: dict,
+    figures: list[str],
+    artifact_paths: list[str] | str | Path,
+) -> None:
+    """Render a rich Panel summarizing one completed rank run.
+
+    Purely additive terminal output: no file or data side effects, so it
+    cannot affect any golden-checked artifact. Intended to be called right
+    after a rank's convergence gate and figures have been written, from
+    both the joint (``_run_single_rank``) and cut (``_run_cut_rank``) paths.
+
+    Parameters
+    ----------
+    model_type : str
+    rank : int
+    num_chains : int
+    chain_method : str
+    outcome_distribution : str
+    convergence : dict
+        The convergence gate dict (``diagnostics.convergence_summary()`` /
+        ``cut.summarize_mcmc()`` / ``results.build_cut_convergence_manifest()``
+        shape): at minimum a ``"converged"`` bool, plus any of
+        ``rhat_max``, ``ess_bulk_min``, ``ess_tail_min``, ``divergences``.
+    figures : list of str
+        Figure names selected for this run (``PLOT_REGISTRY`` subset).
+    artifact_paths : list of str, or str/Path
+        Artifact directory or list of written artifact paths to display.
+    """
+    from rich.console import Console
+    from rich.panel import Panel
+
+    console = Console()
+
+    converged = bool(convergence.get("converged", False))
+    status = (
+        "[bold green]PASS[/bold green]" if converged else "[bold red]FAIL[/bold red]"
+    )
+
+    lines = [
+        f"[bold]Model type:[/bold] {model_type}   [bold]Rank:[/bold] {rank}",
+        f"[bold]Chains:[/bold] {num_chains} ({chain_method})   "
+        f"[bold]Distribution:[/bold] {outcome_distribution}",
+        "",
+        f"[bold]Convergence:[/bold] {status}",
+    ]
+    if "rhat_max" in convergence:
+        lines.append(f"  max R-hat: {convergence['rhat_max']:.4f}")
+    if "ess_bulk_min" in convergence:
+        lines.append(f"  min bulk ESS: {convergence['ess_bulk_min']:.0f}")
+    if "ess_tail_min" in convergence:
+        lines.append(f"  min tail ESS: {convergence['ess_tail_min']:.0f}")
+    if "divergences" in convergence:
+        lines.append(f"  divergences: {convergence['divergences']}")
+
+    lines.append("")
+    lines.append(f"[bold]Figures:[/bold] {', '.join(figures) if figures else '(none)'}")
+
+    paths = (
+        [str(artifact_paths)]
+        if isinstance(artifact_paths, (str, Path))
+        else [str(p) for p in artifact_paths]
+    )
+    lines.append(f"[bold]Artifacts:[/bold] {', '.join(paths) if paths else '(none)'}")
+
+    console.print(
+        Panel(
+            "\n".join(lines),
+            title=f"Run summary — {model_type} rank {rank}",
+            border_style="green" if converged else "red",
+        )
+    )
+    logger.debug(
+        f"{model_type} rank {rank}: run-summary panel printed (converged={converged})"
+    )
