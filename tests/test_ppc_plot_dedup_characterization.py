@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from bayesian_panel_nmf.visualization import (
+from bayesian_panel_nmf.plots import (
     make_abs_ppc_plot,
     make_acf_ppc_plot,
     make_rmse_ppc_plot,
@@ -51,7 +51,9 @@ def test_make_acf_ppc_plot_pvals_shape_and_columns():
     plt.close(fig)
 
     assert set(pvals.columns) == {"unit", "group", "pval"}
-    assert set(pvals["unit"]) == {"unit0"}  # only treated unit0 is a control-period PPC target
+    assert set(pvals["unit"]) == {
+        "unit0"
+    }  # only treated unit0 is a control-period PPC target
     assert (pvals["pval"] >= 0).all() and (pvals["pval"] <= 1).all()
 
 

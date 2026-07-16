@@ -88,7 +88,7 @@ def test_valid_cut_block_accepted():
 
 from loguru import logger  # noqa: E402
 
-from bayesian_panel_nmf.cut_inference import resolve_cut_settings  # noqa: E402
+from bayesian_panel_nmf.cut import resolve_cut_settings  # noqa: E402
 
 
 def test_defaults_resolved_from_minimal_config():

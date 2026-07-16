@@ -14,7 +14,7 @@ frames.
 import numpy as np
 import pandas as pd
 
-from .cut_inference import Stage1DrawRef
+from .cut import Stage1DrawRef
 from .output import format_draws
 
 PROVENANCE_COLUMNS = [

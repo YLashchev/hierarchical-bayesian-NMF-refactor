@@ -319,7 +319,7 @@ def _run_cut_rank(
     import arviz as az
     from jax import random as jax_random
 
-    from bayesian_panel_nmf.cut_inference import (
+    from bayesian_panel_nmf.cut import (
         resolve_cut_settings,
         run_stage1_mcmc,
         run_stage2_mcmc,

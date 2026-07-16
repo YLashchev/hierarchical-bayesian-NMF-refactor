@@ -11,16 +11,16 @@ from bayesian_panel_nmf.inference import (
 from bayesian_panel_nmf.logging_config import logger, setup_logging
 from bayesian_panel_nmf.models import model
 from bayesian_panel_nmf.output import format_draws
+from bayesian_panel_nmf.plots import (
+    make_all_ppc_plots,
+    make_group_comparison_plot,
+    make_raw_rate_plot,
+)
 from bayesian_panel_nmf.validation import (
     ConfigError,
     DataError,
     validate_config,
     validate_data_dict,
-)
-from bayesian_panel_nmf.visualization import (
-    make_all_ppc_plots,
-    make_group_comparison_plot,
-    make_raw_rate_plot,
 )
 
 __all__ = [

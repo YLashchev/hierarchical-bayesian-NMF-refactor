@@ -14,7 +14,7 @@ from jax import block_until_ready, random
 from loguru import logger
 from numpyro.infer import MCMC, NUTS, Predictive
 
-from bayesian_panel_nmf.mcmc_utils import choose_mcmc_parallelism
+from bayesian_panel_nmf.parallelism import choose_mcmc_parallelism
 from bayesian_panel_nmf.validation import (
     DataError,
     validate_data_dict,

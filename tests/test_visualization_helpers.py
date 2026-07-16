@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import pytest
 
-from bayesian_panel_nmf.visualization import (
+from bayesian_panel_nmf.plots import (
     _detect_outcome_column,
     make_interval_plot,
     make_summary_table,

@@ -6,13 +6,13 @@ import pandas as pd
 import pytest
 from rich.console import Console
 
-from bayesian_panel_nmf import visualization
+from bayesian_panel_nmf import plots
+from bayesian_panel_nmf.plots import make_abs_ppc_plot, make_all_ppc_plots
 from bayesian_panel_nmf.reporting import (
     _compute_per_unit_post_treatment,
     _print_rich_tables,
     generate_reports,
 )
-from bayesian_panel_nmf.visualization import make_abs_ppc_plot, make_all_ppc_plots
 
 
 def _ppc_df() -> pd.DataFrame:
@@ -92,10 +92,10 @@ def test_make_all_ppc_plots_acf_lags_write_expected_files(
         fig, _ = plt.subplots()
         return fig, pd.DataFrame({"group": ["g"], "pval": [0.3]})
 
-    monkeypatch.setattr(visualization, "make_abs_ppc_plot", fake_abs)
-    monkeypatch.setattr(visualization, "make_acf_ppc_plot", fake_acf)
-    monkeypatch.setattr(visualization, "make_rmse_ppc_plot", fake_rmse)
-    monkeypatch.setattr(visualization, "make_unit_corr_ppc_plot", fake_corr)
+    monkeypatch.setattr(plots, "make_abs_ppc_plot", fake_abs)
+    monkeypatch.setattr(plots, "make_acf_ppc_plot", fake_acf)
+    monkeypatch.setattr(plots, "make_rmse_ppc_plot", fake_rmse)
+    monkeypatch.setattr(plots, "make_unit_corr_ppc_plot", fake_corr)
 
     results = make_all_ppc_plots(df, output_dir=str(tmp_path), acf_lags=[1, 3, 6])
 

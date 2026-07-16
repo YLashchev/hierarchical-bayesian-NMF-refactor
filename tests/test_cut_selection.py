@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from bayesian_panel_nmf.cut_inference import (
+from bayesian_panel_nmf.cut import (
     CutSettings,
     select_stage1_draws,
     subsample_component_draws,

@@ -4,7 +4,7 @@ import jax
 import numpy as np
 from cut_fixtures import RANK, D, K, N, make_cut_data_dict
 
-from bayesian_panel_nmf.cut_inference import (
+from bayesian_panel_nmf.cut import (
     resolve_cut_settings,
     run_stage1_mcmc,
     run_stage2_mcmc,

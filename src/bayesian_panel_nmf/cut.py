@@ -24,9 +24,9 @@ from loguru import logger
 from numpyro.infer import MCMC, NUTS
 
 from .inference import _resolve_model_settings, convergence_summary
-from .mcmc_utils import choose_mcmc_parallelism
 from .models.cut_stage1_model import stage1_model
 from .models.cut_stage2_model import stage2_model
+from .parallelism import choose_mcmc_parallelism
 from .validation import ConfigError, DataError, validate_data_dict, validate_rank
 
 DEFAULT_NUM_STAGE1_DRAWS = 25

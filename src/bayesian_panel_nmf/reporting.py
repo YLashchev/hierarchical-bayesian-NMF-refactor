@@ -25,7 +25,7 @@ import pandas as pd
 from loguru import logger
 
 from .aggregate_units import add_aggregate_units
-from .visualization import (
+from .plots import (
     make_all_ppc_plots,
     make_group_comparison_plot,
     make_interval_plot,
@@ -126,8 +126,8 @@ def generate_reports(
     ``groups``, ``figs_dir``, ``treated_units``.
     """
     # Lazy import: AGENTS.md forbids top-level matplotlib/pyplot outside
-    # visualization.py. matplotlib is already loaded transitively via
-    # ``from .visualization import ...`` above; this binds local names for
+    # plots.py. matplotlib is already loaded transitively via
+    # ``from .plots import ...`` above; this binds local names for
     # the Agg backend call and ``plt.close()`` calls below.
     import matplotlib
     import matplotlib.pyplot as plt
