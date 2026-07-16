@@ -36,9 +36,9 @@ numpyro.set_host_device_count(os.cpu_count() or 1)
 
 import arviz as az  # noqa: E402
 import numpy as np  # noqa: E402
-import yaml  # type: ignore[import-untyped]  # noqa: E402
 from loguru import logger  # noqa: E402
 
+from bayesian_panel_nmf.config import Config, OutputConfig, TypeConfig  # noqa: E402
 from bayesian_panel_nmf.data import load_and_prepare  # noqa: E402
 from bayesian_panel_nmf.inference import (  # noqa: E402
     convergence_summary,
@@ -48,15 +48,14 @@ from bayesian_panel_nmf.inference import (  # noqa: E402
 from bayesian_panel_nmf.logging_config import setup_logging  # noqa: E402
 from bayesian_panel_nmf.models import model  # noqa: E402
 from bayesian_panel_nmf.output import format_draws  # noqa: E402
-from bayesian_panel_nmf.validation import ConfigError, validate_config  # noqa: E402
+from bayesian_panel_nmf.validation import ConfigError  # noqa: E402
 
 
-def _validate_run_analysis_config(config: dict) -> None:
-    """Validate generic schema plus sections required by run_analysis."""
-    if "model" not in config:
-        raise ConfigError("config missing 'model' section")
-    validate_config(config)
-    if "types" not in config.get("model", {}):
+def _validate_run_analysis_config(config: Config) -> None:
+    """Run-analysis-specific check beyond generic schema validation (already
+    enforced by ``Config.from_yaml``/``Config.model_validate``): at least one
+    model type must be configured."""
+    if not config.model.types:
         raise ConfigError("config['model'] missing 'types' section")
 
 
@@ -100,7 +99,7 @@ def _format_elapsed(seconds: float) -> str:
     return f"{secs}s"
 
 
-def _get_outcome_name(config: dict) -> str:
+def _get_outcome_name(config: Config) -> str:
     """Derive outcome name for filename placeholder from config.
 
     Priority:
@@ -108,15 +107,13 @@ def _get_outcome_name(config: dict) -> str:
     2. Strip trailing underscore from ``outcomes_from_prefixes.outcome_prefix``.
     3. Fall back to ``"births"`` for backward compatibility.
     """
-    data_cfg = config.get("data", {})
-    explicit = data_cfg.get("outcome")
+    explicit = config.data.outcome
     if explicit:
         return str(explicit)
 
-    schema = data_cfg.get("schema", {})
-    prefixes = schema.get("outcomes_from_prefixes")
+    prefixes = config.data.schema_.outcomes_from_prefixes
     if prefixes:
-        prefix = prefixes.get("outcome_prefix", "")
+        prefix = prefixes.outcome_prefix or ""
         if prefix.endswith("_"):
             return prefix[:-1]
         return prefix or "births"
@@ -124,9 +121,9 @@ def _get_outcome_name(config: dict) -> str:
     return "births"
 
 
-def _draws_filename(config: dict, model_type: str, rank: int) -> str:
+def _draws_filename(config: Config, model_type: str, rank: int) -> str:
     """Fixed scheme: {distribution}_{outcome}_{type}_{rank}."""
-    dist = config.get("model", {}).get("outcome_distribution", "NB")
+    dist = config.model.outcome_distribution
     return f"{dist}_{_get_outcome_name(config)}_{model_type}_{rank}"
 
 
@@ -149,36 +146,41 @@ def _clean_scoped_samples(mcmc, model_type: str, rank: int) -> dict:
 def _run_reporting(
     draws_df,
     output_dir,
-    output_config: dict,
+    output_config: OutputConfig,
     ppc_draws_df=None,
 ) -> None:
     """Generate figures + tables under ``<output_dir>/figs/``."""
     from bayesian_panel_nmf.reporting import generate_reports
 
+    aggregate_units = (
+        [spec.model_dump() for spec in output_config.aggregate_units]
+        if output_config.aggregate_units
+        else None
+    )
     generate_reports(
         draws_df,
         output_dir=output_dir,
-        target_unit=output_config.get("target_unit"),
-        groups=output_config.get("report_groups"),
-        print_tables=output_config.get("print_tables", True),
-        print_target_table=output_config.get("print_target_table", True),
-        aggregate_units=output_config.get("aggregate_units"),
-        ppc_units=output_config.get("ppc_units"),
-        ppc_acf_lags=output_config.get("ppc_acf_lags", [6]),
-        ppc_unit_corr_max_time=output_config.get("ppc_unit_corr_max_time"),
-        ppc_exclude_units=output_config.get("ppc_exclude_units"),
+        target_unit=output_config.target_unit,
+        groups=output_config.report_groups,
+        print_tables=output_config.print_tables,
+        print_target_table=output_config.print_target_table,
+        aggregate_units=aggregate_units,
+        ppc_units=output_config.ppc_units,
+        ppc_acf_lags=output_config.ppc_acf_lags or [6],
+        ppc_unit_corr_max_time=output_config.ppc_unit_corr_max_time,
+        ppc_exclude_units=output_config.ppc_exclude_units,
         ppc_draws_df=ppc_draws_df,
     )
 
 
 def _prepare_type_output_dir(
-    base_output_dir: Path, model_type: str, output_config: dict
+    base_output_dir: Path, model_type: str, output_config: OutputConfig
 ) -> Path:
     """Return this model type's output directory, optionally clearing it
     first when output.clean is true."""
     type_output_dir = base_output_dir / model_type
 
-    if output_config.get("clean", False) and type_output_dir.exists():
+    if output_config.clean and type_output_dir.exists():
         logger.info(f"clean=true: removing existing {type_output_dir}")
         _safe_rmtree(type_output_dir, base_output_dir)
 
@@ -190,16 +192,16 @@ def _run_single_rank(
     rank: int,
     data_dict: dict,
     model_type: str,
-    config: dict,
+    config: Config,
     type_output_dir: Path,
     ranks: list[int],
     save_traces: bool,
-    output_config: dict,
+    output_config: OutputConfig,
 ) -> None:
     """Run MCMC inference for one rank, write the convergence gate,
     optionally save a trace sidecar, write draws, and optionally dispatch
     reporting/figure generation."""
-    if (config.get("model", {}) or {}).get("inference_mode", "joint") == "cut":
+    if config.model.inference_mode == "cut":
         _run_cut_rank(
             rank,
             data_dict,
@@ -272,7 +274,7 @@ def _run_single_rank(
     report_dir = type_output_dir / f"rank_{rank}" if len(ranks) > 1 else type_output_dir
     report_dir.mkdir(parents=True, exist_ok=True)
 
-    if output_config.get("figures", False):
+    if output_config.figures:
         _run_reporting(draws_df, report_dir, output_config)
 
 
@@ -301,11 +303,11 @@ def _run_cut_rank(
     rank: int,
     data_dict: dict,
     model_type: str,
-    config: dict,
+    config: Config,
     type_output_dir: Path,
     ranks: list[int],
     save_traces: bool,
-    output_config: dict,
+    output_config: OutputConfig,
 ) -> None:
     """Two-stage pure cut-posterior path for one rank.
 
@@ -343,11 +345,9 @@ def _run_cut_rank(
         _safe_rmtree(staging, type_output_dir)
     staging.mkdir(parents=True)
 
-    model_cfg = config.get("model", {}) or {}
-    mcmc_cfg = config.get("mcmc", {}) or {}
-    outcome_dist = model_cfg.get("outcome_distribution", "NB")
-    sample_disp = model_cfg.get("sample_disp", False)
-    nb_disp = model_cfg.get("nb_disp", 1e-4)
+    outcome_dist = config.model.outcome_distribution
+    sample_disp = config.model.sample_disp
+    nb_disp = config.model.nb_disp
 
     try:
         validate_cut_data(data_dict)
@@ -379,7 +379,7 @@ def _run_cut_rank(
         else:
             conc1 = None
         _, ppc_key = jax_random.split(
-            jax_random.PRNGKey(int(mcmc_cfg.get("random_seed", 8675309)) + 1)
+            jax_random.PRNGKey(int(config.mcmc.random_seed) + 1)
         )
         stage1_ypred = sample_untreated_predictions(mu1, conc1, outcome_dist, ppc_key)
         stage1_ppc_df = format_stage1_ppc_draws(mu1, stage1_ypred, data_dict)
@@ -396,7 +396,7 @@ def _run_cut_rank(
                 str(staging / f"{filename}_stage1_traces.nc"), engine="h5netcdf"
             )
 
-        refs = select_stage1_draws(stage1.samples, settings, model_cfg)
+        refs = select_stage1_draws(stage1.samples, settings, config.model.model_dump())
         del stage1, mu1  # release the full Stage-1 posterior; refs hold copies
 
         # ---- Stage 2: one conditional multi-chain fit per component ----
@@ -519,7 +519,7 @@ def _run_cut_rank(
     # ---- Reporting from published artifacts (same as re-render path) ----
     report_dir = type_output_dir / f"rank_{rank}" if len(ranks) > 1 else type_output_dir
     report_dir.mkdir(parents=True, exist_ok=True)
-    if output_config.get("figures", False):
+    if output_config.figures:
         import pandas as pd
 
         draws_df = pd.read_csv(type_output_dir / f"{filename}.csv")
@@ -529,8 +529,8 @@ def _run_cut_rank(
 
 def run_model_type(
     model_type: str,
-    type_config: dict,
-    config: dict,
+    type_config: TypeConfig,
+    config: Config,
     rank_override: int | None = None,
     save_traces: bool = False,
     log_level: str = "INFO",
@@ -540,24 +540,24 @@ def run_model_type(
     if configure_logging:
         setup_logging(level=log_level)
 
-    base_output_dir = Path(config["data"]["output_dir"])
-    output_config = config.get("output", {})
+    base_output_dir = Path(config.data.output_dir)
+    output_config = config.output
     type_output_dir = _prepare_type_output_dir(
         base_output_dir, model_type, output_config
     )
 
-    groups = type_config["groups"]
-    ranks = [rank_override] if rank_override else type_config.get("ranks_to_test", [10])
-    exclude_units = type_config.get("exclude_units")
+    groups = type_config.groups
+    ranks = [rank_override] if rank_override else type_config.ranks_to_test
+    exclude_units = type_config.exclude_units
 
     model_started_at = time.monotonic()
     load_started_at = time.monotonic()
     data_dict = load_and_prepare(
-        filepath=config["data"]["input_file"],
+        filepath=config.data.input_file,
         config=config,
         groups=groups,
         exclude_units=exclude_units,
-        type_config=type_config,
+        type_config=type_config.model_dump(),
     )
 
     logger.info(
@@ -588,27 +588,27 @@ def run_model_type(
     )
 
 
-def load_config(config_path: str) -> dict:
-    """Load configuration from YAML file."""
-    try:
-        with open(config_path) as f:
-            config = yaml.safe_load(f)
-    except OSError as e:
-        raise ConfigError(f"failed to load config {config_path}: {e}") from e
-    return config
+def load_config(config_path: str) -> Config:
+    """Load and validate configuration from a YAML file."""
+    return Config.from_yaml(config_path)
 
 
-def _apply_mcmc_overrides(config: dict, args: argparse.Namespace) -> None:
-    """Apply --chains / --chain-method overrides to config['mcmc'] in place.
+def _apply_mcmc_overrides(config: Config, args: argparse.Namespace) -> Config:
+    """Return ``config`` with --chains / --chain-method overrides applied to
+    its ``mcmc`` section.
 
     --chain-method forces auto_parallelism=false (manual mode) and sets
     chain_method. --chains then sets num_chains (manual) or max_chains (auto).
     Without --chain-method, --chains just overrides max_chains under auto.
+
+    ``Config`` is immutable, so overrides are applied by dumping to a dict,
+    mutating the ``mcmc`` sub-dict, and re-validating.
     """
     if args.chains is None and args.chain_method is None:
-        return
+        return config
 
-    mcmc = config.setdefault("mcmc", {})
+    data = config.model_dump()
+    mcmc = data["mcmc"]
     if args.chain_method is not None:
         mcmc["auto_parallelism"] = False
         mcmc["chain_method"] = args.chain_method
@@ -624,6 +624,7 @@ def _apply_mcmc_overrides(config: dict, args: argparse.Namespace) -> None:
         logger.info(
             f"CLI override: max_chains={args.chains} (auto_parallelism stays on)"
         )
+    return Config.model_validate(data)
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -685,7 +686,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _select_types_to_run(all_types: dict, requested_type: str | None) -> dict:
+def _select_types_to_run(
+    all_types: dict[str, TypeConfig], requested_type: str | None
+) -> dict[str, TypeConfig]:
     """Return the subset of configured model types to run: just the
     requested one if --type was given, otherwise every configured type.
 
@@ -705,8 +708,8 @@ def _select_types_to_run(all_types: dict, requested_type: str | None) -> dict:
 
 
 def _run_sequential(
-    types_to_run: dict,
-    config: dict,
+    types_to_run: dict[str, TypeConfig],
+    config: Config,
     args: argparse.Namespace,
     save_traces: bool,
     log_level: str,
@@ -739,7 +742,7 @@ def main():
     _validate_run_analysis_config(config)
 
     # Setup output directory
-    output_dir = Path(config["data"]["output_dir"])
+    output_dir = Path(config.data.output_dir)
     try:
         output_dir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
@@ -747,13 +750,13 @@ def main():
         raise
 
     # Apply CLI overrides to the mcmc config section.
-    _apply_mcmc_overrides(config, args)
+    config = _apply_mcmc_overrides(config, args)
 
     # Select which model types to run
-    types_to_run = _select_types_to_run(config["model"]["types"], args.type)
+    types_to_run = _select_types_to_run(config.model.types, args.type)
 
     # Resolve save_traces: CLI flag overrides config
-    save_traces = args.save_traces or config.get("output", {}).get("save_traces", False)
+    save_traces = args.save_traces or config.output.save_traces
 
     logger.info(f"Running {len(types_to_run)} model type(s)")
 
