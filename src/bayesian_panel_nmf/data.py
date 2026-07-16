@@ -6,29 +6,29 @@ outcome, denominator, treatment.
 
 from datetime import timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-import numpy as np
 import pandas as pd
 from loguru import logger
 
 if TYPE_CHECKING:
     from bayesian_panel_nmf.config import Config
 
+from bayesian_panel_nmf.arrays import (
+    DENOMINATOR_COL,
+    GROUP_COL,
+    OUTCOME_COL,
+    TIME_COL,
+    TREATMENT_COL,
+    UNIT_COL,
+    build_model_arrays,
+)
 from bayesian_panel_nmf.validation import (
     ConfigError,
     DataError,
     validate_filepath,
     validate_groups,
 )
-
-# Standard column names (fixed after loading)
-UNIT_COL = "unit"
-TIME_COL = "time"
-GROUP_COL = "group"
-OUTCOME_COL = "outcome"
-DENOMINATOR_COL = "denominator"
-TREATMENT_COL = "treatment"
 
 
 def load_and_prepare(
@@ -131,7 +131,7 @@ def load_and_prepare(
         logger.info(f"Aggregated to {period}: {len(df)} rows")
 
     allow_unbalanced = data_config.allow_unbalanced_panel
-    data_dict = _build_model_arrays(df, groups, allow_unbalanced_panel=allow_unbalanced)
+    data_dict = build_model_arrays(df, groups, allow_unbalanced_panel=allow_unbalanced)
 
     K, D, N = data_dict["Y"].shape
     logger.info(f"Model arrays built: K={K} groups, D={D} units, N={N} time periods")
@@ -542,103 +542,3 @@ def _aggregate_temporal(df: pd.DataFrame, period: str) -> pd.DataFrame:
     df_agg = df_agg.sort_values([UNIT_COL, TIME_COL, GROUP_COL]).reset_index(drop=True)
 
     return df_agg
-
-
-def _build_model_arrays(
-    df: pd.DataFrame,
-    groups: list[str],
-    denominator_scale: float = 1e4,
-    allow_unbalanced_panel: bool = False,
-) -> dict[str, Any]:
-    """
-    Convert long-format DataFrame to K×D×N arrays for the model.
-
-    Uses FIXED column names: unit, time, group, outcome, denominator, treatment.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Long format data with standardized columns
-    groups : list of str
-        Group labels in desired order (defines K dimension)
-    denominator_scale : float
-        Scale factor for denominators (default 1e4 = per 10k)
-
-    Returns
-    -------
-    dict
-        Y, denominators, control_idx_array, missing_idx_array, groups, units, times
-    """
-    # Filter to requested groups and sort
-    df = df[df[GROUP_COL].isin(groups)].copy()
-    df = df.sort_values([UNIT_COL, TIME_COL, GROUP_COL]).reset_index(drop=True)
-
-    # Get dimensions — use FULL set of units/times across all data
-    units = sorted(df[UNIT_COL].unique())
-    times = sorted(df[TIME_COL].unique())
-    K, D, N = len(groups), len(units), len(times)
-
-    # Initialize arrays
-    Y = np.zeros((K, D, N))
-    denominators = np.ones((K, D, N))  # Default to 1 for count modeling
-    control_idx = np.ones((K, D, N), dtype=bool)
-    missing_idx = np.zeros((K, D, N), dtype=bool)
-    filled = np.zeros((K, D, N), dtype=bool)  # Track which cells have data
-
-    # Create index mappings
-    group_to_k = {g: i for i, g in enumerate(groups)}
-    unit_to_d = {u: i for i, u in enumerate(units)}
-    time_to_n = {t: i for i, t in enumerate(times)}
-
-    # Fill arrays
-    has_denominator = DENOMINATOR_COL in df.columns
-
-    for _, row in df.iterrows():
-        k = group_to_k[row[GROUP_COL]]
-        d = unit_to_d[row[UNIT_COL]]
-        n = time_to_n[row[TIME_COL]]
-
-        # Outcome
-        outcome_val = row[OUTCOME_COL]
-        if pd.isna(outcome_val):
-            Y[k, d, n] = 0
-            missing_idx[k, d, n] = True
-        else:
-            Y[k, d, n] = outcome_val
-
-        # Denominator (if present)
-        if has_denominator:
-            denom_val = row[DENOMINATOR_COL]
-            if pd.notna(denom_val) and denom_val > 0:
-                denominators[k, d, n] = denom_val / denominator_scale
-
-        # Control status (treatment=0 means control)
-        control_idx[k, d, n] = row[TREATMENT_COL] == 0
-        filled[k, d, n] = True
-
-    # Check for structurally absent cells (no row in data)
-    absent_mask = ~filled
-    n_absent = int(absent_mask.sum())
-    n_total = K * D * N
-
-    if n_absent > 0:
-        if not allow_unbalanced_panel:
-            raise DataError(
-                f"Unbalanced panel: {n_absent} of {n_total} cells are missing. "
-                "Set allow_unbalanced_panel=True in config to allow."
-            )
-        # Mark absent cells as missing
-        missing_idx = missing_idx | absent_mask
-        logger.warning(
-            f"Unbalanced panel: {n_absent} of {n_total} cells are structurally absent (marked as missing)"
-        )
-
-    return {
-        "Y": Y,
-        "denominators": denominators,
-        "control_idx_array": control_idx,
-        "missing_idx_array": missing_idx,
-        "groups": groups,
-        "units": units,
-        "times": times,
-    }
