@@ -27,12 +27,14 @@ def minimal_config():
     """Valid minimal configuration required by schema."""
     return {
         "data": {
+            "input_file": "input.csv",
+            "output_dir": "results",
             "schema": {
                 "unit_col": "state",
                 "time_col": "time",
                 "treatment_col": "treated",
                 "outcomes": [{"outcome_col": "y", "label": "total"}],
-            }
+            },
         },
         "model": {},
         "mcmc": {},
@@ -54,13 +56,14 @@ def _set_nested_val(config, path_tuple, value):
 def test_quoted_bool_rejected(minimal_config, path_tuple, bad_value):
     _set_nested_val(minimal_config, path_tuple, bad_value)
 
-    # Validation error should specifically call out the final key that failed
-    with pytest.raises(ConfigError, match="must be boolean"):
+    # Validation error should specifically call out the field that failed;
+    # pydantic reports "Input should be a valid boolean" for non-bool values.
+    with pytest.raises(ConfigError, match="valid boolean"):
         validate_config(minimal_config)
 
 
 @pytest.mark.parametrize("path_tuple", BOOL_PATHS)
-@pytest.mark.parametrize("good_value", [True, False, None])
+@pytest.mark.parametrize("good_value", [True, False])
 def test_valid_bool_accepted(minimal_config, path_tuple, good_value):
     _set_nested_val(minimal_config, path_tuple, good_value)
 
@@ -69,16 +72,36 @@ def test_valid_bool_accepted(minimal_config, path_tuple, good_value):
 
 
 def test_nested_total_all_quoted_rejected(minimal_config):
-    minimal_config["model"] = {"types": {"synthetic_total": {"total_all": "true"}}}
-    with pytest.raises(ConfigError, match="must be boolean"):
+    minimal_config["model"] = {
+        "types": {
+            "synthetic_total": {
+                "groups": ["g1"],
+                "ranks_to_test": [1],
+                "total_all": "true",
+            }
+        }
+    }
+    with pytest.raises(ConfigError, match="valid boolean"):
         validate_config(minimal_config)
 
 
 def test_nested_total_all_accepted(minimal_config):
-    minimal_config["model"] = {"types": {"synthetic_total": {"total_all": True}}}
+    minimal_config["model"] = {
+        "types": {
+            "synthetic_total": {
+                "groups": ["g1"],
+                "ranks_to_test": [1],
+                "total_all": True,
+            }
+        }
+    }
     validate_config(minimal_config)
 
 
 def test_flag_absent_ok(minimal_config):
-    # Base minimal config without any of the boolean flags set
+    # Base minimal config without any of the boolean flags set.
+    # Note: explicit null is no longer equivalent to absent under the
+    # pydantic schema's StrictBool fields (Phase 3 Task 3.3) -- a deliberate
+    # tightening, not a regression: `flag: null` in YAML was a silent no-op
+    # under the old dict-based validator.
     validate_config(minimal_config)

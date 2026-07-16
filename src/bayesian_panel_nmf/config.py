@@ -22,6 +22,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StrictBool,
+    StrictInt,
     ValidationError,
     model_validator,
 )
@@ -204,10 +205,10 @@ class CutConfig(BaseModel):
 
     model_config = _STRICT
 
-    num_stage1_draws: int = 25
-    stage2_draws_per_component: int | None = 100
-    selection_seed: int | None = None
-    stage2_seed: int | None = None
+    num_stage1_draws: StrictInt = Field(default=25, gt=0)
+    stage2_draws_per_component: StrictInt | None = Field(default=100, gt=0)
+    selection_seed: StrictInt | None = None
+    stage2_seed: StrictInt | None = None
     stage2_mcmc: dict[str, Any] | None = None
 
     @model_validator(mode="after")

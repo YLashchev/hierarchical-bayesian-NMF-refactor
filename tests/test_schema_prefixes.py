@@ -165,7 +165,7 @@ def test_validate_config_rejects_non_dict_model_types(panel_csv: Path) -> None:
     )
     config["model"] = {"types": []}
 
-    with pytest.raises(ConfigError, match="must be dict"):
+    with pytest.raises(ConfigError, match="valid dictionary"):
         validate_config(config)
 
 

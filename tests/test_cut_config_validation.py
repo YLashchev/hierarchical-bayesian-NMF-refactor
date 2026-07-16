@@ -7,13 +7,14 @@ from bayesian_panel_nmf.validation import ConfigError, validate_config
 
 def _base_config(**model_over):
     model = {
-        "types": {"total": {"groups": ["total"]}},
+        "types": {"total": {"groups": ["total"], "ranks_to_test": [1]}},
         "inference_mode": "cut",
     }
     model.update(model_over)
     return {
         "data": {
             "input_file": "x.csv",
+            "output_dir": "results",
             "schema": {
                 "unit_col": "state",
                 "time_col": "time",
@@ -46,7 +47,7 @@ def test_cut_requires_model_treated():
 def test_cut_block_type_checks():
     cfg = _base_config()
     cfg["cut"] = "nope"
-    with pytest.raises(ConfigError, match="cut.*dict"):
+    with pytest.raises(ConfigError, match="cut"):
         validate_config(cfg)
 
 
