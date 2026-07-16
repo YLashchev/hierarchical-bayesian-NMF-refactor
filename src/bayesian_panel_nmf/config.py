@@ -24,10 +24,17 @@ from pydantic import (
     StrictBool,
     StrictInt,
     ValidationError,
+    field_validator,
     model_validator,
 )
 
+from bayesian_panel_nmf.plots import PLOT_REGISTRY
 from bayesian_panel_nmf.validation import ConfigError
+
+# Canonical figure names accepted by output.figures list form. Imported
+# directly from PLOT_REGISTRY (rather than a hardcoded duplicate set) so the
+# two can't drift.
+_FIGURE_NAMES = frozenset(PLOT_REGISTRY.keys())
 
 _STRICT = ConfigDict(extra="forbid")
 
@@ -185,7 +192,11 @@ class OutputConfig(BaseModel):
 
     model_config = _STRICT
 
-    figures: StrictBool = False
+    # Declared type is the post-validation canonical form (list of registry
+    # names to render); the validator below accepts the wider input spelling
+    # (bool / "all" / "none" / list) and normalizes before pydantic's own
+    # list[str] coercion runs.
+    figures: list[str] = Field(default_factory=list)
     clean: StrictBool = False
     save_traces: StrictBool = False
     target_unit: str | None = None
@@ -198,6 +209,41 @@ class OutputConfig(BaseModel):
     ppc_acf_lags: list[int] | None = None
     ppc_unit_corr_max_time: str | None = None
     draws_format: Literal["csv", "parquet"] = "csv"
+
+    @field_validator("figures", mode="before")
+    @classmethod
+    def _normalize_figures(cls, v: Any) -> list[str]:
+        """Normalize every accepted spelling to the canonical form: a list of
+        registry names to render (empty list means render none).
+
+        Accepts ``bool`` (true -> all registry names, false -> []),
+        ``"all"``/``"none"``, or an explicit ``list[str]`` subset (unknown
+        names rejected against ``PLOT_REGISTRY``). Rejects quoted-string
+        booleans (e.g. ``"false"``) the same way ``StrictBool`` elsewhere in
+        this schema does, rather than silently truthy-coercing them.
+        """
+        if isinstance(v, bool):
+            return sorted(_FIGURE_NAMES) if v else []
+        if v == "all":
+            return sorted(_FIGURE_NAMES)
+        if v == "none":
+            return []
+        if isinstance(v, str):
+            raise ValueError(
+                f"output.figures string value must be 'all' or 'none', got {v!r}"
+            )
+        if not isinstance(v, list):
+            raise ValueError(
+                f"output.figures must be a bool, 'all', 'none', or a list of "
+                f"figure names; got {v!r}"
+            )
+        unknown = [name for name in v if name not in _FIGURE_NAMES]
+        if unknown:
+            raise ValueError(
+                f"output.figures contains unknown figure name(s) {unknown}; "
+                f"valid names are {sorted(_FIGURE_NAMES)}"
+            )
+        return list(v)
 
 
 class CutConfig(BaseModel):

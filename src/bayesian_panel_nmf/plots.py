@@ -6,6 +6,7 @@ D=units, N=time periods.
 """
 
 import warnings
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -2036,3 +2037,23 @@ def make_all_ppc_plots(
 
     logger.info("PPC plots completed.")
     return results
+
+
+# -----------------------------------------------------------------------------
+# Figure selection registry
+# -----------------------------------------------------------------------------
+
+# Stable name -> figure-producing function, used by config.OutputConfig.figures
+# to select which figures reporting.generate_reports() renders. Keep in sync
+# with config.py's imported keys (config.py imports PLOT_REGISTRY directly, so
+# there is no separate list to drift). ``summary_table`` is a table, not a
+# figure, and is intentionally not included here -- reporting.py always
+# renders it regardless of ``output.figures``.
+PLOT_REGISTRY: dict[str, Callable] = {
+    "unit_fit": make_unit_fit_plot,
+    "unit_gap": make_unit_gap_plot,
+    "raw_rate": make_raw_rate_plot,
+    "interval": make_interval_plot,
+    "group_comparison": make_group_comparison_plot,
+    "ppc": make_all_ppc_plots,
+}

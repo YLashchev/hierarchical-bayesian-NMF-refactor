@@ -17,9 +17,15 @@ BOOL_PATHS = [
     ("model", "adjust_for_missingness"),
     ("model", "model_treated"),
     ("mcmc", "progress_bar"),
-    ("output", "figures"),
     ("output", "clean"),
 ]
+
+# output.figures is intentionally NOT a plain StrictBool (Phase 7.3): it
+# accepts bool | list[str] | Literal["all", "none"] so output.figures can
+# select a PLOT_REGISTRY subset. It still rejects quoted-string booleans
+# (see test_figures_quoted_bool_rejected below), just with a different
+# error message than the other pure-boolean fields.
+FIGURES_PATH = ("output", "figures")
 
 
 @pytest.fixture
@@ -96,6 +102,25 @@ def test_nested_total_all_accepted(minimal_config):
         }
     }
     validate_config(minimal_config)
+
+
+@pytest.mark.parametrize("bad_value", ["false", "true", "False", "True", "yes", 1, 0])
+def test_figures_quoted_bool_rejected(minimal_config, bad_value):
+    _set_nested_val(minimal_config, FIGURES_PATH, bad_value)
+    with pytest.raises(ConfigError):
+        validate_config(minimal_config)
+
+
+@pytest.mark.parametrize("good_value", [True, False, "all", "none", [], ["interval"]])
+def test_figures_accepted_spellings(minimal_config, good_value):
+    _set_nested_val(minimal_config, FIGURES_PATH, good_value)
+    validate_config(minimal_config)
+
+
+def test_figures_unknown_name_rejected(minimal_config):
+    _set_nested_val(minimal_config, FIGURES_PATH, ["bogus"])
+    with pytest.raises(ConfigError, match="unknown figure name"):
+        validate_config(minimal_config)
 
 
 def test_flag_absent_ok(minimal_config):

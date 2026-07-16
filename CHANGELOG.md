@@ -13,6 +13,15 @@ All notable changes to this project will be documented in this file.
 - Opt-in Parquet output for the large draws artifact via `output.draws_format`
   (`"csv"` default, or `"parquet"`); applies only to the joint/cut combined
   draws files, never the human-facing summary/table CSVs.
+- `PLOT_REGISTRY` in `plots.py` (`unit_fit`, `unit_gap`, `raw_rate`,
+  `interval`, `group_comparison`, `ppc`) plus config-driven figure
+  selection: `output.figures` now accepts `bool | list[str] | "all"/"none"`
+  (previously a plain boolean), normalizing to the set of registry names to
+  render. `reporting.generate_reports()` gained a `figures: list[str] | None`
+  parameter (`None` = render everything, back-compat default) that selects
+  which registry entries render; always-on tables (`summary_table.csv` etc.)
+  are unaffected by this selection. See documentation.md's Visualization
+  section.
 
 ### Changed
 
@@ -37,6 +46,12 @@ All notable changes to this project will be documented in this file.
   call surface this package uses.
 - Raised `requires-python` to `>=3.12,<3.15`; dropped the direct `jaxlib`
   pin (resolved transitively via `jax`).
+- `plots.py` teardown: extracted three private helpers
+  (`_new_fig`/`_new_grid_fig`, `_empty_placeholder_fig`, `_finalize`) that
+  dedup the repeated `plt.subplots`/empty-data-placeholder/tight_layout
+  scaffolding across all 11 `make_*` plotting functions. No data-producing
+  computation changed; every `make_*` signature and return type is
+  unchanged (verified bit-identical against `tests/test_golden.py`).
 
 ## 0.1.0
 

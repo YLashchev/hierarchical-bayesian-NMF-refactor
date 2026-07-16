@@ -26,6 +26,7 @@ from loguru import logger
 
 from .aggregate_units import add_aggregate_units
 from .plots import (
+    PLOT_REGISTRY,
     make_all_ppc_plots,
     make_group_comparison_plot,
     make_interval_plot,
@@ -86,8 +87,9 @@ def generate_reports(
     ppc_unit_corr_max_time: str | None = None,
     ppc_exclude_units: list[str] | None = None,
     ppc_draws_df: pd.DataFrame | None = None,
+    figures: list[str] | None = None,
 ) -> dict:
-    """Generate all figures and tables from posterior draws.
+    """Generate figures and tables from posterior draws.
 
     For each outcome group present in ``draws_df`` (or each group in
     ``groups`` if provided), per-unit plots (fit, gap, raw_rate) are
@@ -119,12 +121,30 @@ def generate_reports(
         full Stage-1 posterior with untreated ypred). All other figures and
         tables continue to use ``draws_df``. Reporting-only aggregate units
         are applied to it before plotting.
+    figures : list of str, optional
+        Subset of ``PLOT_REGISTRY`` names to render (``"unit_fit", "unit_gap",
+        "raw_rate", "interval", "group_comparison", "ppc"``). ``None``
+        (default) renders every registry entry, matching the pre-selection
+        behavior. An empty list renders none. Unknown names raise
+        ``ValueError``. Tables (summary_table, expected_vs_observed,
+        post_treatment_summary) are always written regardless of this
+        selection -- only PLOT_REGISTRY figures are gated.
 
     Returns
     -------
     dict with keys: ``summary``, ``per_unit``, ``detail``, ``target_unit``,
     ``groups``, ``figs_dir``, ``treated_units``.
     """
+    if figures is None:
+        selected_figures = set(PLOT_REGISTRY)
+    else:
+        unknown_figures = [name for name in figures if name not in PLOT_REGISTRY]
+        if unknown_figures:
+            raise ValueError(
+                f"figures contains unknown name(s) {unknown_figures}; valid "
+                f"names are {sorted(PLOT_REGISTRY)}"
+            )
+        selected_figures = set(figures)
     # Lazy import: AGENTS.md forbids top-level matplotlib/pyplot outside
     # plots.py. matplotlib is already loaded transitively via
     # ``from .plots import ...`` above; this binds local names for
@@ -175,53 +195,61 @@ def generate_reports(
     for grp in report_groups:
         grp_figs_dir = figs_dir / grp if len(report_groups) > 1 else figs_dir
         grp_figs_dir.mkdir(parents=True, exist_ok=True)
-        logger.debug(f"  [{grp}] fit + gap + raw_rate")
 
-        fig, _ = make_unit_fit_plot(quantiles_df, target_unit, group=grp)
-        fig.savefig(
-            grp_figs_dir / f"fit_{target_slug}.png", dpi=150, bbox_inches="tight"
-        )
-        plt.close(fig)
+        if "unit_fit" in selected_figures:
+            logger.debug(f"  [{grp}] fit")
+            fig, _ = make_unit_fit_plot(quantiles_df, target_unit, group=grp)
+            fig.savefig(
+                grp_figs_dir / f"fit_{target_slug}.png", dpi=150, bbox_inches="tight"
+            )
+            plt.close(fig)
 
-        fig, _ = make_unit_gap_plot(quantiles_df, target_unit, group=grp)
-        fig.savefig(
-            grp_figs_dir / f"gap_{target_slug}.png", dpi=150, bbox_inches="tight"
-        )
-        plt.close(fig)
+        if "unit_gap" in selected_figures:
+            logger.debug(f"  [{grp}] gap")
+            fig, _ = make_unit_gap_plot(quantiles_df, target_unit, group=grp)
+            fig.savefig(
+                grp_figs_dir / f"gap_{target_slug}.png", dpi=150, bbox_inches="tight"
+            )
+            plt.close(fig)
 
-        fig, _ = make_raw_rate_plot(draws_df, group=grp, separate_unit=target_unit)
-        fig.savefig(grp_figs_dir / "raw_rate.png", dpi=150, bbox_inches="tight")
-        plt.close(fig)
+        if "raw_rate" in selected_figures:
+            logger.debug(f"  [{grp}] raw_rate")
+            fig, _ = make_raw_rate_plot(draws_df, group=grp, separate_unit=target_unit)
+            fig.savefig(grp_figs_dir / "raw_rate.png", dpi=150, bbox_inches="tight")
+            plt.close(fig)
 
     # ---- Cross-group figures (interval, comparison, PPC) ---------------------
-    logger.debug("  interval (percent change)")
-    fig, ax = make_interval_plot(
-        draws_df, group_var="unit", estimand="ratio", method="mu"
-    )
-    ax.set_xlabel("Percent Change (%)", fontsize=12)
-    fig.savefig(figs_dir / "interval.png", dpi=150, bbox_inches="tight")
-    plt.close(fig)
+    if "interval" in selected_figures:
+        logger.debug("  interval (percent change)")
+        fig, ax = make_interval_plot(
+            draws_df, group_var="unit", estimand="ratio", method="mu"
+        )
+        ax.set_xlabel("Percent Change (%)", fontsize=12)
+        fig.savefig(figs_dir / "interval.png", dpi=150, bbox_inches="tight")
+        plt.close(fig)
 
-    logger.debug("  group_comparison")
-    fig, _ = make_group_comparison_plot(draws_df)
-    fig.savefig(figs_dir / "group_comparison.png", dpi=150, bbox_inches="tight")
-    plt.close(fig)
+    if "group_comparison" in selected_figures:
+        logger.debug("  group_comparison")
+        fig, _ = make_group_comparison_plot(draws_df)
+        fig.savefig(figs_dir / "group_comparison.png", dpi=150, bbox_inches="tight")
+        plt.close(fig)
 
-    logger.debug("  ppc/*")
-    ppc_dir = figs_dir / "ppc"
-    ppc_dir.mkdir(parents=True, exist_ok=True)
-    if ppc_draws_df is not None:
-        ppc_source = add_aggregate_units(ppc_draws_df, aggregate_units or [])
-    else:
-        ppc_source = draws_for_reporting
-    make_all_ppc_plots(
-        ppc_source,
-        output_dir=str(ppc_dir),
-        acf_lags=ppc_acf_lags or [6],
-        max_treat_date=ppc_unit_corr_max_time,
-        ppc_units=ppc_units,
-        ppc_exclude_units=ppc_exclude_units,
-    )
+    if "ppc" in selected_figures:
+        logger.debug("  ppc/*")
+        ppc_dir = figs_dir / "ppc"
+        ppc_dir.mkdir(parents=True, exist_ok=True)
+        if ppc_draws_df is not None:
+            ppc_source = add_aggregate_units(ppc_draws_df, aggregate_units or [])
+        else:
+            ppc_source = draws_for_reporting
+        make_all_ppc_plots(
+            ppc_source,
+            output_dir=str(ppc_dir),
+            acf_lags=ppc_acf_lags or [6],
+            max_treat_date=ppc_unit_corr_max_time,
+            ppc_units=ppc_units,
+            ppc_exclude_units=ppc_exclude_units,
+        )
 
     # ---- Tables ---------------------------------------------------------------
     summary = make_summary_table(draws_for_reporting, target_unit)

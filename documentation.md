@@ -101,8 +101,10 @@ of `outcomes` (explicit list of `{outcome_col, label, denominator_col?}`) or
 
 ### `output`
 
-`figures` (false), `clean` (false), `save_traces` (false), `print_tables` (true),
-`print_target_table` (true); optional reporting filters `target_unit`, `report_groups`,
+`figures` (false — see [Visualization](#visualization) for the full
+`bool | list[str] | "all"/"none"` selection semantics), `clean` (false),
+`save_traces` (false), `print_tables` (true), `print_target_table` (true);
+optional reporting filters `target_unit`, `report_groups`,
 `aggregate_units`, `ppc_units`, `ppc_exclude_units`, `ppc_acf_lags` (unset →
 `[6]` at report time), `ppc_unit_corr_max_time`. `draws_format` (`"csv"` default, or `"parquet"`) controls
 only the large draws artifact (joint draws / cut combined draws); human-facing
@@ -116,6 +118,40 @@ tables (`df_{type}.csv`, `summary_table*.csv`, `expected_vs_observed.csv`,
 (overlay on `mcmc` for the cheaper conditional fits). The distinct seed offsets keep
 draw *selection* independent of the draws themselves; setting `stage2_mcmc.random_seed`
 is rejected (`cut.stage2_seed` is the authority).
+
+---
+
+## Visualization
+
+`bayesian_panel_nmf.plots.PLOT_REGISTRY` maps a stable name to each
+figure-producing `make_*` function. `output.figures` selects which registry
+entries `reporting.generate_reports()` renders; `summary_table` (and the
+other CSV tables) is not in the registry and always renders regardless of
+this selection.
+
+| Registry name | Function | Artifact |
+| --- | --- | --- |
+| `unit_fit` | `make_unit_fit_plot` | `fit_<target>.png` |
+| `unit_gap` | `make_unit_gap_plot` | `gap_<target>.png` |
+| `raw_rate` | `make_raw_rate_plot` | `raw_rate.png` |
+| `interval` | `make_interval_plot` | `interval.png` |
+| `group_comparison` | `make_group_comparison_plot` | `group_comparison.png` |
+| `ppc` | `make_all_ppc_plots` | `ppc/*.png`, `ppc/ppc_pvalues.csv` |
+
+`output.figures` accepts:
+
+- `true` (default-equivalent "render everything") or `false` (render no
+  figures) — the original boolean spelling still works.
+- `"all"` / `"none"` — explicit string spellings of the same two extremes.
+- a list of registry names, e.g. `figures: ["interval", "ppc"]` — renders
+  only those. Unknown names are rejected at config-load time.
+
+All spellings normalize to a canonical `list[str]` (the names to render).
+`scripts/run_analysis.py` skips reporting entirely (no figures *and* no
+tables) when the normalized selection is empty, matching the pre-existing
+`figures: false` behavior. Calling `reporting.generate_reports(..., figures=
+["interval"])` directly always still writes the always-on tables — only the
+PLOT_REGISTRY figures are gated at that level.
 
 ---
 
@@ -149,6 +185,7 @@ Regenerate figures from a saved draws file without re-running MCMC:
 ```bash
 uv run scripts/generate_full_viz.py --results results/total/NB_births_total_3.csv
 ```
+
 (`--results` accepts either the `.csv` or `.parquet` draws file.)
 
 ---

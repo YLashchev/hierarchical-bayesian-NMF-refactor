@@ -198,6 +198,7 @@ def _run_reporting(
         ppc_unit_corr_max_time=output_config.ppc_unit_corr_max_time,
         ppc_exclude_units=output_config.ppc_exclude_units,
         ppc_draws_df=ppc_draws_df,
+        figures=output_config.figures,
     )
 
 
