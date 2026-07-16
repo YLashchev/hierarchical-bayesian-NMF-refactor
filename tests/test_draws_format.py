@@ -5,25 +5,19 @@ exercise ``_write_draws``/``_read_draws`` in ``scripts/run_analysis.py``
 directly against a tiny synthetic frame -- no MCMC run required.
 """
 
-import importlib.util
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
+from bayesian_panel_nmf import pipeline as _pipeline_module
 from bayesian_panel_nmf.config import Config
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def _load_run_analysis():
-    spec = importlib.util.spec_from_file_location(
-        "run_analysis_draws_format_test", ROOT / "scripts" / "run_analysis.py"
-    )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return _pipeline_module
 
 
 @pytest.fixture(scope="module")

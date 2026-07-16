@@ -6,12 +6,44 @@ filepaths, group lists) at runtime, as opposed to validation.py's config-shape
 checks which are now delegated to the pydantic schema in config.py.
 """
 
+import shutil
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+from loguru import logger
 
 from bayesian_panel_nmf.validation import DataError
+
+
+def _safe_rmtree(path: Path, allowed_parent: Path) -> None:
+    """Remove a directory tree only if strictly inside ``allowed_parent``.
+
+    Refuses to remove ``allowed_parent`` itself, its ancestors, or any path
+    that is not a descendant of it. Intended for cleaning per-type
+    subdirectories under a user-configured output root.
+    """
+    path = Path(path).resolve()
+    allowed_parent = Path(allowed_parent).resolve()
+
+    if path == allowed_parent:
+        logger.warning(f"Refusing to remove output root: {path}")
+        return
+
+    try:
+        rel = path.relative_to(allowed_parent)
+    except ValueError:
+        logger.warning(
+            f"Refusing to remove path outside output root {allowed_parent}: {path}"
+        )
+        return
+
+    # `relative_to` succeeds even for `.`; guard against empty relative path too
+    if rel == Path("."):
+        logger.warning(f"Refusing to remove output root: {path}")
+        return
+
+    shutil.rmtree(path, ignore_errors=True)
 
 
 def validate_filepath(filepath: str) -> Path:

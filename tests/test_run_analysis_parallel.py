@@ -1,10 +1,10 @@
-import importlib.util
-import sys
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
+from bayesian_panel_nmf import pipeline as run_analysis
+from bayesian_panel_nmf.checks import _safe_rmtree
 from bayesian_panel_nmf.config import Config
 from bayesian_panel_nmf.inference import generate_predictions
 from bayesian_panel_nmf.models import model
@@ -32,16 +32,6 @@ def _config(**overrides) -> Config:
     return Config.model_validate(data)
 
 
-RUN_ANALYSIS_PATH = Path(__file__).resolve().parents[1] / "scripts" / "run_analysis.py"
-RUN_ANALYSIS_SPEC = importlib.util.spec_from_file_location(
-    "test_run_analysis_module", RUN_ANALYSIS_PATH
-)
-assert RUN_ANALYSIS_SPEC is not None and RUN_ANALYSIS_SPEC.loader is not None
-run_analysis = importlib.util.module_from_spec(RUN_ANALYSIS_SPEC)
-sys.modules.setdefault("test_run_analysis_module", run_analysis)
-RUN_ANALYSIS_SPEC.loader.exec_module(run_analysis)
-
-
 def test_run_analysis_config_requires_model_types():
     """A complete config missing only model.types still raises ConfigError
     from _validate_run_analysis_config's own check (the generic schema
@@ -55,7 +45,7 @@ def test_safe_rmtree_refuses_project_root(tmp_path: Path):
     project_root = tmp_path / "project"
     project_root.mkdir()
 
-    run_analysis._safe_rmtree(project_root, project_root)
+    _safe_rmtree(project_root, project_root)
 
     assert project_root.exists()
 
@@ -66,7 +56,7 @@ def test_safe_rmtree_refuses_path_outside_root(tmp_path: Path):
     outside = tmp_path / "outside"
     outside.mkdir()
 
-    run_analysis._safe_rmtree(outside, project_root)
+    _safe_rmtree(outside, project_root)
 
     assert outside.exists()
 
@@ -77,7 +67,7 @@ def test_safe_rmtree_removes_child_directory(tmp_path: Path):
     child.mkdir(parents=True)
     (child / "file.txt").write_text("x")
 
-    run_analysis._safe_rmtree(child, project_root)
+    _safe_rmtree(child, project_root)
 
     assert not child.exists()
 

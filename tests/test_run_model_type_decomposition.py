@@ -5,24 +5,14 @@ _prepare_type_output_dir (Tier 2b of the repo clarity refactor). These two
 behaviors previously had no direct test — only end-to-end coverage of the
 happy path via test_run_model_type_without_figures_does_not_import_viz."""
 
-import importlib.util
 import json
-import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+from bayesian_panel_nmf import pipeline as run_analysis
 from bayesian_panel_nmf.config import Config
-
-RUN_ANALYSIS_PATH = Path(__file__).resolve().parents[1] / "scripts" / "run_analysis.py"
-RUN_ANALYSIS_SPEC = importlib.util.spec_from_file_location(
-    "test_run_model_type_decomp_module", RUN_ANALYSIS_PATH
-)
-assert RUN_ANALYSIS_SPEC is not None and RUN_ANALYSIS_SPEC.loader is not None
-run_analysis = importlib.util.module_from_spec(RUN_ANALYSIS_SPEC)
-sys.modules.setdefault("test_run_model_type_decomp_module", run_analysis)
-RUN_ANALYSIS_SPEC.loader.exec_module(run_analysis)
 
 
 def _config(**overrides) -> Config:

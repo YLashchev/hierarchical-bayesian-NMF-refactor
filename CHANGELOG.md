@@ -32,6 +32,19 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Extracted the analysis-pipeline orchestration out of `scripts/run_analysis.py`
+  into a new `src/bayesian_panel_nmf/pipeline.py` (Phase 9.1 of the legibility
+  refactor): `run_model_type`, `_run_sequential`, `_run_single_rank`,
+  `_run_cut_rank`, `_publish_cut_artifacts`, `_prepare_type_output_dir`,
+  `_run_reporting`, `_clean_scoped_samples`, `_write_draws`, `_read_draws`,
+  `_draws_filename`, `_get_outcome_name`, `_validate_run_analysis_config`,
+  `_select_types_to_run` moved verbatim. `scripts/run_analysis.py` keeps only
+  the module-top `numpyro.set_host_device_count()` call, `_parse_args`,
+  `load_config`, `_apply_mcmc_overrides`, `_format_elapsed`, and `main()`
+  (argparse/CLI split is Phase 9.2). Also moved `_safe_rmtree` into
+  `checks.py` (it is a runtime filesystem-safety guard, not orchestration).
+  Behavior, draws/table outputs, and the `set_host_device_count`-before-jax
+  import ordering are unchanged; golden output remains bit-identical.
 - Renamed modules for legibility (internal import paths changed):
   `visualization`→`plots`, `mcmc_utils`→`parallelism`, `cut_inference`→`cut`,
   `output`+`cut_output`→`results`, `models/panel_nmf_model`→`models/joint`,

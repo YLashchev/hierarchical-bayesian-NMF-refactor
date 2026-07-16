@@ -10,6 +10,9 @@ from pathlib import Path
 
 import pytest
 
+from bayesian_panel_nmf import pipeline
+from bayesian_panel_nmf.validation import ConfigError
+
 RUN_ANALYSIS_PATH = Path(__file__).resolve().parents[1] / "scripts" / "run_analysis.py"
 RUN_ANALYSIS_SPEC = importlib.util.spec_from_file_location(
     "test_run_analysis_main_decomp_module", RUN_ANALYSIS_PATH
@@ -18,8 +21,6 @@ assert RUN_ANALYSIS_SPEC is not None and RUN_ANALYSIS_SPEC.loader is not None
 run_analysis = importlib.util.module_from_spec(RUN_ANALYSIS_SPEC)
 sys.modules.setdefault("test_run_analysis_main_decomp_module", run_analysis)
 RUN_ANALYSIS_SPEC.loader.exec_module(run_analysis)
-
-from bayesian_panel_nmf.validation import ConfigError  # noqa: E402
 
 
 def _minimal_config(tmp_path):
@@ -53,7 +54,7 @@ def test_main_runs_all_types_when_no_type_flag_given(monkeypatch, tmp_path):
 
     called_types = []
     monkeypatch.setattr(
-        run_analysis,
+        pipeline,
         "run_model_type",
         lambda **kwargs: called_types.append(kwargs["model_type"]),
     )
@@ -73,7 +74,7 @@ def test_main_runs_only_requested_type_when_type_flag_given(monkeypatch, tmp_pat
 
     called_types = []
     monkeypatch.setattr(
-        run_analysis,
+        pipeline,
         "run_model_type",
         lambda **kwargs: called_types.append(kwargs["model_type"]),
     )

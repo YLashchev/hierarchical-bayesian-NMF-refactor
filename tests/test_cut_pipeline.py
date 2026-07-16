@@ -4,7 +4,6 @@ Runs real tiny NUTS fits -- expect ~1-2 minutes wall time for this file.
 """
 
 import filecmp
-import importlib.util
 import json
 from pathlib import Path
 
@@ -12,19 +11,14 @@ import pandas as pd
 import pytest
 from cut_fixtures import RANK, D, K, N, make_cut_data_dict
 
+from bayesian_panel_nmf import pipeline as _run_analysis_module
 from bayesian_panel_nmf.config import Config
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def _load_run_analysis():
-    spec = importlib.util.spec_from_file_location(
-        "run_analysis_cut_test", ROOT / "scripts" / "run_analysis.py"
-    )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return _run_analysis_module
 
 
 _data_dict = make_cut_data_dict
