@@ -26,6 +26,9 @@ All notable changes to this project will be documented in this file.
 - Split `arrays.py` out of `data.py` and vectorized the (K, D, N) array build
   (replaced a per-row `DataFrame.iterrows()` loop with a categorical-codes
   scatter). Output is bit-identical.
+- Moved the convergence gate (`convergence_summary`) from `inference.py` into a
+  dedicated `diagnostics.py`. Still exported as
+  `bayesian_panel_nmf.convergence_summary` (public API unchanged).
 - Upgraded the core stack to JAX 0.10 / NumPyro 0.21 / ArviZ 1.2 (DataTree).
   Posterior draws are not bit-comparable to pre-upgrade runs because JAX's
   default PRNG changed (`jax_threefry_partitionable`); statistical results

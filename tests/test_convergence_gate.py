@@ -3,7 +3,7 @@
 import arviz as az
 import numpy as np
 
-from bayesian_panel_nmf.inference import convergence_summary
+from bayesian_panel_nmf.diagnostics import convergence_summary
 
 
 def _idata(chains: np.ndarray, diverging: np.ndarray | None = None):

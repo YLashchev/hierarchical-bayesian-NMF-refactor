@@ -153,6 +153,29 @@ uv run scripts/generate_full_viz.py --results results/total/NB_births_total_3.cs
 
 ---
 
+## Interpreting diagnostics
+
+Every MCMC run writes a `*_convergence.json` gate next to the draws
+(`bayesian_panel_nmf.diagnostics.convergence_summary`). It reports four numbers
+and a verdict:
+
+| Field | Meaning | Pass threshold |
+| ----- | ------- | -------------- |
+| `rhat_max` | worst rank-normalized R-hat across parameters | `< 1.01` |
+| `ess_bulk_min` | smallest bulk effective sample size | `> 400` |
+| `ess_tail_min` | smallest tail effective sample size | (reported; not gated) |
+| `divergences` | total divergent transitions | `== 0` |
+| `converged` | `true` only if R-hat, bulk ESS, and divergences all pass | — |
+
+A failed gate logs a warning and the run continues — it never silently drops
+output. On failure: increase `mcmc.num_warmup`/`num_samples`, or investigate
+with the trace sidecars (run with `--save-traces`, then
+`scripts/analyze_traces.py` for the numeric table or `scripts/make_trace_plots.py`
+for visual traces). In cut mode the manifest reports Stage-1 and every Stage-2
+fit separately; diagnostics are never pooled across conditional targets.
+
+---
+
 ## Design decisions
 
 Rationale for choices that are surprising without context.

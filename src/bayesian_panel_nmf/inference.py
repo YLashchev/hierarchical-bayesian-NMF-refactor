@@ -1,12 +1,12 @@
-"""MCMC sampling, posterior prediction, and convergence diagnostics.
+"""MCMC sampling and posterior prediction.
 
 All settings read from a typed ``Config`` object (see ``config.py``) via
-attribute access rather than an untyped dict.
+attribute access rather than an untyped dict. The convergence gate lives in
+``diagnostics.py``.
 """
 
 import time
 from collections.abc import Callable
-from typing import Any
 
 import jax
 import numpy as np
@@ -22,30 +22,6 @@ from bayesian_panel_nmf.validation import (
     validate_data_dict,
     validate_rank,
 )
-
-
-def convergence_summary(idata) -> dict[str, Any]:
-    """Rank-normalized R-hat / bulk+tail ESS gate (Vehtari et al. 2021 via ArviZ).
-
-    Thresholds: R-hat < 1.01, bulk ESS > 400, zero divergences.
-    """
-    import arviz as az
-
-    stats = az.summary(idata, kind="diagnostics", round_to="none")
-    divergences = 0
-    if hasattr(idata, "sample_stats") and "diverging" in idata.sample_stats:
-        divergences = int(np.asarray(idata.sample_stats["diverging"]).sum())
-
-    result = {
-        "rhat_max": float(stats["r_hat"].max()),
-        "ess_bulk_min": float(stats["ess_bulk"].min()),
-        "ess_tail_min": float(stats["ess_tail"].min()),
-        "divergences": divergences,
-    }
-    result["converged"] = bool(
-        result["rhat_max"] < 1.01 and result["ess_bulk_min"] > 400 and divergences == 0
-    )
-    return result
 
 
 def run_mcmc_inference(

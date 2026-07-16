@@ -24,7 +24,7 @@ from loguru import logger
 from numpyro.infer import MCMC, NUTS
 
 from .config import Config
-from .inference import convergence_summary
+from .diagnostics import convergence_summary
 from .models.cut_baseline import stage1_model
 from .models.cut_treatment import stage2_model
 from .parallelism import choose_mcmc_parallelism

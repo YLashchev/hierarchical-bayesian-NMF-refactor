@@ -3,8 +3,8 @@
 __version__ = "0.1.0"
 
 from bayesian_panel_nmf.data import load_and_prepare
+from bayesian_panel_nmf.diagnostics import convergence_summary
 from bayesian_panel_nmf.inference import (
-    convergence_summary,
     generate_predictions,
     run_mcmc_inference,
 )
