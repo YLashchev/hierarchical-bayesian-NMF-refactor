@@ -47,6 +47,7 @@ def test_defaults_match_legacy():
     assert not cfg.data.allow_unbalanced_panel
     assert not cfg.data.aggregation.enabled
     assert cfg.data.aggregation.period == "bimonthly"
+    assert cfg.data.date_format == "auto"
     assert not cfg.output.figures
     assert cfg.output.print_tables
 

@@ -93,7 +93,9 @@ class DataConfig(BaseModel):
     input_file: str
     output_dir: str
     schema_: SchemaConfig = Field(alias="schema")
-    date_format: str | None = None
+    # "auto" triggers data.py's format auto-detection branch; matches the
+    # legacy .get("date_format", "auto") default. Must stay "auto", not None.
+    date_format: str = "auto"
     start_date: str | None = None
     end_date: str | None = None
     aggregation: AggregationConfig = Field(default_factory=AggregationConfig)
