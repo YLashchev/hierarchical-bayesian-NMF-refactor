@@ -103,8 +103,8 @@ of `outcomes` (explicit list of `{outcome_col, label, denominator_col?}`) or
 
 `figures` (false), `clean` (false), `save_traces` (false), `print_tables` (true),
 `print_target_table` (true); optional reporting filters `target_unit`, `report_groups`,
-`aggregate_units`, `ppc_units`, `ppc_exclude_units`, `ppc_acf_lags` (default `[6]`),
-`ppc_unit_corr_max_time`. `draws_format` (`"csv"` default, or `"parquet"`) controls
+`aggregate_units`, `ppc_units`, `ppc_exclude_units`, `ppc_acf_lags` (unset →
+`[6]` at report time), `ppc_unit_corr_max_time`. `draws_format` (`"csv"` default, or `"parquet"`) controls
 only the large draws artifact (joint draws / cut combined draws); human-facing
 tables (`df_{type}.csv`, `summary_table*.csv`, `expected_vs_observed.csv`,
 `post_treatment_summary.csv`, `ppc_pvalues.csv`, `stage1_ppc.csv`) always stay CSV.
@@ -116,3 +116,72 @@ tables (`df_{type}.csv`, `summary_table*.csv`, `expected_vs_observed.csv`,
 (overlay on `mcmc` for the cheaper conditional fits). The distinct seed offsets keep
 draw *selection* independent of the draws themselves; setting `stage2_mcmc.random_seed`
 is rejected (`cut.stage2_seed` is the authority).
+
+---
+
+## Output artifacts
+
+Each model type writes to `<output_dir>/<type>/`. Draws filenames follow
+`{distribution}_{outcome}_{type}_{rank}` (e.g. `NB_births_total_3`); cut mode
+appends `_cut`.
+
+### Joint mode
+
+| File | Contents |
+| ---- | -------- |
+| `{stem}.csv` or `.parquet` | Tidy posterior draws (one row per draw × group × unit × time): `.draw/.chain/.iteration`, `unit/time/group`, `outcome/denominator/treatment`, `ypred` (counterfactual untreated), `mu` (log-rate control), `mu_treated`. Format set by `output.draws_format`. This is the large artifact (100 MB–1 GB for multi-group types). |
+| `{stem}_convergence.json` | Always-on gate: `{rhat_max, ess_bulk_min, ess_tail_min, divergences, converged}` (R-hat<1.01, bulk ESS>400, 0 divergences). |
+| `df_{type}.csv` | Preprocessed observed data (standardized columns). |
+| `{stem}_traces.nc` | Full posterior NetCDF sidecar (only with `--save-traces`). |
+| `figs/` | PPC panels, fit/gap/interval/raw-rate plots, summary tables (when `output.figures: true`). |
+
+### Cut mode (two-stage) — additional files
+
+| File | Contents |
+| ---- | -------- |
+| `{stem}_cut.csv`/`.parquet` | Combined Stage-2 draws with provenance columns `cut_component, stage1_draw, stage1_chain, stage1_iteration`. `.draw` is globally unique across components; `.chain`/`.iteration` are the real Stage-2 chain/subsample index. |
+| `{stem}_cut_stage1_ppc.csv` | Full Stage-1 posterior-predictive draws (feeds the PPC suite only). Always CSV. |
+| `{stem}_cut_convergence.json` | Per-stage manifest: Stage-1 gate + every conditional Stage-2 fit's gate; top-level `converged` true only if Stage 1 and all components passed. |
+| `{stem}_cut_stage1_traces.nc`, `{stem}_cut_stage2_traces/component_*.nc` | Trace sidecars (only with `--save-traces`). |
+
+Regenerate figures from a saved draws file without re-running MCMC:
+
+```bash
+uv run scripts/generate_full_viz.py --results results/total/NB_births_total_3.csv
+```
+(`--results` accepts either the `.csv` or `.parquet` draws file.)
+
+---
+
+## Design decisions
+
+Rationale for choices that are surprising without context.
+
+### Why cut mode uses separate RNG seeds per step
+
+The base `mcmc.random_seed` drives the Stage-1 MCMC; `+1` is the Stage-1
+posterior-predictive stream; `+2` (`cut.selection_seed`) draws the
+chain-stratified subset of Stage-1 draws carried into Stage 2; `+3`
+(`cut.stage2_seed`) drives the Stage-2 fits. The streams must be **distinct**
+so that *which* Stage-1 draws get selected is statistically independent of the
+draws themselves and of the Stage-2 sampling — reusing a stream would correlate
+selection with the values being selected and bias the nested Monte Carlo
+approximation. An explicit `cut.stage2_mcmc.random_seed` is therefore rejected:
+`cut.stage2_seed` is the single Stage-2 seed authority.
+
+### Why Stage-1 and Stage-2 model code is duplicated, not shared
+
+The cut posterior is `p(φ|Z)·p(θ|Y,φ)` — exposed outcomes must never feed back
+into the untreated baseline. `models/joint.py`, `models/cut_baseline.py`, and
+`models/cut_treatment.py` deliberately duplicate the factor/treatment blocks
+rather than import shared helpers, so an edit to one cannot silently change the
+other's isolation guarantee. Parity is enforced by `tests/test_cut_model_parity.py`
+instead of by code sharing.
+
+### Why single-CPU hosts run chains sequentially
+
+`choose_mcmc_parallelism` (in `parallelism.py`) picks `chain_method` from the
+visible JAX devices: sequential on one CPU, vectorized on one GPU, parallel
+across multiple devices. XLA's CPU backend shares one thread pool across
+logical devices, so forcing multiple CPU devices for `parallel` gives no clean
+speedup — sequential is the honest default rather than false parallelism.

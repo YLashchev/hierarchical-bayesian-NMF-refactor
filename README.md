@@ -33,7 +33,7 @@ When that finishes cleanly, run the full analysis:
 uv run scripts/run_analysis.py --config configs/fertility_config.yaml
 ```
 
-Chain-level parallelism is chosen automatically from the visible JAX devices (`mcmc.auto_parallelism: true`, the default): a single-CPU host runs `mcmc.max_chains` chains sequentially, a single GPU runs them vectorized on that device, and a multi-device host (multiple CPUs exposed via `numpyro.set_host_device_count`, or multiple GPUs/TPUs) runs them in parallel across devices, capped at the visible device count. See `src/bayesian_panel_nmf/mcmc_utils.py::choose_mcmc_parallelism` for the exact rules. Model types configured under `model.types` always run sequentially, one after another, in a single process.
+Chain-level parallelism is chosen automatically from the visible JAX devices (`mcmc.auto_parallelism: true`, the default): a single-CPU host runs `mcmc.max_chains` chains sequentially, a single GPU runs them vectorized on that device, and a multi-device host (multiple CPUs exposed via `numpyro.set_host_device_count`, or multiple GPUs/TPUs) runs them in parallel across devices, capped at the visible device count. See `src/bayesian_panel_nmf/parallelism.py::choose_mcmc_parallelism` for the exact rules. Model types configured under `model.types` always run sequentially, one after another, in a single process.
 
 Both write posterior draws + preprocessed data to `results/<type>/` (and figures under `results/<type>/figs/` when `output.figures: true`).
 

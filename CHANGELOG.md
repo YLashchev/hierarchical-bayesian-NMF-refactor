@@ -16,6 +16,16 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Renamed modules for legibility (internal import paths changed):
+  `visualization`→`plots`, `mcmc_utils`→`parallelism`, `cut_inference`→`cut`,
+  `output`+`cut_output`→`results`, `models/panel_nmf_model`→`models/joint`,
+  `models/utils`→`models/likelihood`,
+  `models/cut_stage1_model`→`models/cut_baseline`,
+  `models/cut_stage2_model`→`models/cut_treatment`. Public API
+  (`from bayesian_panel_nmf import ...`) is unchanged.
+- Split `arrays.py` out of `data.py` and vectorized the (K, D, N) array build
+  (replaced a per-row `DataFrame.iterrows()` loop with a categorical-codes
+  scatter). Output is bit-identical.
 - Upgraded the core stack to JAX 0.10 / NumPyro 0.21 / ArviZ 1.2 (DataTree).
   Posterior draws are not bit-comparable to pre-upgrade runs because JAX's
   default PRNG changed (`jax_threefry_partitionable`); statistical results
