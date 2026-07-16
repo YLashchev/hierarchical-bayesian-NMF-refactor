@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 from bayesian_panel_nmf.cut import Stage1DrawRef
-from bayesian_panel_nmf.cut_output import (
+from bayesian_panel_nmf.results import (
     build_cut_convergence_manifest,
     format_cut_component_draws,
     format_stage1_ppc_draws,

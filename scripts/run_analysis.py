@@ -47,7 +47,7 @@ from bayesian_panel_nmf.inference import (  # noqa: E402
 )
 from bayesian_panel_nmf.logging_config import setup_logging  # noqa: E402
 from bayesian_panel_nmf.models import model  # noqa: E402
-from bayesian_panel_nmf.output import format_draws  # noqa: E402
+from bayesian_panel_nmf.results import format_draws  # noqa: E402
 from bayesian_panel_nmf.validation import ConfigError  # noqa: E402
 
 
@@ -130,7 +130,7 @@ def _draws_filename(config: Config, model_type: str, rank: int) -> str:
 def _clean_scoped_samples(mcmc, model_type: str, rank: int) -> dict:
     """Filter scoped ('/') sample keys via output.drop_scoped_samples, with
     per-run debug logging of what was dropped."""
-    from bayesian_panel_nmf.output import drop_scoped_samples
+    from bayesian_panel_nmf.results import drop_scoped_samples
 
     raw_samples = mcmc.get_samples(group_by_chain=True)
     clean_samples = drop_scoped_samples(raw_samples)
@@ -331,7 +331,7 @@ def _run_cut_rank(
         summarize_mcmc,
         validate_cut_data,
     )
-    from bayesian_panel_nmf.cut_output import (
+    from bayesian_panel_nmf.results import (
         build_cut_convergence_manifest,
         format_cut_component_draws,
         format_stage1_ppc_draws,

@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from bayesian_panel_nmf.output import format_draws
+from bayesian_panel_nmf.results import format_draws
 from bayesian_panel_nmf.validation import DataError
 
 
