@@ -8,7 +8,25 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
+from bayesian_panel_nmf.config import Config
 from bayesian_panel_nmf.inference import generate_predictions, run_mcmc_inference
+
+_MINIMAL_DATA = {
+    "input_file": "unused.csv",
+    "output_dir": "unused",
+    "schema": {
+        "unit_col": "state",
+        "time_col": "time",
+        "treatment_col": "exposed",
+        "outcomes": [{"outcome_col": "births_total", "label": "total"}],
+    },
+}
+
+
+def _config(model=None, mcmc=None):
+    return Config.model_validate(
+        {"data": _MINIMAL_DATA, "model": model or {}, "mcmc": mcmc or {}}
+    )
 
 
 def _minimal_data_dict():
@@ -27,7 +45,7 @@ def _minimal_data_dict():
 
 def test_run_mcmc_inference_defaults_outcome_dist_to_nb_when_absent():
     data_dict = _minimal_data_dict()
-    config = {"mcmc": {"num_chains": 1}, "model": {}}
+    config = _config(mcmc={"num_chains": 1})
 
     with patch("bayesian_panel_nmf.inference.MCMC") as mock_mcmc_cls:
         mock_mcmc = MagicMock()
@@ -46,14 +64,14 @@ def test_run_mcmc_inference_defaults_outcome_dist_to_nb_when_absent():
 
 def test_run_mcmc_inference_uses_configured_outcome_dist_when_present():
     data_dict = _minimal_data_dict()
-    config = {
-        "mcmc": {"num_chains": 1},
-        "model": {
+    config = _config(
+        mcmc={"num_chains": 1},
+        model={
             "outcome_distribution": "Poisson",
             "nb_disp": 0.5,
             "sample_disp": True,
         },
-    }
+    )
 
     with patch("bayesian_panel_nmf.inference.MCMC") as mock_mcmc_cls:
         mock_mcmc = MagicMock()
@@ -72,7 +90,7 @@ def test_run_mcmc_inference_uses_configured_outcome_dist_when_present():
 
 def test_generate_predictions_defaults_outcome_dist_to_nb_when_absent():
     data_dict = {"denominators": np.ones((1, 1, 1))}
-    config = {"mcmc": {}, "model": {}}
+    config = _config()
 
     mock_mcmc = MagicMock()
     mock_mcmc.get_samples.return_value = {"mu": np.zeros((1,))}
@@ -94,14 +112,13 @@ def test_generate_predictions_defaults_outcome_dist_to_nb_when_absent():
 
 def test_generate_predictions_uses_configured_outcome_dist_when_present():
     data_dict = {"denominators": np.ones((1, 1, 1))}
-    config = {
-        "mcmc": {},
-        "model": {
+    config = _config(
+        model={
             "outcome_distribution": "Poisson",
             "nb_disp": 0.5,
             "sample_disp": True,
         },
-    }
+    )
 
     mock_mcmc = MagicMock()
     mock_mcmc.get_samples.return_value = {"mu": np.zeros((1,))}

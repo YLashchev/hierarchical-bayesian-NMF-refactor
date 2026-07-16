@@ -13,6 +13,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from bayesian_panel_nmf.config import Config
+
 RUN_ANALYSIS_PATH = Path(__file__).resolve().parents[1] / "scripts" / "run_analysis.py"
 RUN_ANALYSIS_SPEC = importlib.util.spec_from_file_location(
     "test_run_model_type_decomp_module", RUN_ANALYSIS_PATH
@@ -21,6 +23,24 @@ assert RUN_ANALYSIS_SPEC is not None and RUN_ANALYSIS_SPEC.loader is not None
 run_analysis = importlib.util.module_from_spec(RUN_ANALYSIS_SPEC)
 sys.modules.setdefault("test_run_model_type_decomp_module", run_analysis)
 RUN_ANALYSIS_SPEC.loader.exec_module(run_analysis)
+
+
+def _config(**overrides) -> Config:
+    data = {
+        "data": {
+            "input_file": "unused.csv",
+            "output_dir": "unused",
+            "schema": {
+                "unit_col": "unit",
+                "time_col": "time",
+                "treatment_col": "treated",
+                "outcomes": [{"outcome_col": "y", "label": "total"}],
+            },
+        },
+        "model": {"types": {"total": {"groups": ["total"], "ranks_to_test": [1]}}},
+    }
+    data.update(overrides)
+    return Config.model_validate(data)
 
 
 class _DummyMCMC:
@@ -93,16 +113,25 @@ def test_clean_true_removes_existing_type_output_dir_before_rerun(
     stale_file = type_output_dir / "stale_leftover.csv"
     stale_file.write_text("old data that must be removed")
 
-    type_config = {"groups": ["total"], "ranks_to_test": [1]}
-    config = {
-        "data": {"input_file": "unused.csv", "output_dir": str(output_dir)},
-        "model": {"types": {"total": type_config}},
-        "output": {"figures": False, "clean": True},
-    }
+    type_config_dict = {"groups": ["total"], "ranks_to_test": [1]}
+    config = _config(
+        data={
+            "input_file": "unused.csv",
+            "output_dir": str(output_dir),
+            "schema": {
+                "unit_col": "unit",
+                "time_col": "time",
+                "treatment_col": "treated",
+                "outcomes": [{"outcome_col": "y", "label": "total"}],
+            },
+        },
+        model={"types": {"total": type_config_dict}},
+        output={"figures": False, "clean": True},
+    )
 
     run_analysis.run_model_type(
         model_type="total",
-        type_config=type_config,
+        type_config=config.model.types["total"],
         config=config,
         rank_override=None,
         log_level="INFO",
@@ -145,16 +174,25 @@ def test_convergence_gate_failure_logs_warning_but_does_not_abort(
         ),
     )
 
-    type_config = {"groups": ["total"], "ranks_to_test": [1]}
-    config = {
-        "data": {"input_file": "unused.csv", "output_dir": str(output_dir)},
-        "model": {"types": {"total": type_config}},
-        "output": {"figures": False},
-    }
+    type_config_dict = {"groups": ["total"], "ranks_to_test": [1]}
+    config = _config(
+        data={
+            "input_file": "unused.csv",
+            "output_dir": str(output_dir),
+            "schema": {
+                "unit_col": "unit",
+                "time_col": "time",
+                "treatment_col": "treated",
+                "outcomes": [{"outcome_col": "y", "label": "total"}],
+            },
+        },
+        model={"types": {"total": type_config_dict}},
+        output={"figures": False},
+    )
 
     run_analysis.run_model_type(
         model_type="total",
-        type_config=type_config,
+        type_config=config.model.types["total"],
         config=config,
         rank_override=None,
         log_level="INFO",

@@ -5,9 +5,32 @@ from typing import Any, cast
 
 import pytest
 
+from bayesian_panel_nmf.config import Config
 from bayesian_panel_nmf.inference import generate_predictions
 from bayesian_panel_nmf.models import model
 from bayesian_panel_nmf.validation import ConfigError, DataError
+
+_MINIMAL_SCHEMA = {
+    "unit_col": "unit",
+    "time_col": "time",
+    "treatment_col": "treated",
+    "outcomes": [{"outcome_col": "y", "label": "total"}],
+}
+
+
+def _config(**overrides) -> Config:
+    """A complete, minimal Config; overrides replace top-level sections."""
+    data = {
+        "data": {
+            "input_file": "unused.csv",
+            "output_dir": "unused",
+            "schema": _MINIMAL_SCHEMA,
+        },
+        "model": {"types": {"total": {"groups": ["total"], "ranks_to_test": [1]}}},
+    }
+    data.update(overrides)
+    return Config.model_validate(data)
+
 
 RUN_ANALYSIS_PATH = Path(__file__).resolve().parents[1] / "scripts" / "run_analysis.py"
 RUN_ANALYSIS_SPEC = importlib.util.spec_from_file_location(
@@ -19,37 +42,13 @@ sys.modules.setdefault("test_run_analysis_module", run_analysis)
 RUN_ANALYSIS_SPEC.loader.exec_module(run_analysis)
 
 
-def test_run_analysis_config_requires_model_section():
-    with pytest.raises(ConfigError, match="config missing 'model' section"):
-        run_analysis._validate_run_analysis_config(
-            {
-                "data": {
-                    "schema": {
-                        "unit_col": "unit",
-                        "time_col": "time",
-                        "treatment_col": "treated",
-                        "outcomes": [{"outcome_col": "y", "label": "total"}],
-                    }
-                }
-            }
-        )
-
-
 def test_run_analysis_config_requires_model_types():
+    """A complete config missing only model.types still raises ConfigError
+    from _validate_run_analysis_config's own check (the generic schema
+    validation already ran inside Config.model_validate)."""
+    config = _config(model={})
     with pytest.raises(ConfigError, match="missing 'types' section"):
-        run_analysis._validate_run_analysis_config(
-            {
-                "data": {
-                    "schema": {
-                        "unit_col": "unit",
-                        "time_col": "time",
-                        "treatment_col": "treated",
-                        "outcomes": [{"outcome_col": "y", "label": "total"}],
-                    }
-                },
-                "model": {},
-            }
-        )
+        run_analysis._validate_run_analysis_config(config)
 
 
 def test_safe_rmtree_refuses_project_root(tmp_path: Path):
@@ -106,7 +105,7 @@ def test_generate_predictions_raises_when_samples_not_divisible_by_chains(monkey
             data_dict={"denominators": __import__("numpy").ones((1, 1, 1))},
             model_fn=model,
             rank=1,
-            config={"mcmc": {"random_seed": 1}, "model": {}},
+            config=_config(mcmc={"random_seed": 1}, model={}),
         )
 
 
@@ -181,16 +180,20 @@ def test_run_model_type_without_figures_does_not_import_viz(
         ),
     )
 
-    type_config = {"groups": ["total"], "ranks_to_test": [1]}
-    config = {
-        "data": {"input_file": "unused.csv", "output_dir": str(output_dir)},
-        "model": {"types": {"total": type_config}},
-        "output": {"figures": False},
-    }
+    type_config_dict = {"groups": ["total"], "ranks_to_test": [1]}
+    config = _config(
+        data={
+            "input_file": "unused.csv",
+            "output_dir": str(output_dir),
+            "schema": _MINIMAL_SCHEMA,
+        },
+        model={"types": {"total": type_config_dict}},
+        output={"figures": False},
+    )
 
     run_analysis.run_model_type(
         model_type="total",
-        type_config=type_config,
+        type_config=config.model.types["total"],
         config=config,
         rank_override=None,
         log_level="INFO",
@@ -206,31 +209,79 @@ def test_run_model_type_without_figures_does_not_import_viz(
 # ---------------------------------------------------------------------------
 
 
+def _data_with_schema(**data_overrides) -> dict:
+    data = {
+        "input_file": "unused.csv",
+        "output_dir": "unused",
+        "schema": {
+            "unit_col": "unit",
+            "time_col": "time",
+            "treatment_col": "treated",
+            "outcomes_from_prefixes": {"outcome_prefix": "births_"},
+        },
+    }
+    data.update(data_overrides)
+    return data
+
+
 def test_get_outcome_name_explicit_override():
-    assert run_analysis._get_outcome_name({"data": {"outcome": "deaths"}}) == "deaths"
+    config = _config(data=_data_with_schema(outcome="deaths"))
+    assert run_analysis._get_outcome_name(config) == "deaths"
 
 
 def test_get_outcome_name_derives_from_prefix_with_underscore():
-    config = {
-        "data": {"schema": {"outcomes_from_prefixes": {"outcome_prefix": "births_"}}}
-    }
+    config = _config(
+        data=_data_with_schema(
+            schema={
+                "unit_col": "unit",
+                "time_col": "time",
+                "treatment_col": "treated",
+                "outcomes_from_prefixes": {"outcome_prefix": "births_"},
+            }
+        )
+    )
     assert run_analysis._get_outcome_name(config) == "births"
 
 
 def test_get_outcome_name_derives_from_prefix_without_underscore():
-    config = {
-        "data": {"schema": {"outcomes_from_prefixes": {"outcome_prefix": "deaths"}}}
-    }
+    config = _config(
+        data=_data_with_schema(
+            schema={
+                "unit_col": "unit",
+                "time_col": "time",
+                "treatment_col": "treated",
+                "outcomes_from_prefixes": {"outcome_prefix": "deaths"},
+            }
+        )
+    )
     assert run_analysis._get_outcome_name(config) == "deaths"
 
 
 def test_get_outcome_name_fallback_when_neither_set():
-    assert run_analysis._get_outcome_name({"data": {}}) == "births"
-    assert run_analysis._get_outcome_name({}) == "births"
+    config = _config(
+        data=_data_with_schema(
+            schema={
+                "unit_col": "unit",
+                "time_col": "time",
+                "treatment_col": "treated",
+                "outcomes": [{"outcome_col": "y", "label": "total"}],
+            }
+        )
+    )
+    assert run_analysis._get_outcome_name(config) == "births"
 
 
 def test_get_outcome_name_empty_prefix_falls_back():
-    config = {"data": {"schema": {"outcomes_from_prefixes": {"outcome_prefix": ""}}}}
+    config = _config(
+        data=_data_with_schema(
+            schema={
+                "unit_col": "unit",
+                "time_col": "time",
+                "treatment_col": "treated",
+                "outcomes_from_prefixes": {"outcome_prefix": ""},
+            }
+        )
+    )
     assert run_analysis._get_outcome_name(config) == "births"
 
 
@@ -240,12 +291,13 @@ def test_get_outcome_name_empty_prefix_falls_back():
 
 
 def test_draws_filename_fixed_scheme():
-    config = {
-        "model": {"outcome_distribution": "NB"},
-        "data": {"outcome": "births"},
-    }
+    config = _config(
+        model={"outcome_distribution": "NB"},
+        data=_data_with_schema(outcome="births"),
+    )
     assert run_analysis._draws_filename(config, "total", 5) == "NB_births_total_5"
 
 
 def test_draws_filename_default_distribution_and_outcome():
-    assert run_analysis._draws_filename({}, "groups", 3) == "NB_births_groups_3"
+    config = _config()
+    assert run_analysis._draws_filename(config, "groups", 3) == "NB_births_groups_3"

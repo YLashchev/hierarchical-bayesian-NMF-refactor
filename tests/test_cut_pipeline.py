@@ -12,6 +12,8 @@ import pandas as pd
 import pytest
 from cut_fixtures import RANK, D, K, N, make_cut_data_dict
 
+from bayesian_panel_nmf.config import Config
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -29,32 +31,45 @@ _data_dict = make_cut_data_dict
 
 
 def _config():
-    return {
-        "model": {
-            "inference_mode": "cut",
-            "outcome_distribution": "NB",
-            "nb_disp": 1e-4,
-            "sample_disp": False,
-            "adjust_for_missingness": True,
-            "model_treated": True,
-        },
-        "mcmc": {
-            "auto_parallelism": False,
-            "num_chains": 2,
-            "chain_method": "sequential",
-            "num_warmup": 15,
-            "num_samples": 16,
-            "thinning": 1,
-            "random_seed": 0,
-            "progress_bar": False,
-        },
-        "cut": {
-            "num_stage1_draws": 2,
-            "stage2_draws_per_component": 4,
-            "stage2_mcmc": {"num_warmup": 15, "num_samples": 16},
-        },
-        "output": {},
-    }
+    return Config.model_validate(
+        {
+            "data": {
+                "input_file": "unused.csv",
+                "output_dir": "unused",
+                "schema": {
+                    "unit_col": "state",
+                    "time_col": "time",
+                    "treatment_col": "exposed",
+                    "outcomes": [{"outcome_col": "births_total", "label": "total"}],
+                },
+            },
+            "model": {
+                "inference_mode": "cut",
+                "outcome_distribution": "NB",
+                "nb_disp": 1e-4,
+                "sample_disp": False,
+                "adjust_for_missingness": True,
+                "model_treated": True,
+                "types": {"total": {"groups": ["total"], "ranks_to_test": [1]}},
+            },
+            "mcmc": {
+                "auto_parallelism": False,
+                "num_chains": 2,
+                "chain_method": "sequential",
+                "num_warmup": 15,
+                "num_samples": 16,
+                "thinning": 1,
+                "random_seed": 0,
+                "progress_bar": False,
+            },
+            "cut": {
+                "num_stage1_draws": 2,
+                "stage2_draws_per_component": 4,
+                "stage2_mcmc": {"num_warmup": 15, "num_samples": 16},
+            },
+            "output": {},
+        }
+    )
 
 
 @pytest.fixture(scope="module")
@@ -73,7 +88,7 @@ def _run(ra, out_dir: Path) -> str:
         type_output_dir=out_dir,
         ranks=[RANK],
         save_traces=True,
-        output_config={"figures": False},
+        output_config=config.output,
     )
     return f"{ra._draws_filename(config, 'total', RANK)}_cut"
 
@@ -133,8 +148,9 @@ def test_joint_config_never_reaches_cut_path(ra, monkeypatch):
     called = []
     monkeypatch.setattr(ra, "_run_cut_rank", lambda *a, **k: called.append(True))
 
-    config = _config()
-    del config["model"]["inference_mode"]
+    config = _config().model_copy(
+        update={"model": _config().model.model_copy(update={"inference_mode": None})}
+    )
     with pytest.raises(RuntimeError, match="joint path reached"):
         ra._run_single_rank(
             rank=RANK,
@@ -144,7 +160,7 @@ def test_joint_config_never_reaches_cut_path(ra, monkeypatch):
             type_output_dir=Path("/nonexistent"),
             ranks=[RANK],
             save_traces=False,
-            output_config={},
+            output_config=config.output,
         )
     assert called == []
 
@@ -157,15 +173,16 @@ def test_cut_config_dispatches_before_joint_body(ra, monkeypatch):
         raise AssertionError("joint body must not run in cut mode")
 
     monkeypatch.setattr(ra, "run_mcmc_inference", boom)
+    config = _config()
     ra._run_single_rank(
         rank=RANK,
         data_dict={},
         model_type="total",
-        config=_config(),
+        config=config,
         type_output_dir=Path("/nonexistent"),
         ranks=[RANK],
         save_traces=False,
-        output_config={},
+        output_config=config.output,
     )
     assert called == [True]
 
@@ -175,15 +192,16 @@ def test_execution_failure_publishes_nothing(ra, tmp_path, monkeypatch):
 
     dd = _data_dict()
     dd["missing_idx_array"] = ~dd["control_idx_array"]  # no exposed nonmissing
+    config = _config()
     with pytest.raises(DataError):
         ra._run_cut_rank(
             rank=RANK,
             data_dict=dd,
             model_type="total",
-            config=_config(),
+            config=config,
             type_output_dir=tmp_path,
             ranks=[RANK],
             save_traces=False,
-            output_config={"figures": False},
+            output_config=config.output,
         )
     assert list(tmp_path.iterdir()) == []

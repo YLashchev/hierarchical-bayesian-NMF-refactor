@@ -4,6 +4,7 @@ import jax
 import numpy as np
 from cut_fixtures import RANK, D, K, N, make_cut_data_dict
 
+from bayesian_panel_nmf.config import Config
 from bayesian_panel_nmf.cut import (
     resolve_cut_settings,
     run_stage1_mcmc,
@@ -16,7 +17,17 @@ from bayesian_panel_nmf.cut import (
 _data_dict = make_cut_data_dict
 
 
-CONFIG = {
+CONFIG_DICT = {
+    "data": {
+        "input_file": "unused.csv",
+        "output_dir": "unused",
+        "schema": {
+            "unit_col": "state",
+            "time_col": "time",
+            "treatment_col": "exposed",
+            "outcomes": [{"outcome_col": "births_total", "label": "total"}],
+        },
+    },
     "model": {
         "outcome_distribution": "NB",
         "nb_disp": 1e-4,
@@ -24,6 +35,7 @@ CONFIG = {
         "adjust_for_missingness": True,
         "model_treated": True,
         "inference_mode": "cut",
+        "types": {"total": {"groups": ["total"], "ranks_to_test": [1]}},
     },
     "mcmc": {
         "auto_parallelism": False,
@@ -37,6 +49,7 @@ CONFIG = {
     },
     "cut": {"num_stage1_draws": 2, "stage2_draws_per_component": 4},
 }
+CONFIG = Config.model_validate(CONFIG_DICT)
 
 
 def test_stage1_and_stage2_runners_end_to_end():
@@ -58,7 +71,7 @@ def test_stage1_and_stage2_runners_end_to_end():
     }
 
     settings = resolve_cut_settings(CONFIG)
-    refs = select_stage1_draws(fit1.samples, settings, CONFIG["model"])
+    refs = select_stage1_draws(fit1.samples, settings, CONFIG.model.model_dump())
     assert len(refs) == 2
 
     fit2 = run_stage2_mcmc(

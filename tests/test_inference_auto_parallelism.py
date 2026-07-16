@@ -9,6 +9,24 @@ import numpy as np
 from loguru import logger
 
 from bayesian_panel_nmf import inference
+from bayesian_panel_nmf.config import Config
+
+_MINIMAL_DATA = {
+    "input_file": "unused.csv",
+    "output_dir": "unused",
+    "schema": {
+        "unit_col": "state",
+        "time_col": "time",
+        "treatment_col": "exposed",
+        "outcomes": [{"outcome_col": "births_total", "label": "total"}],
+    },
+}
+
+
+def _config(model: dict | None = None, mcmc: dict | None = None) -> Config:
+    return Config.model_validate(
+        {"data": _MINIMAL_DATA, "model": model or {}, "mcmc": mcmc or {}}
+    )
 
 
 class _DummyMCMC:
@@ -47,7 +65,7 @@ def test_auto_parallelism_true_uses_choose_mcmc_parallelism(monkeypatch):
         _minimal_data_dict(),
         model_fn=lambda **kwargs: None,
         rank=1,
-        config={"model": {}, "mcmc": {"max_chains": 4}},
+        config=_config(mcmc={"max_chains": 4}),
     )
 
     assert mcmc.kwargs["num_chains"] == 2
@@ -70,7 +88,7 @@ def test_auto_parallelism_true_is_the_default_when_key_absent(monkeypatch):
         _minimal_data_dict(),
         model_fn=lambda **kwargs: None,
         rank=1,
-        config={"model": {}, "mcmc": {}},
+        config=_config(),
     )
 
     assert called == [4]  # default max_chains when absent
@@ -92,14 +110,13 @@ def test_auto_parallelism_false_uses_literal_config_values(monkeypatch):
         _minimal_data_dict(),
         model_fn=lambda **kwargs: None,
         rank=1,
-        config={
-            "model": {},
-            "mcmc": {
+        config=_config(
+            mcmc={
                 "auto_parallelism": False,
                 "num_chains": 6,
                 "chain_method": "vectorized",
-            },
-        },
+            }
+        ),
     )
 
     assert mcmc.kwargs["num_chains"] == 6
@@ -125,10 +142,7 @@ def test_auto_parallelism_false_defaults_chain_method_to_sequential(monkeypatch)
         _minimal_data_dict(),
         model_fn=lambda **kwargs: None,
         rank=1,
-        config={
-            "model": {},
-            "mcmc": {"auto_parallelism": False, "num_chains": 4},
-        },
+        config=_config(mcmc={"auto_parallelism": False, "num_chains": 4}),
     )
 
     assert mcmc.kwargs["num_chains"] == 4
@@ -156,14 +170,13 @@ def test_parallel_on_single_device_warns_silent_fallback(monkeypatch):
             _minimal_data_dict(),
             model_fn=lambda **kwargs: None,
             rank=1,
-            config={
-                "model": {},
-                "mcmc": {
+            config=_config(
+                mcmc={
                     "auto_parallelism": False,
                     "num_chains": 4,
                     "chain_method": "parallel",
-                },
-            },
+                }
+            ),
         )
     finally:
         logger.remove(sink_id)
@@ -185,14 +198,13 @@ def test_parallel_on_multi_device_does_not_warn(monkeypatch):
             _minimal_data_dict(),
             model_fn=lambda **kwargs: None,
             rank=1,
-            config={
-                "model": {},
-                "mcmc": {
+            config=_config(
+                mcmc={
                     "auto_parallelism": False,
                     "num_chains": 4,
                     "chain_method": "parallel",
-                },
-            },
+                }
+            ),
         )
     finally:
         logger.remove(sink_id)

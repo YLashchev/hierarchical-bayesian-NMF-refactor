@@ -89,11 +89,14 @@ def test_valid_cut_block_accepted():
 
 from loguru import logger  # noqa: E402
 
+from bayesian_panel_nmf.config import Config  # noqa: E402
 from bayesian_panel_nmf.cut import resolve_cut_settings  # noqa: E402
 
 
 def test_defaults_resolved_from_minimal_config():
-    s = resolve_cut_settings({"mcmc": {"random_seed": 100}})
+    cfg = _base_config()
+    cfg["mcmc"] = {"random_seed": 100}
+    s = resolve_cut_settings(Config.model_validate(cfg))
     assert s.num_stage1_draws == 25
     assert s.selection_seed == 102
     assert s.stage2_seed == 103
@@ -101,16 +104,22 @@ def test_defaults_resolved_from_minimal_config():
 
 
 def test_explicit_null_per_component_means_keep_all():
-    s = resolve_cut_settings({"cut": {"stage2_draws_per_component": None}})
+    cfg = _base_config()
+    cfg["cut"] = {"stage2_draws_per_component": None}
+    s = resolve_cut_settings(Config.model_validate(cfg))
     assert s.stage2_draws_per_component is None
 
 
 def test_stage2_mcmc_overlay_inherits_base():
-    cfg = {
-        "mcmc": {"num_warmup": 2000, "thinning": 5, "max_chains": 4, "random_seed": 1},
-        "cut": {"stage2_mcmc": {"num_warmup": 100}},
+    cfg = _base_config()
+    cfg["mcmc"] = {
+        "num_warmup": 2000,
+        "thinning": 5,
+        "max_chains": 4,
+        "random_seed": 1,
     }
-    s = resolve_cut_settings(cfg)
+    cfg["cut"] = {"stage2_mcmc": {"num_warmup": 100}}
+    s = resolve_cut_settings(Config.model_validate(cfg))
     assert s.stage2_mcmc["num_warmup"] == 100
     assert s.stage2_mcmc["thinning"] == 5
     assert s.stage2_mcmc["max_chains"] == 4
@@ -118,10 +127,13 @@ def test_stage2_mcmc_overlay_inherits_base():
 
 
 def test_seed_collision_warns():
+    cfg = _base_config()
+    cfg["mcmc"] = {"random_seed": 7}
+    cfg["cut"] = {"selection_seed": 7}
     messages: list[str] = []
     sink_id = logger.add(lambda m: messages.append(str(m)), level="WARNING")
     try:
-        resolve_cut_settings({"mcmc": {"random_seed": 7}, "cut": {"selection_seed": 7}})
+        resolve_cut_settings(Config.model_validate(cfg))
     finally:
         logger.remove(sink_id)
     assert any("collides" in m for m in messages)
