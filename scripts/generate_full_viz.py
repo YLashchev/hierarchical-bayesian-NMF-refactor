@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from bayesian_panel_nmf.reporting import generate_reports
+from bayesian_panel_nmf.reports import generate_reports
 
 _ROOT = Path(__file__).resolve().parent
 

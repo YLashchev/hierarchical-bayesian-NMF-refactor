@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import bayesian_panel_nmf.reporting as reporting
+import bayesian_panel_nmf.reports as reporting
 
 
 def _draws_frame(units=("u0", "u1"), marker=0.0):

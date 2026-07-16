@@ -8,7 +8,7 @@ from rich.console import Console
 
 from bayesian_panel_nmf import plots
 from bayesian_panel_nmf.plots import make_abs_ppc_plot, make_all_ppc_plots
-from bayesian_panel_nmf.reporting import (
+from bayesian_panel_nmf.reports import (
     _compute_per_unit_post_treatment,
     _print_rich_tables,
     generate_reports,

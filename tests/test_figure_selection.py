@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import bayesian_panel_nmf.reporting as reporting
+import bayesian_panel_nmf.reports as reporting
 from bayesian_panel_nmf.config import OutputConfig
 from bayesian_panel_nmf.plots import PLOT_REGISTRY
 

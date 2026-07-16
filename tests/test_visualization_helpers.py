@@ -5,10 +5,10 @@ import pytest
 from bayesian_panel_nmf.plots import (
     _detect_outcome_column,
     make_interval_plot,
-    make_summary_table,
     make_unit_fit_plot,
     make_unit_gap_plot,
 )
+from bayesian_panel_nmf.tables import make_summary_table
 
 
 def test_prefers_standard_outcome():

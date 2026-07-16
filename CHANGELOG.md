@@ -32,6 +32,18 @@ All notable changes to this project will be documented in this file.
   `models/cut_stage1_model`→`models/cut_baseline`,
   `models/cut_stage2_model`→`models/cut_treatment`. Public API
   (`from bayesian_panel_nmf import ...`) is unchanged.
+- Split `reporting.py` into `reports.py` (orchestration entry point,
+  `generate_reports()`) and a new `tables.py` (table computation + rich
+  terminal rendering, no matplotlib): moved `make_summary_table` out of
+  `plots.py` (it had zero matplotlib references) and moved
+  `_compute_quantiles`, `_auto_detect_target`, `_slug`,
+  `_compute_per_unit_post_treatment`, `_print_rich_tables` out of
+  `reporting.py`/`reports.py`. Table math is unchanged (verified
+  bit-identical against golden CSVs); import paths changed:
+  `bayesian_panel_nmf.reporting` → `.reports`,
+  `bayesian_panel_nmf.plots.make_summary_table` →
+  `bayesian_panel_nmf.tables.make_summary_table`. Public API
+  (`generate_reports`, `make_summary_table`) unchanged otherwise.
 - Split `arrays.py` out of `data.py` and vectorized the (K, D, N) array build
   (replaced a per-row `DataFrame.iterrows()` loop with a categorical-codes
   scatter). Output is bit-identical.

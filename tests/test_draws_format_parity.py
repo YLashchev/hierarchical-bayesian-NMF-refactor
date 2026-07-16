@@ -72,7 +72,7 @@ def _report_from(ra, draws_df: pd.DataFrame, stem_name: str, fmt: str, tmp: Path
     import matplotlib
     import matplotlib.pyplot as plt
 
-    import bayesian_panel_nmf.reporting as reporting
+    import bayesian_panel_nmf.reports as reporting
 
     stem = tmp / stem_name
     ra._write_draws(draws_df, stem, fmt)

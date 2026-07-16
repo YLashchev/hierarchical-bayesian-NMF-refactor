@@ -20,7 +20,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
-import numpy as np
 import pandas as pd
 from loguru import logger
 
@@ -31,43 +30,17 @@ from .plots import (
     make_group_comparison_plot,
     make_interval_plot,
     make_raw_rate_plot,
-    make_summary_table,
     make_unit_fit_plot,
     make_unit_gap_plot,
 )
-
-# -----------------------------------------------------------------------------
-# Helpers
-# -----------------------------------------------------------------------------
-
-
-def _compute_quantiles(draws_df: pd.DataFrame) -> pd.DataFrame:
-    """Aggregate posterior draws to mean/median/95% CI per (unit, time, group)."""
-    return (
-        draws_df.groupby(["unit", "time", "group", "outcome", "treatment"])["ypred"]
-        .agg(
-            ypred_mean="mean",
-            ypred_lower=lambda x: np.percentile(x, 2.5),
-            ypred_upper=lambda x: np.percentile(x, 97.5),
-            ypred_median="median",
-        )
-        .reset_index()
-    )
-
-
-def _auto_detect_target(draws_df: pd.DataFrame) -> str | None:
-    """Pick the unit with the most post-treatment observations."""
-    treated = draws_df[draws_df["treatment"] == 1]
-    if treated.empty:
-        return None
-    # Count unique (time) per unit to avoid inflating by draws
-    counts = treated.groupby("unit")["time"].nunique()
-    return str(counts.idxmax())
-
-
-def _slug(s: str) -> str:
-    return s.replace(" ", "_").lower()
-
+from .tables import (
+    _auto_detect_target,
+    _compute_per_unit_post_treatment,
+    _compute_quantiles,
+    _print_rich_tables,
+    _slug,
+    make_summary_table,
+)
 
 # -----------------------------------------------------------------------------
 # Main entry point
@@ -315,191 +288,3 @@ def generate_reports(
         "treated_units": treated_units,
     }
 
-
-# -----------------------------------------------------------------------------
-# Per-unit post-treatment table (mu-based, matches reference make_fertility_table)
-# -----------------------------------------------------------------------------
-
-
-def _compute_per_unit_post_treatment(
-    draws_df: pd.DataFrame, csv_path: Path
-) -> pd.DataFrame:
-    """Per-(unit, group) post-treatment totals matching reference R
-    ``make_fertility_table`` and the JAMA supplement per-state tables.
-
-    Estimands (identical to upstream R):
-        expected (untreated) = sum(exp(mu))           # counterfactual
-        treated              = sum(exp(mu_treated))    # model fit WITH treatment
-        excess               = treated - untreated      # "Expected difference"
-        excess_pct           = 100 * (treated/untreated - 1)   # percent change
-
-    ``observed`` is retained for transparency only; the supplement's per-state
-    excess estimand is the model-implied treatment effect (treated − untreated),
-    not observed minus the counterfactual. CI is the draw-level distribution
-    of sum(exp(mu)) / sum(exp(mu_treated)).
-    """
-    post = draws_df[draws_df["treatment"] == 1].copy()
-    if post.empty:
-        empty = pd.DataFrame(
-            columns=[
-                "unit",
-                "group",
-                "n_periods",
-                "observed",
-                "expected_mean",
-                "expected_lower_95",
-                "expected_upper_95",
-                "excess_mean",
-                "excess_lower_95",
-                "excess_upper_95",
-                "excess_pct_mean",
-                "excess_pct_lower_95",
-                "excess_pct_upper_95",
-            ]
-        )
-        empty.to_csv(csv_path, index=False)
-        return empty
-
-    def _draw_sums(g: pd.DataFrame) -> pd.Series:
-        return pd.Series(
-            {
-                "expected": float(np.sum(np.exp(g["mu"].to_numpy(dtype=float)))),
-                "treated": float(np.sum(np.exp(g["mu_treated"].to_numpy(dtype=float)))),
-            }
-        )
-
-    draw_sums = cast(
-        pd.DataFrame,
-        post.groupby(["unit", "group", ".draw"], observed=True)
-        .apply(_draw_sums, include_groups=False)
-        .reset_index(),
-    )
-
-    # observed is constant across draws per (unit, group, time);
-    # drop duplicate time rows to avoid double-counting, then sum.
-    observed_totals = cast(
-        pd.DataFrame,
-        post.drop_duplicates(["unit", "group", "time"])
-        .groupby(["unit", "group"], observed=True)
-        .agg(n_periods=("time", "nunique"), observed=("outcome", "sum"))
-        .reset_index(),
-    )
-
-    # Merge observed (transparency only) and compute the model-implied excess:
-    # treated - untreated, matching the supplement's per-state estimand.
-    draw_sums = draw_sums.merge(
-        observed_totals[["unit", "group", "observed"]],
-        on=["unit", "group"],
-        how="left",
-    )
-    draw_sums["excess"] = draw_sums["treated"] - draw_sums["expected"]
-    draw_sums["excess_pct"] = 100 * (draw_sums["treated"] / draw_sums["expected"] - 1)
-
-    stats = cast(
-        pd.DataFrame,
-        draw_sums.groupby(["unit", "group"], observed=True)
-        .agg(
-            expected_mean=("expected", "mean"),
-            expected_lower_95=("expected", lambda x: float(np.quantile(x, 0.025))),
-            expected_upper_95=("expected", lambda x: float(np.quantile(x, 0.975))),
-            excess_mean=("excess", "mean"),
-            excess_lower_95=("excess", lambda x: float(np.quantile(x, 0.025))),
-            excess_upper_95=("excess", lambda x: float(np.quantile(x, 0.975))),
-            excess_pct_mean=("excess_pct", "mean"),
-            excess_pct_lower_95=("excess_pct", lambda x: float(np.quantile(x, 0.025))),
-            excess_pct_upper_95=("excess_pct", lambda x: float(np.quantile(x, 0.975))),
-        )
-        .reset_index(),
-    )
-
-    per_unit = cast(
-        pd.DataFrame, observed_totals.merge(stats, on=["unit", "group"], how="left")
-    )
-    per_unit = cast(
-        pd.DataFrame, per_unit.sort_values("excess_pct_mean", ascending=False)
-    )
-    per_unit = per_unit[
-        [
-            "unit",
-            "group",
-            "n_periods",
-            "observed",
-            "expected_mean",
-            "expected_lower_95",
-            "expected_upper_95",
-            "excess_mean",
-            "excess_lower_95",
-            "excess_upper_95",
-            "excess_pct_mean",
-            "excess_pct_lower_95",
-            "excess_pct_upper_95",
-        ]
-    ]
-    per_unit.to_csv(csv_path, index=False)
-    return cast(pd.DataFrame, per_unit)
-
-
-# -----------------------------------------------------------------------------
-# Terminal rendering
-# -----------------------------------------------------------------------------
-
-
-def _print_rich_tables(
-    summary: pd.DataFrame,
-    per_unit: pd.DataFrame,
-    draws_df: pd.DataFrame,
-    target_unit: str,
-    print_target_table: bool = True,
-) -> None:
-    from rich.console import Console
-    from rich.table import Table
-
-    console = Console()
-
-    # Headline summary (Table 1)
-    if print_target_table:
-        t = Table(title=f"{target_unit} — Observed vs Expected", show_lines=False)
-        for col in summary.columns:
-            t.add_column(col, justify="right" if col != "Group" else "left")
-        for _, row in summary.iterrows():
-            t.add_row(*[str(v) for v in row.tolist()])
-        console.print(t)
-
-    # Per-unit post-treatment totals (Table 2)
-    t = Table(
-        title="Post-treatment totals by unit (ranked by % excess)",
-        show_lines=False,
-    )
-    t.add_column("Unit", justify="left")
-    t.add_column("Group", justify="left")
-    t.add_column("Periods", justify="right")
-    t.add_column("Observed", justify="right")
-    t.add_column("Expected (95% CI)", justify="right")
-    t.add_column("Excess (95% CI)", justify="right")
-    t.add_column("Excess % (95% CI)", justify="right")
-    for _, r in per_unit.iterrows():
-        row = r.to_dict()
-        style = "bold green" if row["unit"] == target_unit else None
-        exp_ci = (
-            f"{row['expected_mean']:,.0f} "
-            f"({row['expected_lower_95']:,.0f}, {row['expected_upper_95']:,.0f})"
-        )
-        excess_ci = (
-            f"{row['excess_mean']:+,.0f} "
-            f"({row['excess_lower_95']:+,.0f}, {row['excess_upper_95']:+,.0f})"
-        )
-        excess_pct_ci = (
-            f"{row['excess_pct_mean']:+.2f}% "
-            f"({row['excess_pct_lower_95']:+.2f}%, {row['excess_pct_upper_95']:+.2f}%)"
-        )
-        t.add_row(
-            str(row["unit"]),
-            str(row["group"]),
-            f"{int(row['n_periods'])}",
-            f"{row['observed']:,.0f}",
-            exp_ci,
-            excess_ci,
-            excess_pct_ci,
-            style=style,
-        )
-    console.print(t)

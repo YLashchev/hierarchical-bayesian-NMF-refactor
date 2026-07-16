@@ -178,7 +178,7 @@ def _run_reporting(
     ppc_draws_df=None,
 ) -> None:
     """Generate figures + tables under ``<output_dir>/figs/``."""
-    from bayesian_panel_nmf.reporting import generate_reports
+    from bayesian_panel_nmf.reports import generate_reports
 
     aggregate_units = (
         [spec.model_dump() for spec in output_config.aggregate_units]

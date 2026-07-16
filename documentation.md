@@ -125,9 +125,14 @@ is rejected (`cut.stage2_seed` is the authority).
 
 `bayesian_panel_nmf.plots.PLOT_REGISTRY` maps a stable name to each
 figure-producing `make_*` function. `output.figures` selects which registry
-entries `reporting.generate_reports()` renders; `summary_table` (and the
+entries `reports.generate_reports()` renders; `summary_table` (and the
 other CSV tables) is not in the registry and always renders regardless of
 this selection.
+
+Figure/table orchestration is split across three modules: `plots.py` (matplotlib
+plotting primitives), `tables.py` (pure pandas/numpy table computation plus rich
+terminal rendering — no matplotlib), and `reports.py` (`generate_reports()`,
+the orchestration entry point that calls into both).
 
 | Registry name | Function | Artifact |
 | --- | --- | --- |
@@ -149,7 +154,7 @@ this selection.
 All spellings normalize to a canonical `list[str]` (the names to render).
 `scripts/run_analysis.py` skips reporting entirely (no figures *and* no
 tables) when the normalized selection is empty, matching the pre-existing
-`figures: false` behavior. Calling `reporting.generate_reports(..., figures=
+`figures: false` behavior. Calling `reports.generate_reports(..., figures=
 ["interval"])` directly always still writes the always-on tables — only the
 PLOT_REGISTRY figures are gated at that level.
 
