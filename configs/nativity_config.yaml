@@ -12,7 +12,7 @@
 # -----------------------------------------------------------------------------
 data:
   # Path relative to bayesian_panel_nmf directory
-  # Run from bayesian_panel_nmf: python scripts/run_analysis.py --config configs/nativity_config.yaml
+  # Run from bayesian_panel_nmf: uv run bpnmf run --config configs/nativity_config.yaml
   input_file: "data/raw/nativity_analyticdata.csv"
   output_dir: "results"
   
