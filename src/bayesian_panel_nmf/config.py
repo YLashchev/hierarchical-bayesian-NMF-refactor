@@ -7,7 +7,7 @@ arbitrary user-chosen model-type names (e.g. "age", "race", "total"). Booleans
 use ``StrictBool`` so quoted YAML strings like ``"false"`` are rejected rather
 than silently treated as truthy.
 
-This module only builds the schema; wiring it into consumers (run_analysis.py,
+This module only builds the schema; wiring it into consumers (cli.py,
 cut.py, inference.py) and retiring the corresponding validation.py checks is a
 separate, later task.
 """
@@ -108,7 +108,7 @@ class DataConfig(BaseModel):
     end_date: str | None = None
     aggregation: AggregationConfig = Field(default_factory=AggregationConfig)
     allow_unbalanced_panel: StrictBool = False
-    # Explicit override for run_analysis.py's _get_outcome_name() filename
+    # Explicit override for pipeline.py's _get_outcome_name() filename
     # placeholder; undocumented but tested (test_run_analysis_parallel.py).
     # Falls back to deriving from outcomes_from_prefixes, then "births".
     outcome: str | None = None

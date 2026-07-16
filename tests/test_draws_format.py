@@ -1,7 +1,7 @@
 """Unit tests for the opt-in Parquet draws-artifact helpers (Phase 5b).
 
 Additive feature: ``output.draws_format`` defaults to ``"csv"``; these tests
-exercise ``_write_draws``/``_read_draws`` in ``scripts/run_analysis.py``
+exercise ``_write_draws``/``_read_draws`` in ``bayesian_panel_nmf.pipeline``
 directly against a tiny synthetic frame -- no MCMC run required.
 """
 

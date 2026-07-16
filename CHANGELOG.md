@@ -9,7 +9,7 @@ All notable changes to this project will be documented in this file.
 - `tables.print_run_summary_panel()`: a rich terminal panel summarizing one
   completed rank run (model type, rank, chains/method, outcome distribution,
   convergence gate PASS/FAIL, selected figures, artifact paths). Called from
-  `scripts/run_analysis.py` after a rank's artifacts are written, in both the
+  the pipeline after a rank's artifacts are written, in both the
   joint (`_run_single_rank`) and cut (`_run_cut_rank`) paths. Purely additive
   terminal output — no file or data side effects, so golden output is
   unaffected.
@@ -32,6 +32,21 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **Hard break**: deleted `scripts/run_analysis.py`, `scripts/generate_full_viz.py`,
+  `scripts/analyze_traces.py`, `scripts/make_trace_plots.py` and replaced them
+  with one installed console script, `bpnmf` (Phase 9.2 of the legibility
+  refactor; `src/bayesian_panel_nmf/cli.py`, `bpnmf = "bayesian_panel_nmf.cli:main"`
+  in `pyproject.toml`). No shims — direct invocations of the deleted scripts
+  no longer work. New subcommands: `bpnmf run` (was `run_analysis.py`),
+  `bpnmf viz` (was `generate_full_viz.py`), `bpnmf traces [--plots]` (folds
+  `analyze_traces.py`'s numeric table and `make_trace_plots.py`'s PNGs into
+  one subcommand), and a new `bpnmf init` that writes a starter config
+  (copy of `configs/base_config.yaml`). Flags, defaults, and behavior for
+  `run`/`viz`/`traces` are unchanged — this is a move + repackage, not a
+  behavior change; golden output remains bit-identical. The module-top
+  `numpyro.set_host_device_count()`-before-jax-import ordering is preserved
+  verbatim at the top of `cli.py`. `python -m bayesian_panel_nmf.cli` also
+  works. See documentation.md's new "CLI reference" section.
 - Extracted the analysis-pipeline orchestration out of `scripts/run_analysis.py`
   into a new `src/bayesian_panel_nmf/pipeline.py` (Phase 9.1 of the legibility
   refactor): `run_model_type`, `_run_sequential`, `_run_single_rank`,

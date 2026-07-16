@@ -1,24 +1,11 @@
-"""Characterization tests for make_trace_plots.py's variable/coordinate
-selection logic. Pins current behavior before any extraction refactor."""
-
-import importlib.util
-import sys
-from pathlib import Path
+"""Characterization tests for cli.py's variable/coordinate selection logic
+(formerly scripts/make_trace_plots.py, folded into `bpnmf traces --plots`
+in Phase 9.2). Pins current behavior before any extraction refactor."""
 
 import arviz as az
 import numpy as np
 
-MAKE_TRACE_PLOTS_PATH = (
-    Path(__file__).resolve().parents[1] / "scripts" / "make_trace_plots.py"
-)
-MAKE_TRACE_PLOTS_SPEC = importlib.util.spec_from_file_location(
-    "test_make_trace_plots_module", MAKE_TRACE_PLOTS_PATH
-)
-make_trace_plots = importlib.util.module_from_spec(MAKE_TRACE_PLOTS_SPEC)
-sys.modules.setdefault("test_make_trace_plots_module", make_trace_plots)
-MAKE_TRACE_PLOTS_SPEC.loader.exec_module(make_trace_plots)
-
-_make_trace_plots_from_netcdf = make_trace_plots._make_trace_plots_from_netcdf
+from bayesian_panel_nmf.cli import _make_trace_plots_from_netcdf
 
 
 def _build_fake_idata(var_shapes: dict[str, tuple[int, ...]]):

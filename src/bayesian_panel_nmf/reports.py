@@ -1,7 +1,7 @@
 """Generate figures and summary tables from MCMC posterior draws.
 
-Shared entry point used by both `scripts/run_analysis.py` (when
-``output.figures: true`` in config) and `scripts/generate_full_viz.py`
+Shared entry point used by both `bpnmf run` (when
+``output.figures: true`` in config) and `bpnmf viz`
 (for standalone regeneration from a results CSV).
 
 Outputs placed under ``<output_dir>/figs/``:

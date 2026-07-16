@@ -5,7 +5,7 @@ following NumPyro's own documented chain_method semantics. This module
 has zero side effects -- it never calls numpyro.set_host_device_count()
 or otherwise mutates JAX/XLA state. That call, when needed, is the
 caller's responsibility and must run before any jax/numpyro import (see
-scripts/run_analysis.py's module-level call and comment for why).
+cli.py's module-level call and comment for why).
 """
 
 import jax

@@ -1,15 +1,15 @@
 """Analysis pipeline orchestration for bayesian_panel_nmf.
 
 Extracted verbatim out of ``scripts/run_analysis.py`` (Phase 9.1 of the
-legibility refactor): this module owns the actual per-type / per-rank
-analysis pipeline (data loading, MCMC dispatch, convergence gating, draws
-serialization, reporting dispatch). CLI parsing, config loading, and the
-module-top ``numpyro.set_host_device_count()`` call stay in
-``scripts/run_analysis.py`` — that ordering is a hard runtime requirement
-(see the comment in ``scripts/run_analysis.py``) and importing this module
-must not disturb it. ``pipeline.py`` imports ``inference``/``cut`` (which
-import jax) same as ``run_analysis.py`` always did; the entry-point import
-order in ``run_analysis.py`` is what keeps ``set_host_device_count`` first.
+legibility refactor, before that script was deleted in Phase 9.2): this
+module owns the actual per-type / per-rank analysis pipeline (data loading,
+MCMC dispatch, convergence gating, draws serialization, reporting
+dispatch). CLI parsing, config loading, and the module-top
+``numpyro.set_host_device_count()`` call stay in ``cli.py`` — that ordering
+is a hard runtime requirement (see the comment in ``cli.py``) and importing
+this module must not disturb it. ``pipeline.py`` imports ``inference``/``cut``
+(which import jax) same as ``cli.py`` always did; the entry-point import
+order in ``cli.py`` is what keeps ``set_host_device_count`` first.
 """
 
 import json

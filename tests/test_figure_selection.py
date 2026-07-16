@@ -94,7 +94,7 @@ def test_figures_empty_list_renders_no_figures(tmp_path):
     assert not (figs / "ppc").exists()
 
     # Tables are still always-on for an explicit empty selection passed
-    # directly to generate_reports (run_analysis.py's own gate, tested
+    # directly to generate_reports (the `run` subcommand's own gate, tested
     # separately via OutputConfig, is what skips _run_reporting entirely).
     assert (figs / "summary_table.csv").exists()
 

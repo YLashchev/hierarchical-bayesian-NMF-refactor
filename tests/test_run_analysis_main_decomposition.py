@@ -1,26 +1,15 @@
-"""Characterization tests for run_analysis.py's main() type-selection
-logic, before extracting it into _select_types_to_run (Tier 2 of the
-repo clarity refactor). This logic previously had no direct test — only
-indirect exercise via the two dispatch tests in
-test_run_analysis_parallel.py, both of which always run all types."""
-
-import importlib.util
-import sys
-from pathlib import Path
+"""Characterization tests for cli.py's `run` subcommand type-selection
+logic (formerly run_analysis.py's main(), moved in Phase 9.2), pinned by
+_select_types_to_run (Tier 2 of the repo clarity refactor). This logic
+previously had no direct test — only indirect exercise via the two dispatch
+tests in test_run_analysis_parallel.py, both of which always run all
+types."""
 
 import pytest
 
+from bayesian_panel_nmf import cli as run_analysis
 from bayesian_panel_nmf import pipeline
 from bayesian_panel_nmf.validation import ConfigError
-
-RUN_ANALYSIS_PATH = Path(__file__).resolve().parents[1] / "scripts" / "run_analysis.py"
-RUN_ANALYSIS_SPEC = importlib.util.spec_from_file_location(
-    "test_run_analysis_main_decomp_module", RUN_ANALYSIS_PATH
-)
-assert RUN_ANALYSIS_SPEC is not None and RUN_ANALYSIS_SPEC.loader is not None
-run_analysis = importlib.util.module_from_spec(RUN_ANALYSIS_SPEC)
-sys.modules.setdefault("test_run_analysis_main_decomp_module", run_analysis)
-RUN_ANALYSIS_SPEC.loader.exec_module(run_analysis)
 
 
 def _minimal_config(tmp_path):
@@ -58,7 +47,7 @@ def test_main_runs_all_types_when_no_type_flag_given(monkeypatch, tmp_path):
         "run_model_type",
         lambda **kwargs: called_types.append(kwargs["model_type"]),
     )
-    monkeypatch.setattr("sys.argv", ["run_analysis.py", "--config", str(config_path)])
+    monkeypatch.setattr("sys.argv", ["bpnmf", "run", "--config", str(config_path)])
 
     run_analysis.main()
 
@@ -79,7 +68,7 @@ def test_main_runs_only_requested_type_when_type_flag_given(monkeypatch, tmp_pat
         lambda **kwargs: called_types.append(kwargs["model_type"]),
     )
     monkeypatch.setattr(
-        "sys.argv", ["run_analysis.py", "--config", str(config_path), "--type", "a"]
+        "sys.argv", ["bpnmf", "run", "--config", str(config_path), "--type", "a"]
     )
 
     run_analysis.main()
@@ -96,7 +85,7 @@ def test_main_raises_config_error_when_requested_type_not_found(monkeypatch, tmp
 
     monkeypatch.setattr(
         "sys.argv",
-        ["run_analysis.py", "--config", str(config_path), "--type", "nonexistent"],
+        ["bpnmf", "run", "--config", str(config_path), "--type", "nonexistent"],
     )
 
     with pytest.raises(ConfigError, match="nonexistent"):

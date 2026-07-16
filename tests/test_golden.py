@@ -42,7 +42,9 @@ def fresh_run(tmp_path_factory) -> Path:
     subprocess.run(
         [
             sys.executable,
-            str(ROOT / "scripts" / "run_analysis.py"),
+            "-m",
+            "bayesian_panel_nmf.cli",
+            "run",
             "--config",
             str(cfg),
         ],

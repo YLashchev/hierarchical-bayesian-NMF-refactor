@@ -1,4 +1,4 @@
-"""Characterization tests for run_analysis.py's run_model_type output-dir
+"""Characterization tests for pipeline.py's run_model_type output-dir
 cleanup and convergence-gate-failure logging, before extracting the
 per-rank pipeline into _run_single_rank and the output-dir prep into
 _prepare_type_output_dir (Tier 2b of the repo clarity refactor). These two

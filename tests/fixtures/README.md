@@ -11,7 +11,7 @@ Regenerate:
 mkdir -p tests/fixtures/golden && rm -rf tests/fixtures/golden/total
 sed 's|output_dir: "results"|output_dir: "tests/fixtures/golden"|' \
   configs/fertility_smoke_test.yaml > /tmp/golden.yaml
-uv run scripts/run_analysis.py --config /tmp/golden.yaml
+uv run bpnmf run --config /tmp/golden.yaml
 ```
 
 **Same-machine caveat:** the smoke config uses `auto_parallelism: true`, so the

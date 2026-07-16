@@ -134,7 +134,7 @@ plotting primitives), `tables.py` (pure pandas/numpy table computation plus rich
 terminal rendering — no matplotlib), and `reports.py` (`generate_reports()`,
 the orchestration entry point that calls into both).
 
-After each rank's artifacts are written, `scripts/run_analysis.py` calls
+After each rank's artifacts are written, `bpnmf run` calls
 `tables.print_run_summary_panel()`: a rich terminal panel echoing that run's
 config (model type, rank, chains/method, outcome distribution), the
 convergence gate verdict (green PASS / red FAIL, plus R-hat/ESS/divergences
@@ -160,7 +160,7 @@ a golden-checked artifact.
   only those. Unknown names are rejected at config-load time.
 
 All spellings normalize to a canonical `list[str]` (the names to render).
-`scripts/run_analysis.py` skips reporting entirely (no figures *and* no
+`bpnmf run` skips reporting entirely (no figures *and* no
 tables) when the normalized selection is empty, matching the pre-existing
 `figures: false` behavior. Calling `reports.generate_reports(..., figures=
 ["interval"])` directly always still writes the always-on tables — only the
@@ -196,7 +196,7 @@ appends `_cut`.
 Regenerate figures from a saved draws file without re-running MCMC:
 
 ```bash
-uv run scripts/generate_full_viz.py --results results/total/NB_births_total_3.csv
+uv run bpnmf viz --results results/total/NB_births_total_3.csv
 ```
 
 (`--results` accepts either the `.csv` or `.parquet` draws file.)
@@ -220,9 +220,68 @@ and a verdict:
 A failed gate logs a warning and the run continues — it never silently drops
 output. On failure: increase `mcmc.num_warmup`/`num_samples`, or investigate
 with the trace sidecars (run with `--save-traces`, then
-`scripts/analyze_traces.py` for the numeric table or `scripts/make_trace_plots.py`
+`bpnmf traces <nc_path>` for the numeric table or `bpnmf traces <nc_path> --plots`
 for visual traces). In cut mode the manifest reports Stage-1 and every Stage-2
 fit separately; diagnostics are never pooled across conditional targets.
+
+---
+
+## CLI reference
+
+Installed as the `bpnmf` console script (`bpnmf = "bayesian_panel_nmf.cli:main"`
+in `pyproject.toml`); also runnable as `python -m bayesian_panel_nmf.cli`.
+Four subcommands:
+
+### `bpnmf run --config <path> [options]`
+
+Runs the analysis pipeline (data load → MCMC → convergence gate → draws +
+reporting) for one or all configured model types.
+
+| Flag | Meaning |
+| ---- | ------- |
+| `--config` | Path to config YAML (default `configs/nativity_config.yaml`) |
+| `--type` | Restrict to one configured model type; default runs all |
+| `--rank` | Override the rank(s) to test from the config |
+| `--verbose` / `-v` | DEBUG-level logging |
+| `--log-file` | Also write logs to this file |
+| `--save-traces` | Write a NetCDF posterior sidecar (`<stem>_traces.nc`) |
+| `--chains` | Override chain count (`max_chains` under auto_parallelism, or literal `num_chains` with `--chain-method`) |
+| `--chain-method` | Force `sequential`/`parallel`/`vectorized`, disabling `mcmc.auto_parallelism` |
+
+### `bpnmf viz --results <draws.csv|.parquet> [options]`
+
+Re-renders figures + tables from an existing draws artifact without
+re-running MCMC — the same reporting path `bpnmf run` calls automatically
+when `output.figures: true`.
+
+| Flag | Meaning |
+| ---- | ------- |
+| `--results` | Path to the draws CSV/parquet (default `results/total/NB_births_total_5.csv`) |
+| `--ppc-results` | Optional Stage-1 PPC draws CSV (cut mode) to route the PPC suite to the full Stage-1 posterior |
+| `--target` | Target unit for fit/gap/summary plots (auto-detected if omitted) |
+| `--group` | Group label to render; repeatable; omit to render every group present |
+
+### `bpnmf traces <nc_path> [options]`
+
+Default: prints a numeric R-hat/ESS pass/warn/fail table per parameter
+(computed natively from the NetCDF sidecar via ArviZ). With `--plots`:
+renders PNG trace plots instead.
+
+| Flag | Meaning |
+| ---- | ------- |
+| `--plots` | Render PNG trace plots instead of the numeric table |
+| `--param-filter` | Comma-separated parameter-name prefixes to restrict to |
+| `--out-dir` | Output directory for `--plots` (default `<input_dir>/figs/diagnostics/`) |
+
+### `bpnmf init [path] [--force]`
+
+Writes a starter config (a copy of the commented `configs/base_config.yaml`
+template) to `path` (default `config.yaml`). Refuses to overwrite an
+existing file unless `--force` is given.
+
+```bash
+uv run bpnmf init configs/my_config.yaml
+```
 
 ---
 

@@ -24,13 +24,13 @@ The repo ships with `data/raw/fertility_data.csv` (state-level US birth counts 2
 Smoke test first:
 
 ```bash
-uv run scripts/run_analysis.py --config configs/fertility_smoke_test.yaml
+uv run bpnmf run --config configs/fertility_smoke_test.yaml
 ```
 
 When that finishes cleanly, run the full analysis:
 
 ```bash
-uv run scripts/run_analysis.py --config configs/fertility_config.yaml
+uv run bpnmf run --config configs/fertility_config.yaml
 ```
 
 Chain-level parallelism is chosen automatically from the visible JAX devices (`mcmc.auto_parallelism: true`, the default): a single-CPU host runs `mcmc.max_chains` chains sequentially, a single GPU runs them vectorized on that device, and a multi-device host (multiple CPUs exposed via `numpyro.set_host_device_count`, or multiple GPUs/TPUs) runs them in parallel across devices, capped at the visible device count. See `src/bayesian_panel_nmf/parallelism.py::choose_mcmc_parallelism` for the exact rules. Model types configured under `model.types` always run sequentially, one after another, in a single process.
@@ -40,7 +40,7 @@ Both write posterior draws + preprocessed data to `results/<type>/` (and figures
 Regenerate figures from an existing draws CSV without re-running MCMC:
 
 ```bash
-uv run scripts/generate_full_viz.py --results results/total/NB_births_total_3.csv
+uv run bpnmf viz --results results/total/NB_births_total_3.csv
 ```
 
 An ArviZ-based convergence gate (rank-normalized R-hat, bulk/tail ESS,
@@ -50,8 +50,8 @@ next to the draws CSV.
 To inspect saved trace sidecars (written with `--save-traces`) after a run:
 
 ```bash
-uv run scripts/analyze_traces.py results/total/NB_births_total_3_traces.nc            # R-hat/ESS pass-fail table
-uv run python scripts/make_trace_plots.py results/total/NB_births_total_3_traces.nc  # visual trace plots
+uv run bpnmf traces results/total/NB_births_total_3_traces.nc          # R-hat/ESS pass-fail table
+uv run bpnmf traces results/total/NB_births_total_3_traces.nc --plots  # visual trace plots
 ```
 
 ## Using Your Own Data
@@ -102,7 +102,7 @@ mcmc:
 ### 3. Run
 
 ```bash
-uv run scripts/run_analysis.py --config configs/my_config.yaml
+uv run bpnmf run --config configs/my_config.yaml
 ```
 
 See `configs/base_config.yaml` for every supported option with inline comments. `configs/nativity_config.yaml` and `configs/fertility_config.yaml` are working end-to-end examples.
@@ -280,7 +280,7 @@ uv run ruff check .
 uv run ruff format .
 ```
 
-Current coverage is regression and integration: synthetic CSVs exercised through `load_and_prepare`, YAML config validation, and subprocess runs of `scripts/run_analysis.py`. True unit tests of individual functions (especially inside `src/bayesian_panel_nmf/models/`) are still an open roadmap item.
+Current coverage is regression and integration: synthetic CSVs exercised through `load_and_prepare`, YAML config validation, and subprocess runs of `bpnmf run`. True unit tests of individual functions (especially inside `src/bayesian_panel_nmf/models/`) are still an open roadmap item.
 
 See `CHANGELOG.md` for release history and the **Roadmap** section below for open items.
 

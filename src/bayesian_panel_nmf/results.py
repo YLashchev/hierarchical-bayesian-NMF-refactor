@@ -4,7 +4,7 @@ Joint mode uses ``format_draws``; cut mode adds provenance-tagged component
 frames (``format_cut_component_draws``), the Stage-1 PPC frame
 (``format_stage1_ppc_draws``), and the convergence manifest
 (``build_cut_convergence_manifest``). Transforms only -- all file I/O stays in
-scripts/run_analysis.py. Uses fixed column names; downcasts dtypes
+cli.py. Uses fixed column names; downcasts dtypes
 (categorical for unit/group, int8/int32 for integer cols, float32 for
 predictions).
 """
