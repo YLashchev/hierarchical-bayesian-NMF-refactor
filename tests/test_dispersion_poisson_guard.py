@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from numpyro.infer import MCMC, NUTS
 
-from bayesian_panel_nmf.models.panel_nmf_model import model
+from bayesian_panel_nmf.models.joint import model
 
 
 @pytest.fixture

@@ -16,7 +16,7 @@ import numpyro
 import numpyro.distributions as dist
 from numpyro.handlers import scope
 
-from .utils import missingness_adjustment
+from .likelihood import missingness_adjustment
 
 
 def stage2_model(

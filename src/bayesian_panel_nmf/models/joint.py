@@ -5,7 +5,7 @@ import numpyro.distributions.constraints as constraints
 from jax import numpy as jnp
 from numpyro.handlers import scope
 
-from .utils import missingness_adjustment
+from .likelihood import missingness_adjustment
 
 
 def _define_time_factors_and_fe(K, D, rank, N, time_fac_alpha):

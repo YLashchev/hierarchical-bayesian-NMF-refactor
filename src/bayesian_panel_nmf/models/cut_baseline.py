@@ -1,9 +1,9 @@
 """Stage 1 of the two-stage pure cut posterior: independent untreated baseline.
 
 Scientifically identical to the joint model's ``model_treated=False`` branch
-in ``models/panel_nmf_model.py``. The duplication is deliberate (approved
+in ``models/joint.py``. The duplication is deliberate (approved
 independence decision): do NOT import private helpers from
-``panel_nmf_model.py``. Parity with the joint model is enforced by
+``joint.py``. Parity with the joint model is enforced by
 ``tests/test_cut_model_parity.py``.
 """
 
@@ -14,7 +14,7 @@ import numpyro.distributions as dist
 import numpyro.distributions.constraints as constraints
 from numpyro.handlers import scope
 
-from .utils import missingness_adjustment
+from .likelihood import missingness_adjustment
 
 
 def _define_time_factors_and_fe(K, D, rank, N, time_fac_alpha):

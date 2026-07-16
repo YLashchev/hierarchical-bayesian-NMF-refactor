@@ -2,7 +2,7 @@
 
 The cut models deliberately duplicate the joint model's untreated branch and
 treatment block (approved independence decision -- no imports of private
-panel_nmf_model helpers). These tests pin site names, shapes, sampled values
+joint-model helpers). These tests pin site names, shapes, sampled values
 (identical PRNG consumption), and log-densities so any drift between the
 copies fails loudly.
 """
@@ -13,9 +13,9 @@ from numpyro.handlers import seed, substitute, trace
 from numpyro.infer.initialization import init_to_uniform
 from numpyro.infer.util import log_density
 
-from bayesian_panel_nmf.models.cut_stage1_model import stage1_model
-from bayesian_panel_nmf.models.cut_stage2_model import stage2_model
-from bayesian_panel_nmf.models.panel_nmf_model import model as joint_model
+from bayesian_panel_nmf.models.cut_baseline import stage1_model
+from bayesian_panel_nmf.models.cut_treatment import stage2_model
+from bayesian_panel_nmf.models.joint import model as joint_model
 
 
 def _traceable(model, seed_val):

@@ -1,5 +1,5 @@
 """
-Regression tests for model default arguments in panel_nmf_model.model().
+Regression tests for model default arguments in joint.model().
 
 Covers to-do item 1: the missing-mask default must mean "nothing is missing"
 when missing_idx_array is not provided.
@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 # ---------------------------------------------------------------------------
-# Helpers: extract the mask logic from panel_nmf_model.model()
+# Helpers: extract the mask logic from joint.model()
 # ---------------------------------------------------------------------------
 
 

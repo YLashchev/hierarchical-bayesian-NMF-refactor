@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 from numpyro.handlers import seed, trace
 
-from bayesian_panel_nmf.models.cut_stage2_model import stage2_model
+from bayesian_panel_nmf.models.cut_treatment import stage2_model
 
 K, D, N = 2, 3, 4
 
