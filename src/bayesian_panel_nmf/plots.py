@@ -1622,7 +1622,10 @@ def make_interval_plot(
         if method == "mu":
             treated = np.sum(np.exp(grp["mu_treated"]))
             untreated = np.sum(np.exp(grp["mu"]))
-            denom_val = np.mean(grp[denom_col] * grp["years"]) if len(grp) > 0 else 1
+            # Summed person-time (pop_t * years_t), matching upstream
+            # make_interval_plot and make_summary_table. A mean here would
+            # divide summed counts by per-period person-time (off by T).
+            denom_val = np.sum(grp[denom_col] * grp["years"]) if len(grp) > 0 else 1
 
             treated_rate = treated / denom_val * rate_normalizer
             untreated_rate = untreated / denom_val * rate_normalizer

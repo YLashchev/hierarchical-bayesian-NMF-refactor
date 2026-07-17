@@ -189,6 +189,12 @@ def _merge_observed_columns(
         obs_cols.append("denominator")
     if "treatment" in obs_df.columns:
         obs_cols.append("treatment")
+    # Period interval boundaries (present only under temporal aggregation).
+    # Reporting needs them to compute person-years; without them rates fall
+    # back to years=1.0. See _aggregate_temporal in data.py.
+    for col in ("start_date", "end_date"):
+        if col in obs_df.columns:
+            obs_cols.append(col)
 
     obs_subset = obs_df[["K", "D", "N"] + obs_cols].drop_duplicates()
 
@@ -208,6 +214,8 @@ def _merge_observed_columns(
         "ypred",
         "mu",
         "mu_treated",
+        "start_date",
+        "end_date",
     ]
     col_order = [c for c in col_order if c in merged.columns]
     return merged[col_order]
