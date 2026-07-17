@@ -12,7 +12,6 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from bayesian_panel_nmf.config import Config
 from bayesian_panel_nmf.data import load_and_prepare
 from bayesian_panel_nmf.validation import ConfigError
 
@@ -77,21 +76,6 @@ def panel_csv_with_total(tmp_path: Path) -> Path:
     return path
 
 
-def _make_config(csv_path: Path, outcomes: list) -> Config:
-    """Build a minimal config for testing."""
-    return Config.model_validate({
-        "data": {
-            "input_file": str(csv_path),
-            "output_dir": "results/test",
-            "schema": {
-                "unit_col": "state",
-                "time_col": "time",
-                "treatment_col": "treated",
-                "outcomes": outcomes,
-            },
-            "aggregation": {"enabled": False},
-        }
-    })
 
 
 # ---------------------------------------------------------------------------
@@ -100,10 +84,10 @@ def _make_config(csv_path: Path, outcomes: list) -> Config:
 class TestMode1ExplicitTotal:
     """'total' is defined as a regular outcome in the config schema."""
 
-    def test_explicit_total_no_aggregation(self, panel_csv_with_total: Path) -> None:
-        config = _make_config(
+    def test_explicit_total_no_aggregation(self, panel_csv_with_total: Path, make_data_config) -> None:
+        config = make_data_config(
             panel_csv_with_total,
-            [
+            outcomes=[
                 {
                     "outcome_col": "births_total",
                     "denominator_col": "pop_total",
@@ -123,12 +107,12 @@ class TestMode1ExplicitTotal:
         assert x_t1["denominator"].values[0] == 150
 
     def test_explicit_total_needs_no_type_config(
-        self, panel_csv_with_total: Path
+        self, panel_csv_with_total: Path, make_data_config
     ) -> None:
         """No type_config needed when total is explicitly defined."""
-        config = _make_config(
+        config = make_data_config(
             panel_csv_with_total,
-            [
+            outcomes=[
                 {
                     "outcome_col": "births_total",
                     "denominator_col": "pop_total",
@@ -150,10 +134,10 @@ class TestMode1ExplicitTotal:
 class TestMode2TotalFrom:
     """total_from lists specific outcome labels to sum."""
 
-    def test_total_from_sums_outcomes_and_denominators(self, panel_csv: Path) -> None:
-        config = _make_config(
+    def test_total_from_sums_outcomes_and_denominators(self, panel_csv: Path, make_data_config) -> None:
+        config = make_data_config(
             panel_csv,
-            [
+            outcomes=[
                 {"outcome_col": "births_a", "denominator_col": "pop_a", "label": "a"},
                 {"outcome_col": "births_b", "denominator_col": "pop_b", "label": "b"},
             ],
@@ -173,11 +157,11 @@ class TestMode2TotalFrom:
         assert x_t1["outcome"].values[0] == 15  # 10 + 5
         assert x_t1["denominator"].values[0] == 150  # 100 + 50
 
-    def test_total_from_subset_of_outcomes(self, panel_csv: Path) -> None:
+    def test_total_from_subset_of_outcomes(self, panel_csv: Path, make_data_config) -> None:
         """total_from can reference a subset — doesn't have to include all outcomes."""
-        config = _make_config(
+        config = make_data_config(
             panel_csv,
-            [
+            outcomes=[
                 {"outcome_col": "births_a", "denominator_col": "pop_a", "label": "a"},
                 {"outcome_col": "births_b", "denominator_col": "pop_b", "label": "b"},
             ],
@@ -193,11 +177,11 @@ class TestMode2TotalFrom:
         assert x_t1["outcome"].values[0] == 10  # only births_a
         assert x_t1["denominator"].values[0] == 100  # only pop_a
 
-    def test_total_from_with_other_groups_requested(self, panel_csv: Path) -> None:
+    def test_total_from_with_other_groups_requested(self, panel_csv: Path, make_data_config) -> None:
         """Can request both total and individual subgroups."""
-        config = _make_config(
+        config = make_data_config(
             panel_csv,
-            [
+            outcomes=[
                 {"outcome_col": "births_a", "denominator_col": "pop_a", "label": "a"},
                 {"outcome_col": "births_b", "denominator_col": "pop_b", "label": "b"},
             ],
@@ -212,10 +196,10 @@ class TestMode2TotalFrom:
         df = result["df_preprocessed"]
         assert sorted(df["group"].unique()) == ["a", "total"]
 
-    def test_total_from_rejects_undefined_label(self, panel_csv: Path) -> None:
-        config = _make_config(
+    def test_total_from_rejects_undefined_label(self, panel_csv: Path, make_data_config) -> None:
+        config = make_data_config(
             panel_csv,
-            [
+            outcomes=[
                 {"outcome_col": "births_a", "denominator_col": "pop_a", "label": "a"},
             ],
         )
@@ -226,11 +210,11 @@ class TestMode2TotalFrom:
                 str(panel_csv), config, groups=["total"], type_config=type_config
             )
 
-    def test_total_from_no_denominator_column(self, panel_csv_no_denom: Path) -> None:
+    def test_total_from_no_denominator_column(self, panel_csv_no_denom: Path, make_data_config) -> None:
         """total_from works even when there are no denominator columns (count model)."""
-        config = _make_config(
+        config = make_data_config(
             panel_csv_no_denom,
-            [
+            outcomes=[
                 {"outcome_col": "births_a", "label": "a"},
                 {"outcome_col": "births_b", "label": "b"},
             ],
@@ -251,7 +235,7 @@ class TestMode2TotalFrom:
             or True
         )
 
-    def test_total_from_prevents_double_counting(self, panel_csv: Path) -> None:
+    def test_total_from_prevents_double_counting(self, panel_csv: Path, make_data_config) -> None:
         """
         Regression: the old code summed all outcomes, which would double-count
         if some outcomes are subsets of others. total_from prevents this by
@@ -259,9 +243,9 @@ class TestMode2TotalFrom:
         """
         # Simulate nativity-like config: a and b are components of c
         # If user specifies total_from: ["a", "b"], they get 15, not 30
-        config = _make_config(
+        config = make_data_config(
             panel_csv,
-            [
+            outcomes=[
                 {"outcome_col": "births_a", "denominator_col": "pop_a", "label": "a"},
                 {"outcome_col": "births_b", "denominator_col": "pop_b", "label": "b"},
             ],
@@ -284,10 +268,10 @@ class TestMode2TotalFrom:
 class TestMode3TotalAll:
     """total_all=True sums all defined outcomes."""
 
-    def test_total_all_sums_everything(self, panel_csv: Path) -> None:
-        config = _make_config(
+    def test_total_all_sums_everything(self, panel_csv: Path, make_data_config) -> None:
+        config = make_data_config(
             panel_csv,
-            [
+            outcomes=[
                 {"outcome_col": "births_a", "denominator_col": "pop_a", "label": "a"},
                 {"outcome_col": "births_b", "denominator_col": "pop_b", "label": "b"},
             ],
@@ -303,10 +287,10 @@ class TestMode3TotalAll:
         assert x_t1["outcome"].values[0] == 15  # 10 + 5
         assert x_t1["denominator"].values[0] == 150  # 100 + 50
 
-    def test_total_all_no_denominator(self, panel_csv_no_denom: Path) -> None:
-        config = _make_config(
+    def test_total_all_no_denominator(self, panel_csv_no_denom: Path, make_data_config) -> None:
+        config = make_data_config(
             panel_csv_no_denom,
-            [
+            outcomes=[
                 {"outcome_col": "births_a", "label": "a"},
                 {"outcome_col": "births_b", "label": "b"},
             ],
@@ -329,11 +313,11 @@ class TestMode3TotalAll:
 class TestTotalErrorCases:
     """Error handling when total is misconfigured."""
 
-    def test_no_config_for_synthetic_total_raises(self, panel_csv: Path) -> None:
+    def test_no_config_for_synthetic_total_raises(self, panel_csv: Path, make_data_config) -> None:
         """Requesting 'total' without explicit label or type_config raises ConfigError."""
-        config = _make_config(
+        config = make_data_config(
             panel_csv,
-            [
+            outcomes=[
                 {"outcome_col": "births_a", "denominator_col": "pop_a", "label": "a"},
                 {"outcome_col": "births_b", "denominator_col": "pop_b", "label": "b"},
             ],
@@ -342,11 +326,11 @@ class TestTotalErrorCases:
         with pytest.raises(ConfigError, match="not defined as an outcome"):
             load_and_prepare(str(panel_csv), config, groups=["total"])
 
-    def test_empty_type_config_raises(self, panel_csv: Path) -> None:
+    def test_empty_type_config_raises(self, panel_csv: Path, make_data_config) -> None:
         """type_config present but without total_from or total_all raises ConfigError."""
-        config = _make_config(
+        config = make_data_config(
             panel_csv,
-            [
+            outcomes=[
                 {"outcome_col": "births_a", "denominator_col": "pop_a", "label": "a"},
             ],
         )
@@ -357,11 +341,11 @@ class TestTotalErrorCases:
                 str(panel_csv), config, groups=["total"], type_config=type_config
             )
 
-    def test_total_from_takes_precedence_over_total_all(self, panel_csv: Path) -> None:
+    def test_total_from_takes_precedence_over_total_all(self, panel_csv: Path, make_data_config) -> None:
         """If both total_from and total_all are present, total_from wins."""
-        config = _make_config(
+        config = make_data_config(
             panel_csv,
-            [
+            outcomes=[
                 {"outcome_col": "births_a", "denominator_col": "pop_a", "label": "a"},
                 {"outcome_col": "births_b", "denominator_col": "pop_b", "label": "b"},
             ],
@@ -380,11 +364,11 @@ class TestTotalErrorCases:
         x_t1 = df[(df["unit"] == "X") & (df["time"] == pd.Timestamp("2020-01-01"))]
         assert x_t1["outcome"].values[0] == 10  # only "a", not a+b
 
-    def test_total_from_rejects_duplicate_labels(self, panel_csv: Path) -> None:
+    def test_total_from_rejects_duplicate_labels(self, panel_csv: Path, make_data_config) -> None:
         """Duplicate labels in total_from would double-count — must be rejected."""
-        config = _make_config(
+        config = make_data_config(
             panel_csv,
-            [
+            outcomes=[
                 {"outcome_col": "births_a", "denominator_col": "pop_a", "label": "a"},
                 {"outcome_col": "births_b", "denominator_col": "pop_b", "label": "b"},
             ],
@@ -403,10 +387,10 @@ class TestTotalErrorCases:
 class TestTotalModelArrays:
     """Verify the K×D×N arrays are correct for synthetic total."""
 
-    def test_total_from_produces_correct_array_shape(self, panel_csv: Path) -> None:
-        config = _make_config(
+    def test_total_from_produces_correct_array_shape(self, panel_csv: Path, make_data_config) -> None:
+        config = make_data_config(
             panel_csv,
-            [
+            outcomes=[
                 {"outcome_col": "births_a", "denominator_col": "pop_a", "label": "a"},
                 {"outcome_col": "births_b", "denominator_col": "pop_b", "label": "b"},
             ],
@@ -423,10 +407,10 @@ class TestTotalModelArrays:
         assert result["control_idx_array"].shape == (1, 2, 2)
         assert result["missing_idx_array"].shape == (1, 2, 2)
 
-    def test_total_from_array_values_are_summed(self, panel_csv: Path) -> None:
-        config = _make_config(
+    def test_total_from_array_values_are_summed(self, panel_csv: Path, make_data_config) -> None:
+        config = make_data_config(
             panel_csv,
-            [
+            outcomes=[
                 {"outcome_col": "births_a", "denominator_col": "pop_a", "label": "a"},
                 {"outcome_col": "births_b", "denominator_col": "pop_b", "label": "b"},
             ],

@@ -3,27 +3,9 @@ from typing import Any, cast
 import numpy as np
 
 from bayesian_panel_nmf import inference
-from bayesian_panel_nmf.config import Config
-
-_MINIMAL_DATA = {
-    "input_file": "unused.csv",
-    "output_dir": "unused",
-    "schema": {
-        "unit_col": "state",
-        "time_col": "time",
-        "treatment_col": "exposed",
-        "outcomes": [{"outcome_col": "births_total", "label": "total"}],
-    },
-}
 
 
-def _config(model=None, mcmc=None):
-    return Config.model_validate(
-        {"data": _MINIMAL_DATA, "model": model or {}, "mcmc": mcmc or {}}
-    )
-
-
-def test_run_mcmc_inference_blocks_until_samples_ready(monkeypatch):
+def test_run_mcmc_inference_blocks_until_samples_ready(monkeypatch, make_inference_config):
     samples = {"mu_ctrl": np.ones((1, 1, 1, 1, 1))}
     seen = []
 
@@ -71,7 +53,7 @@ def test_run_mcmc_inference_blocks_until_samples_ready(monkeypatch):
         data_dict,
         model_fn=lambda **kwargs: None,
         rank=1,
-        config=_config(
+        config=make_inference_config(
             mcmc={
                 "num_chains": 1,
                 "num_warmup": 1,
@@ -87,7 +69,9 @@ def test_run_mcmc_inference_blocks_until_samples_ready(monkeypatch):
     assert mcmc.kwargs["chain_method"] == "sequential"
 
 
-def test_generate_predictions_blocks_until_predictions_ready(monkeypatch):
+def test_generate_predictions_blocks_until_predictions_ready(
+    monkeypatch, make_inference_config
+):
     predictions = np.ones((1, 1, 1, 1))
     seen = []
 
@@ -117,7 +101,7 @@ def test_generate_predictions_blocks_until_predictions_ready(monkeypatch):
         data_dict={"denominators": np.ones((1, 1, 1))},
         model_fn=lambda **kwargs: None,
         rank=1,
-        config=_config(mcmc={"random_seed": 1}),
+        config=make_inference_config(mcmc={"random_seed": 1}),
     )
 
     assert seen == [predictions]

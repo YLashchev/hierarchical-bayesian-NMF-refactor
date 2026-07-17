@@ -5,7 +5,6 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from bayesian_panel_nmf.config import Config
 from bayesian_panel_nmf.data import load_and_prepare
 from bayesian_panel_nmf.validation import DataError
 
@@ -50,44 +49,28 @@ def panel_csv_clean(tmp_path: Path) -> Path:
     return path
 
 
-def _make_config(csv_path: Path) -> Config:
-    return Config.model_validate({
-        "data": {
-            "input_file": str(csv_path),
-            "output_dir": "results/test",
-            "schema": {
-                "unit_col": "state",
-                "time_col": "time",
-                "treatment_col": "treated",
-                "outcomes": [
-                    {
-                        "outcome_col": "outcome",
-                        "denominator_col": "pop",
-                        "label": "total",
-                    },
-                ],
-            },
-            "aggregation": {"enabled": False},
-        }
-    })
-
-
 class TestDuplicateDetection:
-    def test_duplicates_raise_data_error(self, panel_csv_with_dupes: Path) -> None:
-        config = _make_config(panel_csv_with_dupes)
+    def test_duplicates_raise_data_error(
+        self, panel_csv_with_dupes: Path, make_data_config
+    ) -> None:
+        config = make_data_config(panel_csv_with_dupes)
 
         with pytest.raises(DataError, match="duplicate.*group.*unit.*time"):
             load_and_prepare(str(panel_csv_with_dupes), config, groups=["total"])
 
-    def test_clean_data_passes(self, panel_csv_clean: Path) -> None:
-        config = _make_config(panel_csv_clean)
+    def test_clean_data_passes(
+        self, panel_csv_clean: Path, make_data_config
+    ) -> None:
+        config = make_data_config(panel_csv_clean)
 
         result = load_and_prepare(str(panel_csv_clean), config, groups=["total"])
 
         assert result["Y"].shape == (1, 2, 2)
 
-    def test_error_message_shows_examples(self, panel_csv_with_dupes: Path) -> None:
-        config = _make_config(panel_csv_with_dupes)
+    def test_error_message_shows_examples(
+        self, panel_csv_with_dupes: Path, make_data_config
+    ) -> None:
+        config = make_data_config(panel_csv_with_dupes)
 
         with pytest.raises(DataError, match="X") as exc_info:
             load_and_prepare(str(panel_csv_with_dupes), config, groups=["total"])

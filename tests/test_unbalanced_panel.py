@@ -11,36 +11,14 @@ import pandas as pd
 import pytest
 from loguru import logger
 
-from bayesian_panel_nmf.config import Config
 from bayesian_panel_nmf.data import load_and_prepare
 from bayesian_panel_nmf.validation import DataError
 
 
-def _make_config(csv_path: Path, *, allow_unbalanced: bool = False) -> Config:
-    return Config.model_validate({
-        "data": {
-            "input_file": str(csv_path),
-            "output_dir": "results/test",
-            "schema": {
-                "unit_col": "state",
-                "time_col": "time",
-                "treatment_col": "treated",
-                "outcomes": [
-                    {
-                        "outcome_col": "outcome",
-                        "denominator_col": "pop",
-                        "label": "total",
-                    },
-                ],
-            },
-            "aggregation": {"enabled": False},
-            "allow_unbalanced_panel": allow_unbalanced,
-        }
-    })
-
-
 class TestUnbalancedPanel:
-    def test_unbalanced_panel_raises_by_default(self, tmp_path: Path) -> None:
+    def test_unbalanced_panel_raises_by_default(
+        self, tmp_path: Path, make_data_config
+    ) -> None:
         """Without allow_unbalanced_panel, unbalanced data raises DataError."""
         df = pd.DataFrame(
             {
@@ -63,11 +41,13 @@ class TestUnbalancedPanel:
         with pytest.raises(DataError, match="Unbalanced panel"):
             load_and_prepare(
                 filepath=str(csv_path),
-                config=_make_config(csv_path, allow_unbalanced=False),
+                config=make_data_config(csv_path, allow_unbalanced=False),
                 groups=["total"],
             )
 
-    def test_absent_cell_marked_missing(self, tmp_path: Path) -> None:
+    def test_absent_cell_marked_missing(
+        self, tmp_path: Path, make_data_config
+    ) -> None:
         """A cell with no row should be missing_idx=True, not observed zero."""
         # State C has no January row
         df = pd.DataFrame(
@@ -90,7 +70,7 @@ class TestUnbalancedPanel:
 
         result = load_and_prepare(
             filepath=str(csv_path),
-            config=_make_config(csv_path, allow_unbalanced=True),
+            config=make_data_config(csv_path, allow_unbalanced=True),
             groups=["total"],
         )
 
@@ -113,7 +93,9 @@ class TestUnbalancedPanel:
         assert not missing[0, 1, 0]  # B, Jan
         assert not missing[0, 1, 1]  # B, Feb
 
-    def test_balanced_panel_no_missing(self, tmp_path: Path) -> None:
+    def test_balanced_panel_no_missing(
+        self, tmp_path: Path, make_data_config
+    ) -> None:
         """A balanced panel should have no missing cells."""
         df = pd.DataFrame(
             {
@@ -129,13 +111,15 @@ class TestUnbalancedPanel:
 
         result = load_and_prepare(
             filepath=str(csv_path),
-            config=_make_config(csv_path, allow_unbalanced=False),
+            config=make_data_config(csv_path, allow_unbalanced=False),
             groups=["total"],
         )
 
         assert result["missing_idx_array"].sum() == 0
 
-    def test_nan_outcome_still_marked_missing(self, tmp_path: Path) -> None:
+    def test_nan_outcome_still_marked_missing(
+        self, tmp_path: Path, make_data_config
+    ) -> None:
         """A row with NaN outcome (suppressed count) should be missing_idx=True."""
         df = pd.DataFrame(
             {
@@ -151,7 +135,7 @@ class TestUnbalancedPanel:
 
         result = load_and_prepare(
             filepath=str(csv_path),
-            config=_make_config(csv_path, allow_unbalanced=False),
+            config=make_data_config(csv_path, allow_unbalanced=False),
             groups=["total"],
         )
 
@@ -163,7 +147,9 @@ class TestUnbalancedPanel:
         assert not result["missing_idx_array"][0, 0, 1]
         assert result["Y"][0, 0, 1] == 12
 
-    def test_unbalanced_panel_warns_when_allowed(self, tmp_path: Path) -> None:
+    def test_unbalanced_panel_warns_when_allowed(
+        self, tmp_path: Path, make_data_config
+    ) -> None:
         """Unbalanced panel should emit a warning when allow_unbalanced_panel=True."""
         df = pd.DataFrame(
             {
@@ -183,7 +169,7 @@ class TestUnbalancedPanel:
         try:
             load_and_prepare(
                 filepath=str(csv_path),
-                config=_make_config(csv_path, allow_unbalanced=True),
+                config=make_data_config(csv_path, allow_unbalanced=True),
                 groups=["total"],
             )
         finally:
