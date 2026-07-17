@@ -8,13 +8,13 @@ import pytest
 from bayesian_panel_nmf.data import load_and_prepare
 from bayesian_panel_nmf.validation import DataError
 
-_NO_DENOM_OUTCOME = [{"outcome_col": "outcome", "denominator_col": None, "label": "total"}]
+_NO_DENOM_OUTCOME = [
+    {"outcome_col": "outcome", "denominator_col": None, "label": "total"}
+]
 
 
 class TestDenominatorValidation:
-    def test_nan_denominator_raises(
-        self, tmp_path: Path, make_data_config
-    ) -> None:
+    def test_nan_denominator_raises(self, tmp_path: Path, make_data_config) -> None:
         df = pd.DataFrame(
             {
                 "state": ["A", "A"],
@@ -28,11 +28,11 @@ class TestDenominatorValidation:
         df.to_csv(csv_path, index=False)
 
         with pytest.raises(DataError, match="NaN or non-positive denominator"):
-            load_and_prepare(str(csv_path), make_data_config(csv_path), groups=["total"])
+            load_and_prepare(
+                str(csv_path), make_data_config(csv_path), groups=["total"]
+            )
 
-    def test_zero_denominator_raises(
-        self, tmp_path: Path, make_data_config
-    ) -> None:
+    def test_zero_denominator_raises(self, tmp_path: Path, make_data_config) -> None:
         df = pd.DataFrame(
             {
                 "state": ["A", "A"],
@@ -46,7 +46,9 @@ class TestDenominatorValidation:
         df.to_csv(csv_path, index=False)
 
         with pytest.raises(DataError, match="NaN or non-positive denominator"):
-            load_and_prepare(str(csv_path), make_data_config(csv_path), groups=["total"])
+            load_and_prepare(
+                str(csv_path), make_data_config(csv_path), groups=["total"]
+            )
 
     def test_negative_denominator_raises(
         self, tmp_path: Path, make_data_config
@@ -64,11 +66,11 @@ class TestDenominatorValidation:
         df.to_csv(csv_path, index=False)
 
         with pytest.raises(DataError, match="NaN or non-positive denominator"):
-            load_and_prepare(str(csv_path), make_data_config(csv_path), groups=["total"])
+            load_and_prepare(
+                str(csv_path), make_data_config(csv_path), groups=["total"]
+            )
 
-    def test_valid_denominator_passes(
-        self, tmp_path: Path, make_data_config
-    ) -> None:
+    def test_valid_denominator_passes(self, tmp_path: Path, make_data_config) -> None:
         df = pd.DataFrame(
             {
                 "state": ["A", "A"],
@@ -125,7 +127,9 @@ class TestDenominatorValidation:
         df.to_csv(csv_path, index=False)
 
         with pytest.raises(DataError, match="2 rows") as exc_info:
-            load_and_prepare(str(csv_path), make_data_config(csv_path), groups=["total"])
+            load_and_prepare(
+                str(csv_path), make_data_config(csv_path), groups=["total"]
+            )
 
         # Error should mention both bad values
         err_msg = str(exc_info.value)

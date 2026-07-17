@@ -458,11 +458,11 @@ def _cut_stage2_components(
         )
         n_out = int(te_flat.shape[0])
 
-        conc_b = (
-            None if ref.nb_concentration is None else ref.nb_concentration[:, None]
-        )
+        conc_b = None if ref.nb_concentration is None else ref.nb_concentration[:, None]
         mu_grid = np.broadcast_to(ref.mu_ctrl, te_flat.shape)
-        ypred = sample_untreated_predictions(mu_grid, conc_b, outcome_dist, pred_keys[i])
+        ypred = sample_untreated_predictions(
+            mu_grid, conc_b, outcome_dist, pred_keys[i]
+        )
 
         df = format_cut_component_draws(
             te_flat, ypred, chain_ids, ref, data_dict, draw_offset
@@ -552,7 +552,14 @@ def _run_cut_rank(
         settings = resolve_cut_settings(config)
 
         stage1_diag, refs, stage1_num_chains = _cut_stage1(
-            rank, data_dict, model_type, config, settings, staging, filename, save_traces
+            rank,
+            data_dict,
+            model_type,
+            config,
+            settings,
+            staging,
+            filename,
+            save_traces,
         )
 
         combined_stem = staging / filename

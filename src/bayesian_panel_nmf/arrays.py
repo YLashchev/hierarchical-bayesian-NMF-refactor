@@ -81,7 +81,9 @@ def build_model_arrays(
     # Y: NaN -> 0 (already zero) + mark missing; else the value.
     present = ~outcome_missing
     Y[k_idx[present], d_idx[present], n_idx[present]] = outcome[present].astype(float)
-    missing_idx[k_idx[outcome_missing], d_idx[outcome_missing], n_idx[outcome_missing]] = True
+    missing_idx[
+        k_idx[outcome_missing], d_idx[outcome_missing], n_idx[outcome_missing]
+    ] = True
 
     # Denominator (if present): notna AND >0 -> val/scale; else leave default 1.
     if DENOMINATOR_COL in df.columns:
@@ -94,7 +96,7 @@ def build_model_arrays(
         )
 
     # Control status: treatment == 0 means control.
-    is_control = (df[TREATMENT_COL].to_numpy() == 0)
+    is_control = df[TREATMENT_COL].to_numpy() == 0
     control_idx[k_idx, d_idx, n_idx] = is_control
     filled[k_idx, d_idx, n_idx] = True
 

@@ -45,9 +45,7 @@ class TestUnbalancedPanel:
                 groups=["total"],
             )
 
-    def test_absent_cell_marked_missing(
-        self, tmp_path: Path, make_data_config
-    ) -> None:
+    def test_absent_cell_marked_missing(self, tmp_path: Path, make_data_config) -> None:
         """A cell with no row should be missing_idx=True, not observed zero."""
         # State C has no January row
         df = pd.DataFrame(
@@ -93,9 +91,7 @@ class TestUnbalancedPanel:
         assert not missing[0, 1, 0]  # B, Jan
         assert not missing[0, 1, 1]  # B, Feb
 
-    def test_balanced_panel_no_missing(
-        self, tmp_path: Path, make_data_config
-    ) -> None:
+    def test_balanced_panel_no_missing(self, tmp_path: Path, make_data_config) -> None:
         """A balanced panel should have no missing cells."""
         df = pd.DataFrame(
             {

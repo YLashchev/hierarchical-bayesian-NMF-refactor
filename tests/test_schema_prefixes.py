@@ -59,7 +59,9 @@ def test_explicit_outcomes_still_work(panel_csv: Path) -> None:
         },
     )
 
-    result = load_and_prepare(str(panel_csv), Config.model_validate(config), groups=["a", "b"])
+    result = load_and_prepare(
+        str(panel_csv), Config.model_validate(config), groups=["a", "b"]
+    )
 
     assert result["groups"] == ["a", "b"]
     assert sorted(result["df_preprocessed"]["group"].unique().tolist()) == ["a", "b"]
@@ -80,7 +82,9 @@ def test_prefix_outcomes_with_include(panel_csv: Path) -> None:
         },
     )
 
-    result = load_and_prepare(str(panel_csv), Config.model_validate(config), groups=["a", "b"])
+    result = load_and_prepare(
+        str(panel_csv), Config.model_validate(config), groups=["a", "b"]
+    )
 
     assert result["groups"] == ["a", "b"]
     assert sorted(result["df_preprocessed"]["group"].unique().tolist()) == ["a", "b"]
@@ -100,7 +104,9 @@ def test_prefix_outcomes_autodiscover_shared_suffixes(panel_csv: Path) -> None:
         },
     )
 
-    result = load_and_prepare(str(panel_csv), Config.model_validate(config), groups=["a", "b"])
+    result = load_and_prepare(
+        str(panel_csv), Config.model_validate(config), groups=["a", "b"]
+    )
 
     assert result["groups"] == ["a", "b"]
     assert sorted(result["df_preprocessed"]["group"].unique().tolist()) == ["a", "b"]
@@ -198,7 +204,9 @@ def test_prefix_outcomes_require_matching_denominator_suffixes(tmp_path: Path) -
     )
 
     with pytest.raises(DataError, match="Missing denominator columns"):
-        load_and_prepare(str(csv_path), Config.model_validate(config), groups=["a", "b"])
+        load_and_prepare(
+            str(csv_path), Config.model_validate(config), groups=["a", "b"]
+        )
 
 
 def test_prefix_outcomes_reject_unknown_include_suffix(panel_csv: Path) -> None:

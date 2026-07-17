@@ -5,7 +5,9 @@ import numpy as np
 from bayesian_panel_nmf import inference
 
 
-def test_run_mcmc_inference_blocks_until_samples_ready(monkeypatch, make_inference_config):
+def test_run_mcmc_inference_blocks_until_samples_ready(
+    monkeypatch, make_inference_config
+):
     samples = {"mu_ctrl": np.ones((1, 1, 1, 1, 1))}
     seen = []
 

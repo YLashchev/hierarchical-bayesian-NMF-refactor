@@ -178,9 +178,7 @@ def test_parallel_on_single_device_warns_silent_fallback(
     assert "local_device_count()=1" in warning_text
 
 
-def test_parallel_on_multi_device_does_not_warn(
-    monkeypatch, make_inference_config
-):
+def test_parallel_on_multi_device_does_not_warn(monkeypatch, make_inference_config):
     """chain_method='parallel' with >1 visible device emits no fallback warning."""
     _patch_for_call(monkeypatch)
     monkeypatch.setattr(inference.jax, "local_device_count", lambda: 8)

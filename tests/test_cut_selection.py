@@ -36,9 +36,7 @@ def _samples(C=2, S=10, with_disp=False):
     return samples
 
 
-MODEL_NB_FIXED = ModelConfig(
-    outcome_distribution="NB", nb_disp=1e-4, sample_disp=False
-)
+MODEL_NB_FIXED = ModelConfig(outcome_distribution="NB", nb_disp=1e-4, sample_disp=False)
 
 
 def test_quota_split_and_component_order():

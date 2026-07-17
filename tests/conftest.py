@@ -19,7 +19,9 @@ _INFERENCE_DATA = {
     },
 }
 
-_DEFAULT_OUTCOME = [{"outcome_col": "outcome", "denominator_col": "pop", "label": "total"}]
+_DEFAULT_OUTCOME = [
+    {"outcome_col": "outcome", "denominator_col": "pop", "label": "total"}
+]
 
 
 @pytest.fixture

@@ -58,9 +58,7 @@ class TestDuplicateDetection:
         with pytest.raises(DataError, match="duplicate.*group.*unit.*time"):
             load_and_prepare(str(panel_csv_with_dupes), config, groups=["total"])
 
-    def test_clean_data_passes(
-        self, panel_csv_clean: Path, make_data_config
-    ) -> None:
+    def test_clean_data_passes(self, panel_csv_clean: Path, make_data_config) -> None:
         config = make_data_config(panel_csv_clean)
 
         result = load_and_prepare(str(panel_csv_clean), config, groups=["total"])
