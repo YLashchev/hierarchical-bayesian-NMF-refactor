@@ -296,6 +296,226 @@ def _publish_cut_artifacts(
     _safe_rmtree(staging, dest_dir)
 
 
+def _cut_stage1(
+    rank: int,
+    data_dict: dict,
+    model_type: str,
+    config: Config,
+    settings,
+    staging: Path,
+    filename: str,
+    save_traces: bool,
+):
+    """Fit the untreated baseline, write its PPC product (+ optional traces),
+    and select the chain-stratified Stage-1 draws that seed Stage 2.
+
+    Returns ``(stage1_diag, refs, stage1_num_chains)``. Releases the full
+    Stage-1 posterior before returning; ``refs`` hold the selected copies.
+    The Stage-1 PPC uses the independent ``mcmc.random_seed + 1`` stream.
+    """
+    import arviz as az
+    from jax import random as jax_random
+
+    from bayesian_panel_nmf.cut import (
+        run_stage1_mcmc,
+        sample_untreated_predictions,
+        select_stage1_draws,
+        summarize_mcmc,
+    )
+    from bayesian_panel_nmf.results import format_stage1_ppc_draws
+
+    outcome_dist = config.model.outcome_distribution
+    sample_disp = config.model.sample_disp
+    nb_disp = config.model.nb_disp
+
+    started = time.monotonic()
+    stage1 = run_stage1_mcmc(data_dict, rank, config)
+    logger.info(
+        f"{model_type} rank {rank} cut: Stage 1 finished in "
+        f"{_format_elapsed(time.monotonic() - started)}"
+    )
+    stage1_diag = summarize_mcmc(stage1)
+    if not stage1_diag["converged"]:
+        logger.warning(
+            f"{model_type} rank {rank} cut: Stage-1 convergence gate FAILED — "
+            f"max R-hat={stage1_diag['rhat_max']:.4f}, "
+            f"min bulk ESS={stage1_diag['ess_bulk_min']:.0f}, "
+            f"divergences={stage1_diag['divergences']}"
+        )
+
+    # ---- Full Stage-1 PPC product (independent +1 stream) ----------
+    mu1 = stage1.samples["mu_ctrl"]
+    if outcome_dist == "NB":
+        if sample_disp and "disp" in stage1.samples:
+            conc1 = (1.0 / stage1.samples["disp"])[:, :, None, :, None]
+        else:
+            conc1 = (np.ones(mu1.shape[3]) / nb_disp)[:, None]
+    else:
+        conc1 = None
+    _, ppc_key = jax_random.split(jax_random.PRNGKey(int(config.mcmc.random_seed) + 1))
+    stage1_ypred = sample_untreated_predictions(mu1, conc1, outcome_dist, ppc_key)
+    stage1_ppc_df = format_stage1_ppc_draws(mu1, stage1_ypred, data_dict)
+    stage1_ppc_df.to_csv(staging / f"{filename}_stage1_ppc.csv", index=False)
+    del stage1_ppc_df, stage1_ypred
+
+    if save_traces:
+        az.from_dict(
+            {
+                "posterior": stage1.samples,
+                "sample_stats": {"diverging": stage1.diverging},
+            }
+        ).to_netcdf(str(staging / f"{filename}_stage1_traces.nc"), engine="h5netcdf")
+
+    refs = select_stage1_draws(stage1.samples, settings, config.model.model_dump())
+    stage1_num_chains = stage1.num_chains
+    del stage1, mu1  # release the full Stage-1 posterior; refs hold copies
+    return stage1_diag, refs, stage1_num_chains
+
+
+def _cut_stage2_components(
+    refs,
+    data_dict: dict,
+    model_type: str,
+    rank: int,
+    config: Config,
+    settings,
+    staging: Path,
+    filename: str,
+    combined_stem: Path,
+    draws_format: str,
+    save_traces: bool,
+):
+    """Run one conditional multi-chain Stage-2 fit per selected baseline draw.
+
+    Writes the combined draws artifact (csv incremental-append or a single
+    parquet write) and returns ``(component_records, combined_path)``. Uses
+    the ``settings.stage2_seed`` stream, split into per-component fit/predict
+    keys. Raises ``DataError`` if components yield unequal output-draw counts
+    (equal counts preserve the equal-weight nested Monte Carlo).
+    """
+    import arviz as az
+    from jax import random as jax_random
+
+    from bayesian_panel_nmf.cut import (
+        run_stage2_mcmc,
+        sample_untreated_predictions,
+        subsample_component_draws,
+        summarize_mcmc,
+    )
+    from bayesian_panel_nmf.results import format_cut_component_draws
+    from bayesian_panel_nmf.validation import DataError
+
+    outcome_dist = config.model.outcome_distribution
+
+    fit_root, pred_root = jax_random.split(jax_random.PRNGKey(settings.stage2_seed))
+    fit_keys = jax_random.split(fit_root, len(refs))
+    pred_keys = jax_random.split(pred_root, len(refs))
+
+    traces_dir = staging / f"{filename}_stage2_traces"
+    if save_traces:
+        traces_dir.mkdir()
+
+    combined_path = combined_stem.with_suffix(".csv")
+    component_records: list[dict] = []
+    component_dfs: list[pd.DataFrame] = []
+    output_counts: set[int] = set()
+    draw_offset = 0
+
+    for i, ref in enumerate(refs):
+        started = time.monotonic()
+        fit = run_stage2_mcmc(data_dict, ref, config, settings.stage2_mcmc, fit_keys[i])
+        diag = summarize_mcmc(fit)
+        logger.info(
+            f"{model_type} rank {rank} cut: component {ref.component}/"
+            f"{len(refs)} (stage1 chain {ref.stage1_chain}, "
+            f"iter {ref.stage1_iteration}) in "
+            f"{_format_elapsed(time.monotonic() - started)}"
+        )
+        if not diag["converged"]:
+            logger.warning(
+                f"{model_type} rank {rank} cut: component {ref.component} "
+                f"convergence gate FAILED — max R-hat={diag['rhat_max']:.4f}"
+            )
+
+        if save_traces:
+            az.from_dict(
+                {
+                    "posterior": fit.samples,
+                    "sample_stats": {"diverging": fit.diverging},
+                }
+            ).to_netcdf(
+                str(traces_dir / f"component_{ref.component:04d}.nc"),
+                engine="h5netcdf",
+            )
+
+        idx_per_chain = subsample_component_draws(
+            fit.num_chains, fit.num_retained, settings.stage2_draws_per_component
+        )
+        te_flat = np.concatenate(
+            [fit.samples["te"][c][ix] for c, ix in enumerate(idx_per_chain) if len(ix)]
+        )
+        chain_ids = np.concatenate(
+            [
+                np.full(len(ix), c + 1, dtype=np.int8)
+                for c, ix in enumerate(idx_per_chain)
+                if len(ix)
+            ]
+        )
+        n_out = int(te_flat.shape[0])
+
+        conc_b = (
+            None if ref.nb_concentration is None else ref.nb_concentration[:, None]
+        )
+        mu_grid = np.broadcast_to(ref.mu_ctrl, te_flat.shape)
+        ypred = sample_untreated_predictions(mu_grid, conc_b, outcome_dist, pred_keys[i])
+
+        df = format_cut_component_draws(
+            te_flat, ypred, chain_ids, ref, data_dict, draw_offset
+        )
+        if draws_format == "parquet":
+            # parquet has no cheap append mode; buffer components and
+            # write once below via _write_draws.
+            component_dfs.append(df)
+        else:
+            df.to_csv(
+                combined_path,
+                mode="w" if i == 0 else "a",
+                header=(i == 0),
+                index=False,
+            )
+
+        component_records.append(
+            {
+                "component": int(ref.component),
+                "stage1_draw": int(ref.stage1_draw),
+                "stage1_chain": int(ref.stage1_chain),
+                "stage1_iteration": int(ref.stage1_iteration),
+                **diag,
+                "retained_draws": int(fit.num_chains * fit.num_retained),
+                "output_draws": n_out,
+            }
+        )
+        output_counts.add(n_out)
+        draw_offset += n_out
+        if draws_format != "parquet":
+            del df
+        del fit, te_flat, ypred
+
+    if draws_format == "parquet":
+        combined_path = _write_draws(
+            pd.concat(component_dfs, ignore_index=True), combined_stem, "parquet"
+        )
+        component_dfs.clear()
+
+    if len(output_counts) > 1:
+        raise DataError(
+            f"unequal output draw counts across cut components: "
+            f"{sorted(output_counts)} — equal counts preserve equal weights"
+        )
+
+    return component_records, combined_path
+
+
 def _run_cut_rank(
     rank: int,
     data_dict: dict,
@@ -308,34 +528,20 @@ def _run_cut_rank(
 ) -> None:
     """Two-stage pure cut-posterior path for one rank.
 
-    Stage 1 fits the untreated baseline; a chain-stratified subset of its
-    draws each conditions a complete multi-chain Stage-2 fit. Artifacts are
-    built in a staging directory and published atomically only after every
-    component succeeds. Convergence-gate failures warn and continue;
-    execution/data/shape errors abort with staging cleaned and previously
-    published artifacts untouched.
+    Thin orchestrator: stage 1 (``_cut_stage1``) fits the untreated baseline
+    and selects the draws that each seed a complete Stage-2 fit
+    (``_cut_stage2_components``). Artifacts are built in a staging directory
+    and published atomically only after every component succeeds.
+    Convergence-gate failures warn and continue; execution/data/shape errors
+    abort with staging cleaned and previously published artifacts untouched.
     """
-    import arviz as az
-    from jax import random as jax_random
-
     from bayesian_panel_nmf.cut import (
         _resolve_chains,
         resolve_cut_settings,
-        run_stage1_mcmc,
-        run_stage2_mcmc,
-        sample_untreated_predictions,
-        select_stage1_draws,
-        subsample_component_draws,
-        summarize_mcmc,
         validate_cut_data,
     )
-    from bayesian_panel_nmf.results import (
-        build_cut_convergence_manifest,
-        format_cut_component_draws,
-        format_stage1_ppc_draws,
-    )
+    from bayesian_panel_nmf.results import build_cut_convergence_manifest
     from bayesian_panel_nmf.tables import print_run_summary_panel
-    from bayesian_panel_nmf.validation import DataError
 
     filename = f"{_draws_filename(config, model_type, rank)}_cut"
     staging = type_output_dir / f".tmp_cut_{filename}"
@@ -345,176 +551,29 @@ def _run_cut_rank(
     staging.mkdir(parents=True)
 
     outcome_dist = config.model.outcome_distribution
-    sample_disp = config.model.sample_disp
-    nb_disp = config.model.nb_disp
 
     try:
         validate_cut_data(data_dict)
         settings = resolve_cut_settings(config)
 
-        # ---- Stage 1 ---------------------------------------------------
-        started = time.monotonic()
-        stage1 = run_stage1_mcmc(data_dict, rank, config)
-        logger.info(
-            f"{model_type} rank {rank} cut: Stage 1 finished in "
-            f"{_format_elapsed(time.monotonic() - started)}"
+        stage1_diag, refs, stage1_num_chains = _cut_stage1(
+            rank, data_dict, model_type, config, settings, staging, filename, save_traces
         )
-        stage1_diag = summarize_mcmc(stage1)
-        if not stage1_diag["converged"]:
-            logger.warning(
-                f"{model_type} rank {rank} cut: Stage-1 convergence gate FAILED — "
-                f"max R-hat={stage1_diag['rhat_max']:.4f}, "
-                f"min bulk ESS={stage1_diag['ess_bulk_min']:.0f}, "
-                f"divergences={stage1_diag['divergences']}"
-            )
 
-        # ---- Full Stage-1 PPC product (independent +1 stream) ----------
-        mu1 = stage1.samples["mu_ctrl"]
-        if outcome_dist == "NB":
-            if sample_disp and "disp" in stage1.samples:
-                conc1 = (1.0 / stage1.samples["disp"])[:, :, None, :, None]
-            else:
-                conc1 = (np.ones(mu1.shape[3]) / nb_disp)[:, None]
-        else:
-            conc1 = None
-        _, ppc_key = jax_random.split(
-            jax_random.PRNGKey(int(config.mcmc.random_seed) + 1)
-        )
-        stage1_ypred = sample_untreated_predictions(mu1, conc1, outcome_dist, ppc_key)
-        stage1_ppc_df = format_stage1_ppc_draws(mu1, stage1_ypred, data_dict)
-        stage1_ppc_df.to_csv(staging / f"{filename}_stage1_ppc.csv", index=False)
-        del stage1_ppc_df, stage1_ypred
-
-        if save_traces:
-            az.from_dict(
-                {
-                    "posterior": stage1.samples,
-                    "sample_stats": {"diverging": stage1.diverging},
-                }
-            ).to_netcdf(
-                str(staging / f"{filename}_stage1_traces.nc"), engine="h5netcdf"
-            )
-
-        refs = select_stage1_draws(stage1.samples, settings, config.model.model_dump())
-        stage1_num_chains = stage1.num_chains
-        del stage1, mu1  # release the full Stage-1 posterior; refs hold copies
-
-        # ---- Stage 2: one conditional multi-chain fit per component ----
-        fit_root, pred_root = jax_random.split(jax_random.PRNGKey(settings.stage2_seed))
-        fit_keys = jax_random.split(fit_root, len(refs))
-        pred_keys = jax_random.split(pred_root, len(refs))
-
-        traces_dir = staging / f"{filename}_stage2_traces"
-        if save_traces:
-            traces_dir.mkdir()
-
-        draws_format = output_config.draws_format
         combined_stem = staging / filename
-        combined_path = combined_stem.with_suffix(".csv")
-        component_records: list[dict] = []
-        component_dfs: list[pd.DataFrame] = []
-        output_counts: set[int] = set()
-        draw_offset = 0
-
-        for i, ref in enumerate(refs):
-            started = time.monotonic()
-            fit = run_stage2_mcmc(
-                data_dict, ref, config, settings.stage2_mcmc, fit_keys[i]
-            )
-            diag = summarize_mcmc(fit)
-            logger.info(
-                f"{model_type} rank {rank} cut: component {ref.component}/"
-                f"{len(refs)} (stage1 chain {ref.stage1_chain}, "
-                f"iter {ref.stage1_iteration}) in "
-                f"{_format_elapsed(time.monotonic() - started)}"
-            )
-            if not diag["converged"]:
-                logger.warning(
-                    f"{model_type} rank {rank} cut: component {ref.component} "
-                    f"convergence gate FAILED — max R-hat={diag['rhat_max']:.4f}"
-                )
-
-            if save_traces:
-                az.from_dict(
-                    {
-                        "posterior": fit.samples,
-                        "sample_stats": {"diverging": fit.diverging},
-                    }
-                ).to_netcdf(
-                    str(traces_dir / f"component_{ref.component:04d}.nc"),
-                    engine="h5netcdf",
-                )
-
-            idx_per_chain = subsample_component_draws(
-                fit.num_chains, fit.num_retained, settings.stage2_draws_per_component
-            )
-            te_flat = np.concatenate(
-                [
-                    fit.samples["te"][c][ix]
-                    for c, ix in enumerate(idx_per_chain)
-                    if len(ix)
-                ]
-            )
-            chain_ids = np.concatenate(
-                [
-                    np.full(len(ix), c + 1, dtype=np.int8)
-                    for c, ix in enumerate(idx_per_chain)
-                    if len(ix)
-                ]
-            )
-            n_out = int(te_flat.shape[0])
-
-            conc_b = (
-                None if ref.nb_concentration is None else ref.nb_concentration[:, None]
-            )
-            mu_grid = np.broadcast_to(ref.mu_ctrl, te_flat.shape)
-            ypred = sample_untreated_predictions(
-                mu_grid, conc_b, outcome_dist, pred_keys[i]
-            )
-
-            df = format_cut_component_draws(
-                te_flat, ypred, chain_ids, ref, data_dict, draw_offset
-            )
-            if draws_format == "parquet":
-                # parquet has no cheap append mode; buffer components and
-                # write once below via _write_draws.
-                component_dfs.append(df)
-            else:
-                df.to_csv(
-                    combined_path,
-                    mode="w" if i == 0 else "a",
-                    header=(i == 0),
-                    index=False,
-                )
-
-            component_records.append(
-                {
-                    "component": int(ref.component),
-                    "stage1_draw": int(ref.stage1_draw),
-                    "stage1_chain": int(ref.stage1_chain),
-                    "stage1_iteration": int(ref.stage1_iteration),
-                    **diag,
-                    "retained_draws": int(fit.num_chains * fit.num_retained),
-                    "output_draws": n_out,
-                }
-            )
-            output_counts.add(n_out)
-            draw_offset += n_out
-            if draws_format != "parquet":
-                del df
-            del fit, te_flat, ypred
-
-        if draws_format == "parquet":
-            combined_path = _write_draws(
-                pd.concat(component_dfs, ignore_index=True), combined_stem, "parquet"
-            )
-            component_dfs.clear()
-
-        if len(output_counts) > 1:
-            raise DataError(
-                f"unequal output draw counts across cut components: "
-                f"{sorted(output_counts)} — equal counts preserve equal weights"
-            )
+        component_records, combined_path = _cut_stage2_components(
+            refs,
+            data_dict,
+            model_type,
+            rank,
+            config,
+            settings,
+            staging,
+            filename,
+            combined_stem,
+            output_config.draws_format,
+            save_traces,
+        )
 
         manifest = build_cut_convergence_manifest(stage1_diag, component_records)
         with open(staging / f"{filename}_convergence.json", "w") as f:
