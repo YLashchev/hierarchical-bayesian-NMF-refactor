@@ -1,0 +1,54 @@
+# =============================================================================
+# Education group — JOINT model (full walkthrough run)
+# =============================================================================
+# Single-type run of the education group (nohs / hs / somecoll / coll) using
+# the standard joint model. Separate output_dir so it coexists with the cut run.
+
+data:
+  input_file: "data/raw/fertility_data.csv"
+  output_dir: "results_education_joint"
+
+  schema:
+    unit_col: "state"
+    time_col: "time"
+    treatment_col: "exposed_births"
+    outcomes_from_prefixes:
+      outcome_prefix: "births_"
+      denominator_prefix: "pop_"
+      include:
+        - nohs
+        - hs
+        - somecoll
+        - coll
+
+  date_format: "%Y-%m-%d"
+  start_date: "2016-01-01"
+  end_date: "2024-01-01"
+
+  aggregation:
+    enabled: true
+    period: "bimonthly"
+
+model:
+  outcome_distribution: "NB"
+  types:
+    education:
+      groups: ["nohs", "hs", "somecoll", "coll"]
+      ranks_to_test: [5]
+  nb_disp: 1.0e-4
+  sample_disp: false
+  adjust_for_missingness: true
+  model_treated: true
+
+mcmc:
+  auto_parallelism: true
+  max_chains: 2
+  num_warmup: 2000
+  num_samples: 2000
+  thinning: 5
+  random_seed: 8675309
+  progress_bar: true
+
+output:
+  figures: true
+  clean: true

@@ -1,0 +1,64 @@
+# =============================================================================
+# Education group — CUT model (two-stage pure cut posterior)
+# =============================================================================
+# Same data/schema as education_joint.yaml but inference_mode: "cut". Stage 1
+# fits untreated cells only; selected Stage-1 draws each condition a full
+# Stage-2 fit. Separate output_dir so it coexists with the joint run.
+
+data:
+  input_file: "data/raw/fertility_data.csv"
+  output_dir: "results_education_cut"
+
+  schema:
+    unit_col: "state"
+    time_col: "time"
+    treatment_col: "exposed_births"
+    outcomes_from_prefixes:
+      outcome_prefix: "births_"
+      denominator_prefix: "pop_"
+      include:
+        - nohs
+        - hs
+        - somecoll
+        - coll
+
+  date_format: "%Y-%m-%d"
+  start_date: "2016-01-01"
+  end_date: "2024-01-01"
+
+  aggregation:
+    enabled: true
+    period: "bimonthly"
+
+model:
+  outcome_distribution: "NB"
+  types:
+    education:
+      groups: ["nohs", "hs", "somecoll", "coll"]
+      ranks_to_test: [5]
+  nb_disp: 1.0e-4
+  sample_disp: false
+  adjust_for_missingness: true
+  model_treated: true
+  inference_mode: "cut"
+
+mcmc:
+  auto_parallelism: true
+  max_chains: 4
+  num_warmup: 1000
+  num_samples: 2500
+  thinning: 10
+  random_seed: 8675309
+  progress_bar: true
+
+output:
+  figures: true
+  clean: true
+
+cut:
+  num_stage1_draws: 50
+  stage2_draws_per_component: 250
+  stage2_mcmc:
+    num_warmup: 500
+    num_samples: 1000
+    thinning: 1
