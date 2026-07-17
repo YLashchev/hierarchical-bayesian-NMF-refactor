@@ -275,9 +275,7 @@ def generate_reports(
     )
 
     if print_tables:
-        _print_rich_tables(
-            summary, per_unit, draws_for_reporting, target_unit, print_target_table
-        )
+        _print_rich_tables(summary, per_unit, target_unit, print_target_table)
 
     return {
         "summary": summary,

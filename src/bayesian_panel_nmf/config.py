@@ -1,15 +1,9 @@
-"""Pydantic v2 config schema for bayesian_panel_nmf.
+"""Pydantic v2 config schema — the single source of truth for config shape.
 
-Mirrors the shape validated ad hoc by ``validation.validate_config`` /
-``_require_bool``, as a strict, self-documenting schema. Every model forbids
-unknown keys (``extra="forbid"``) except ``ModelConfig.types``, whose keys are
-arbitrary user-chosen model-type names (e.g. "age", "race", "total"). Booleans
-use ``StrictBool`` so quoted YAML strings like ``"false"`` are rejected rather
-than silently treated as truthy.
-
-This module only builds the schema; wiring it into consumers (cli.py,
-cut.py, inference.py) and retiring the corresponding validation.py checks is a
-separate, later task.
+Every model forbids unknown keys (``extra="forbid"``) except
+``ModelConfig.types``, whose keys are user-chosen model-type names (e.g.
+"age", "race", "total"). Booleans use ``StrictBool`` so a quoted YAML
+``"false"`` is rejected, not silently treated as truthy.
 """
 
 from __future__ import annotations

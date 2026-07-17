@@ -316,7 +316,6 @@ def _compute_per_unit_post_treatment(
 def _print_rich_tables(
     summary: pd.DataFrame,
     per_unit: pd.DataFrame,
-    draws_df: pd.DataFrame,
     target_unit: str,
     print_target_table: bool = True,
 ) -> None:

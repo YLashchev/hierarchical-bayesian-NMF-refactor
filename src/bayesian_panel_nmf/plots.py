@@ -1916,12 +1916,10 @@ def make_all_ppc_plots(
 # Figure selection registry
 # -----------------------------------------------------------------------------
 
-# Stable name -> figure-producing function, used by config.OutputConfig.figures
-# to select which figures reporting.generate_reports() renders. Keep in sync
-# with config.py's imported keys (config.py imports PLOT_REGISTRY directly, so
-# there is no separate list to drift). ``summary_table`` is a table, not a
-# figure, and is intentionally not included here -- reporting.py always
-# renders it regardless of ``output.figures``.
+# Figure name -> plotting function. ``output.figures`` selects which of these
+# reports.generate_reports() renders; config.py imports this dict directly, so
+# there is no separate key list to drift. ``summary_table`` is a table, not a
+# figure: it always renders, so it is deliberately absent here.
 PLOT_REGISTRY: dict[str, Callable] = {
     "unit_fit": make_unit_fit_plot,
     "unit_gap": make_unit_gap_plot,

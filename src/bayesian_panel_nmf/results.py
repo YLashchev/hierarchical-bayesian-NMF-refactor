@@ -21,14 +21,6 @@ from bayesian_panel_nmf.validation import DataError
 if TYPE_CHECKING:
     from bayesian_panel_nmf.cut import Stage1DrawRef
 
-# Columns tagging which Stage-1 draw each cut row came from.
-STAGE1_SOURCE_COLUMNS = [
-    "cut_component",
-    "stage1_draw",
-    "stage1_chain",
-    "stage1_iteration",
-]
-
 
 def drop_scoped_samples(samples: dict) -> dict:
     """Drop sample keys containing '/' (from numpyro.handlers.scope).
@@ -296,7 +288,7 @@ def format_draws(
 
 
 # ---------------------------------------------------------------------------
-# Cut-posterior formatting (merged from the former cut_output.py)
+# Cut-posterior formatting
 # ---------------------------------------------------------------------------
 # The combined cut CSV keeps the reporting schema built by format_draws (one
 # component at a time) plus the Stage-1 source columns. ``.draw`` is globally

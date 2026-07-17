@@ -137,17 +137,7 @@ def test_rich_table_prints_group_column(monkeypatch: pytest.MonkeyPatch) -> None
             "excess_pct_upper_95": [37.5],
         }
     )
-    draws = pd.DataFrame(
-        {
-            ".draw": [1, 2],
-            "unit": ["A", "A"],
-            "treatment": [1, 1],
-            "outcome": [10.0, 10.0],
-            "ypred": [8.0, 9.0],
-        }
-    )
-
-    _print_rich_tables(summary, per_unit, draws, "A")
+    _print_rich_tables(summary, per_unit, "A")
 
     # Only two tables now: headline summary + per-unit totals (Table 3 removed)
     assert len(captured) == 2
@@ -292,17 +282,7 @@ def test_print_target_table_false_skips_headline_table(
             "excess_pct_upper_95": [37.5],
         }
     )
-    draws = pd.DataFrame(
-        {
-            ".draw": [1, 2],
-            "unit": ["A", "A"],
-            "treatment": [1, 1],
-            "outcome": [10.0, 10.0],
-            "ypred": [8.0, 9.0],
-        }
-    )
-
-    _print_rich_tables(summary, per_unit, draws, "A", print_target_table=False)
+    _print_rich_tables(summary, per_unit, "A", print_target_table=False)
 
     # Only Table 2 should print
     assert len(captured) == 1

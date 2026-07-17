@@ -1,9 +1,8 @@
-"""Runtime array/data validators for bayesian_panel_nmf.
+"""Runtime validators for in-memory data: data dicts, MCMC samples,
+prediction arrays, filepaths, group lists.
 
-Moved verbatim out of validation.py in Phase 3 (Task 3.3): these validate
-in-memory data structures (data dicts, MCMC samples, predictions arrays,
-filepaths, group lists) at runtime, as opposed to validation.py's config-shape
-checks which are now delegated to the pydantic schema in config.py.
+Config-shape validation is separate -- that lives in the pydantic schema
+(config.py).
 """
 
 import shutil

@@ -1,20 +1,11 @@
-"""``bpnmf`` command-line entry point.
+"""``bpnmf`` command-line entry point. Subcommands: run, viz, traces, init.
 
-Consolidates the four former standalone scripts
-(``scripts/run_analysis.py``, ``scripts/generate_full_viz.py``,
-``scripts/analyze_traces.py``, ``scripts/make_trace_plots.py``, all deleted
-in Phase 9.2 of the legibility refactor) into one installed console script
-with subcommands: ``run``, ``viz``, ``traces``, ``init``.
-
-Module-top import order is a hard runtime requirement, carried over
-unchanged from ``scripts/run_analysis.py``:
-``numpyro.set_host_device_count()`` only takes effect before JAX's backend
-is lazily initialized (it sets an XLA_FLAGS env var that XLA reads once, at
-first use). It MUST run before any jax/numpyro/arviz import — including
-imports inside ``bayesian_panel_nmf.inference``/``pipeline`` — or it is a
-silent no-op and NUTS's ``MCMC(..., chain_method="parallel")`` falls back to
-sequential chain execution (root cause of ``mcmc.num_chains`` chains not
-actually running concurrently on multi-core CPUs).
+Module-top import order is a hard runtime requirement:
+``numpyro.set_host_device_count()`` sets an XLA_FLAGS env var that XLA reads
+once, at first use, so it MUST run before any jax/numpyro/arviz import
+(including those inside ``inference``/``pipeline``). Run it late and it is a
+silent no-op: ``chain_method="parallel"`` then falls back to sequential, so
+``mcmc.num_chains`` chains never run concurrently on multi-core CPUs.
 """
 
 import argparse
