@@ -50,6 +50,16 @@ mcmc:
   thinning: 10
   random_seed: 8675309
   progress_bar: true
+  # Gate R-hat/ESS on the identified quantities only; excludes the
+  # non-identifiable sites (state_fe, time_fe, time_fac, unit_weight).
+  # Applies to Stage-1 and every Stage-2 component gate alike.
+  gate_params:
+    - "mu"              # mu, mu_ctrl
+    - "te"
+    - "treatment"       # treatment_{it,state,category}_scale, treatment_kt
+    - "state_treatment" # state_treatment_effect
+    - "category_treatment" # category_treatment_effect
+    - "state_category"  # state_category_te, state_category_scale
 
 output:
   figures: true
