@@ -259,6 +259,7 @@ Posterior draws schema:
 
 ```python
 from bayesian_panel_nmf import (
+    Config,
     load_and_prepare,
     run_mcmc_inference,
     generate_predictions,
@@ -266,6 +267,7 @@ from bayesian_panel_nmf import (
     model,
 )
 
+config = Config.from_yaml("configs/my_config.yaml")
 data_dict = load_and_prepare("data/my_panel.csv", config, groups=["total"])
 mcmc = run_mcmc_inference(data_dict, model, rank=10, config=config)
 predictions = generate_predictions(mcmc, data_dict, model, rank=10, config=config)
@@ -275,7 +277,7 @@ draws_df = format_draws(mcmc.get_samples(group_by_chain=True), predictions, data
 ## Development
 
 ```bash
-uv run pytest              # 290 regression + integration tests
+uv run pytest              # 333 regression + integration tests
 uv run ruff check .
 uv run ruff format .
 ```

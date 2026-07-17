@@ -43,7 +43,7 @@ from bayesian_panel_nmf.pipeline import (  # noqa: E402
     _validate_run_analysis_config,
 )
 from bayesian_panel_nmf.reports import generate_reports  # noqa: E402
-from bayesian_panel_nmf.validation import ConfigError  # noqa: E402
+from bayesian_panel_nmf.validation import ConfigError, DataError  # noqa: E402
 
 matplotlib.use("Agg")  # headless — no display needed
 
@@ -556,8 +556,11 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     try:
         args.func(args)
-    except ConfigError:
-        raise
+    except (ConfigError, DataError) as e:
+        # User-fixable input errors (bad config, missing file/column): show a
+        # clean one-line message and exit non-zero, not a raw traceback.
+        logger.error(str(e))
+        sys.exit(1)
 
 
 if __name__ == "__main__":

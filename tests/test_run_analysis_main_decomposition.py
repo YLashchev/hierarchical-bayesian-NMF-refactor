@@ -76,8 +76,11 @@ def test_main_runs_only_requested_type_when_type_flag_given(monkeypatch, tmp_pat
     assert called_types == ["a"]
 
 
-def test_main_raises_config_error_when_requested_type_not_found(monkeypatch, tmp_path):
-    """--type=nonexistent raises ConfigError naming the available types."""
+def test_main_exits_cleanly_when_requested_type_not_found(monkeypatch, tmp_path):
+    """--type=nonexistent -> clean CLI exit(1), not a raw traceback. main()
+    catches the ConfigError and reports it via the logger; the message
+    content (available types) is pinned by _select_types_to_run's own unit
+    test below."""
     import yaml
 
     config_path = tmp_path / "cfg.yaml"
@@ -88,5 +91,13 @@ def test_main_raises_config_error_when_requested_type_not_found(monkeypatch, tmp
         ["bpnmf", "run", "--config", str(config_path), "--type", "nonexistent"],
     )
 
-    with pytest.raises(ConfigError, match="nonexistent"):
+    with pytest.raises(SystemExit) as exc_info:
         run_analysis.main()
+    assert exc_info.value.code == 1
+
+
+def test_select_types_to_run_raises_config_error_naming_available():
+    """The underlying selection helper raises ConfigError naming valid types."""
+    types = {"a": object(), "b": object()}
+    with pytest.raises(ConfigError, match="nonexistent"):
+        pipeline._select_types_to_run(types, "nonexistent")

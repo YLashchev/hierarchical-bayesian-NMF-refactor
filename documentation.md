@@ -87,6 +87,27 @@ of `outcomes` (explicit list of `{outcome_col, label, denominator_col?}`) or
 | `inference_mode` | str/null | null→joint | `"joint"` or `"cut"` (see Cut mode) |
 | `types` | map | `{}` | `name → {groups[], ranks_to_test[], total_from?[], total_all?, exclude_units?[]}` |
 
+#### Model types and `ranks_to_test`
+
+Each entry under `model.types` is an **independent model fit** over a set of
+outcome `groups`. The map key is a label you choose (e.g. `total`, `age`,
+`race`) — it names the output subdirectory and has no effect on the model.
+
+**`rank` is the number of latent factors** in the low-rank factorization — the
+core modeling assumption. The untreated outcome surface is approximated by
+`rank` shared time/unit factors (this is the "NMF": nonnegative matrix
+factorization). A higher rank is a more flexible baseline (captures more
+shared structure) but is harder to identify and slower to converge; a lower
+rank is more parsimonious but may underfit. Typical values are small
+single digits — the shipped fertility/nativity configs use `5`.
+
+`ranks_to_test` is a **list**, and each value produces its own independent
+fit and its own output files (`{dist}_{outcome}_{type}_{rank}.*`) — it is a
+sweep, **not** automatic model selection. `ranks_to_test: [3, 5, 10]` runs
+three full analyses so you can compare them; `ranks_to_test: [5]` runs one.
+If a rank is mis-set for your data you'll typically see it in the diagnostics
+(persistent non-convergence, very low ESS) — see "Interpreting diagnostics".
+
 ### `mcmc`
 
 | Key | Default | Notes |

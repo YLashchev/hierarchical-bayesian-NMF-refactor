@@ -87,6 +87,11 @@ model:
       #   total_all: true                    # sum ALL defined outcomes
       #                                      # (only if subgroups are disjoint)
       groups: ["total"]
+      # rank = number of latent factors in the low-rank factorization (the
+      # core modeling knob). List = a sweep: each value is an independent fit
+      # with its own output files, NOT model selection. Small single digits
+      # are typical (shipped fertility/nativity configs use 5). See
+      # documentation.md → "Model types and ranks_to_test".
       ranks_to_test: [10]
 
       # Drop units for THIS type only, e.g. exclude_units: ["Texas"]
