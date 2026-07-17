@@ -437,7 +437,6 @@ def _wide_to_long(
 
     # Handle "total" group by aggregating specified subgroups
     if needs_total and total_labels:
-        # Filter to only the labels we need to sum
         df_for_total = df_long[df_long[GROUP_COL].isin(total_labels)]
         agg_dict: dict[str, str] = {OUTCOME_COL: "sum"}
         has_denom = DENOMINATOR_COL in df_for_total.columns

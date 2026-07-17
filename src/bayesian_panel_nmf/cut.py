@@ -50,7 +50,7 @@ class CutSettings:
 
 @dataclass(frozen=True)
 class Stage1DrawRef:
-    """One selected Stage-1 baseline draw with provenance.
+    """One selected Stage-1 baseline draw, tagged with where it came from.
 
     ``stage1_iteration`` is the retained (post-thinning) 1-based index within
     its chain; ``stage1_draw`` is the global retained index

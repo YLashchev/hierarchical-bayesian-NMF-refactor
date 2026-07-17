@@ -1,6 +1,6 @@
 """Draws -> tidy DataFrame: the reporting schema for both inference modes.
 
-Joint mode uses ``format_draws``; cut mode adds provenance-tagged component
+Joint mode uses ``format_draws``; cut mode adds source-tagged component
 frames (``format_cut_component_draws``), the Stage-1 PPC frame
 (``format_stage1_ppc_draws``), and the convergence manifest
 (``build_cut_convergence_manifest``). Transforms only -- all file I/O stays in
@@ -21,7 +21,8 @@ from bayesian_panel_nmf.validation import DataError
 if TYPE_CHECKING:
     from bayesian_panel_nmf.cut import Stage1DrawRef
 
-PROVENANCE_COLUMNS = [
+# Columns tagging which Stage-1 draw each cut row came from.
+STAGE1_SOURCE_COLUMNS = [
     "cut_component",
     "stage1_draw",
     "stage1_chain",
@@ -39,10 +40,10 @@ def drop_scoped_samples(samples: dict) -> dict:
     return {k: v for k, v in samples.items() if "/" not in k}
 
 
-def _optimize_dtypes(df: pd.DataFrame) -> pd.DataFrame:
-    """Downcast string/int/float columns in place for smaller memory footprint."""
+def _downcast_dtypes(df: pd.DataFrame) -> pd.DataFrame:
+    """Downcast string/int/float columns in place to shrink the draws frame."""
     initial_mem = df.memory_usage(deep=True).sum() / 1024**2
-    logger.debug(f"DataFrame memory before optimization: {initial_mem:.1f} MB")
+    logger.debug(f"DataFrame memory before downcast: {initial_mem:.1f} MB")
 
     for col in ["unit", "group"]:
         if col in df.columns and df[col].dtype == "object":
@@ -65,7 +66,7 @@ def _optimize_dtypes(df: pd.DataFrame) -> pd.DataFrame:
     final_mem = df.memory_usage(deep=True).sum() / 1024**2
     savings_pct = (1 - final_mem / initial_mem) * 100 if initial_mem > 0 else 0
     logger.debug(
-        f"DataFrame memory after optimization: {final_mem:.1f} MB ({savings_pct:.1f}% reduction)"
+        f"DataFrame memory after downcast: {final_mem:.1f} MB ({savings_pct:.1f}% reduction)"
     )
 
     return df
@@ -286,7 +287,7 @@ def format_draws(
         draws_df, groups, units, times, data_dict["df_preprocessed"]
     )
 
-    merged = _optimize_dtypes(merged)
+    merged = _downcast_dtypes(merged)
 
     final_mem_mb = merged.memory_usage(deep=True).sum() / 1024**2
     logger.info(f"Output DataFrame: {len(merged):,} rows, {final_mem_mb:.1f} MB")
@@ -298,7 +299,7 @@ def format_draws(
 # Cut-posterior formatting (merged from the former cut_output.py)
 # ---------------------------------------------------------------------------
 # The combined cut CSV keeps the reporting schema built by format_draws (one
-# component at a time) plus nested provenance columns. ``.draw`` is globally
+# component at a time) plus the Stage-1 source columns. ``.draw`` is globally
 # unique across components; ``.chain`` is the real Stage-2 chain within the
 # component; ``.iteration`` indexes the component's output subsample.
 

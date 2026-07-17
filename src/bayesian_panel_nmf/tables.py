@@ -102,7 +102,7 @@ def make_summary_table(
         df_tgt["years"] = 1.0
 
     def compute_stats(g):
-        res = {
+        stats = {
             "ypred": np.sum(g["ypred"]),
             "outcome": np.sum(g[outcome_col]),
             "treated": np.sum(np.exp(g["mu_treated"]))
@@ -111,7 +111,7 @@ def make_summary_table(
             "untreated": np.sum(np.exp(g["mu"])) if "mu" in g.columns else np.nan,
             "denom_val": np.sum(g[denom_col] * g["years"]),
         }
-        return pd.Series(res)
+        return pd.Series(stats)
 
     draw_stats = (
         df_tgt.groupby(["group", ".draw"])
