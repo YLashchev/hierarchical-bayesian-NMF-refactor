@@ -194,7 +194,7 @@ def test_run_model_type_without_figures_does_not_import_viz(
     )
 
     assert (output_dir / "total" / "df_total.csv").exists()
-    assert (output_dir / "total" / "NB_births_total_1.csv").exists()
+    assert (output_dir / "total" / "NB_outcome_total_1.csv").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +261,7 @@ def test_get_outcome_name_fallback_when_neither_set():
             }
         )
     )
-    assert run_analysis._get_outcome_name(config) == "births"
+    assert run_analysis._get_outcome_name(config) == "outcome"
 
 
 def test_get_outcome_name_empty_prefix_falls_back():
@@ -275,7 +275,7 @@ def test_get_outcome_name_empty_prefix_falls_back():
             }
         )
     )
-    assert run_analysis._get_outcome_name(config) == "births"
+    assert run_analysis._get_outcome_name(config) == "outcome"
 
 
 # ---------------------------------------------------------------------------
@@ -293,4 +293,4 @@ def test_draws_filename_fixed_scheme():
 
 def test_draws_filename_default_distribution_and_outcome():
     config = _config()
-    assert run_analysis._draws_filename(config, "groups", 3) == "NB_births_groups_3"
+    assert run_analysis._draws_filename(config, "groups", 3) == "NB_outcome_groups_3"

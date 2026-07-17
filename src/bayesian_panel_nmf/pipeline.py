@@ -84,7 +84,7 @@ def _get_outcome_name(config: Config) -> str:
     Priority:
     1. Explicit ``data.outcome`` if set.
     2. Strip trailing underscore from ``outcomes_from_prefixes.outcome_prefix``.
-    3. Fall back to ``"births"`` for backward compatibility.
+    3. Fall back to the domain-neutral ``"outcome"``.
     """
     explicit = config.data.outcome
     if explicit:
@@ -95,9 +95,9 @@ def _get_outcome_name(config: Config) -> str:
         prefix = prefixes.outcome_prefix or ""
         if prefix.endswith("_"):
             return prefix[:-1]
-        return prefix or "births"
+        return prefix or "outcome"
 
-    return "births"
+    return "outcome"
 
 
 def _draws_filename(config: Config, model_type: str, rank: int) -> str:

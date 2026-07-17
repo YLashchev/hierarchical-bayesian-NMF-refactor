@@ -2,7 +2,8 @@
 
 import pytest
 
-from bayesian_panel_nmf.validation import ConfigError, validate_config
+from bayesian_panel_nmf.config import Config
+from bayesian_panel_nmf.validation import ConfigError
 
 
 def _base_config(**model_over):
@@ -29,26 +30,26 @@ def _base_config(**model_over):
 def test_joint_config_without_new_keys_still_validates():
     cfg = _base_config()
     del cfg["model"]["inference_mode"]
-    validate_config(cfg)
+    Config.model_validate(cfg)
 
 
 def test_inference_mode_values():
-    validate_config(_base_config(inference_mode="joint"))
-    validate_config(_base_config(inference_mode="cut"))
+    Config.model_validate(_base_config(inference_mode="joint"))
+    Config.model_validate(_base_config(inference_mode="cut"))
     with pytest.raises(ConfigError, match="inference_mode"):
-        validate_config(_base_config(inference_mode="bogus"))
+        Config.model_validate(_base_config(inference_mode="bogus"))
 
 
 def test_cut_requires_model_treated():
     with pytest.raises(ConfigError, match="model_treated"):
-        validate_config(_base_config(model_treated=False))
+        Config.model_validate(_base_config(model_treated=False))
 
 
 def test_cut_block_type_checks():
     cfg = _base_config()
     cfg["cut"] = "nope"
     with pytest.raises(ConfigError, match="cut"):
-        validate_config(cfg)
+        Config.model_validate(cfg)
 
 
 @pytest.mark.parametrize("key", ["num_stage1_draws", "stage2_draws_per_component"])
@@ -57,7 +58,7 @@ def test_positive_int_keys_rejected(key, bad):
     cfg = _base_config()
     cfg["cut"] = {key: bad}
     with pytest.raises(ConfigError, match=key):
-        validate_config(cfg)
+        Config.model_validate(cfg)
 
 
 @pytest.mark.parametrize("key", ["selection_seed", "stage2_seed"])
@@ -65,14 +66,14 @@ def test_seed_keys_must_be_ints(key):
     cfg = _base_config()
     cfg["cut"] = {key: "8675309"}
     with pytest.raises(ConfigError, match=key):
-        validate_config(cfg)
+        Config.model_validate(cfg)
 
 
 def test_stage2_mcmc_random_seed_rejected():
     cfg = _base_config()
     cfg["cut"] = {"stage2_mcmc": {"random_seed": 1}}
     with pytest.raises(ConfigError, match="stage2_seed"):
-        validate_config(cfg)
+        Config.model_validate(cfg)
 
 
 def test_valid_cut_block_accepted():
@@ -84,12 +85,11 @@ def test_valid_cut_block_accepted():
         "stage2_draws_per_component": 100,
         "stage2_mcmc": {"num_warmup": 500, "num_samples": 500},
     }
-    validate_config(cfg)
+    Config.model_validate(cfg)
 
 
 from loguru import logger  # noqa: E402
 
-from bayesian_panel_nmf.config import Config  # noqa: E402
 from bayesian_panel_nmf.cut import resolve_cut_settings  # noqa: E402
 
 

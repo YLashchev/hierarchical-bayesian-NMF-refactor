@@ -11,12 +11,13 @@ import pandas as pd
 import pytest
 from loguru import logger
 
+from bayesian_panel_nmf.config import Config
 from bayesian_panel_nmf.data import load_and_prepare
 from bayesian_panel_nmf.validation import DataError
 
 
-def _make_config(csv_path: Path, *, allow_unbalanced: bool = False) -> dict:
-    return {
+def _make_config(csv_path: Path, *, allow_unbalanced: bool = False) -> Config:
+    return Config.model_validate({
         "data": {
             "input_file": str(csv_path),
             "output_dir": "results/test",
@@ -35,7 +36,7 @@ def _make_config(csv_path: Path, *, allow_unbalanced: bool = False) -> dict:
             "aggregation": {"enabled": False},
             "allow_unbalanced_panel": allow_unbalanced,
         }
-    }
+    })
 
 
 class TestUnbalancedPanel:

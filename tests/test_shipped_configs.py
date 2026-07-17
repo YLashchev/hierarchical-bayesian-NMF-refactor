@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 import yaml  # type: ignore[import-untyped]
 
-from bayesian_panel_nmf.validation import validate_config
+from bayesian_panel_nmf.config import Config
 
 CONFIG_DIR = Path(__file__).parent.parent / "configs"
 
@@ -15,4 +15,4 @@ def test_shipped_configs_pass_validation(config_path):
     # The config files might be just snippets, but they should ideally pass
     # our validation if they have 'data' and 'schema'.
     if "data" in config and "schema" in config["data"]:
-        validate_config(config)
+        Config.model_validate(config)

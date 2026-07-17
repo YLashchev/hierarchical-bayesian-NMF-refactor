@@ -15,11 +15,8 @@ import numpy as np
 import pandas as pd
 from loguru import logger
 
-from bayesian_panel_nmf.validation import (
-    DataError,
-    validate_predictions,
-    validate_samples,
-)
+from bayesian_panel_nmf.checks import validate_predictions, validate_samples
+from bayesian_panel_nmf.validation import DataError
 
 if TYPE_CHECKING:
     from bayesian_panel_nmf.cut import Stage1DrawRef

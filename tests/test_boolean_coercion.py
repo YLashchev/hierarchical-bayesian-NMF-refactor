@@ -2,13 +2,14 @@
 Regression tests for boolean coercion guards in input configurations.
 
 Covers to-do item 33: explicitly quoted YAML booleans (e.g. "false") evaluate
-to Python truthy strings. validate_config() must reject them and enforce strict
+to Python truthy strings. Config.model_validate() must reject them and enforce strict
 boolean values.
 """
 
 import pytest
 
-from bayesian_panel_nmf.validation import ConfigError, validate_config
+from bayesian_panel_nmf.config import Config
+from bayesian_panel_nmf.validation import ConfigError
 
 BOOL_PATHS = [
     ("data", "allow_unbalanced_panel"),
@@ -65,7 +66,7 @@ def test_quoted_bool_rejected(minimal_config, path_tuple, bad_value):
     # Validation error should specifically call out the field that failed;
     # pydantic reports "Input should be a valid boolean" for non-bool values.
     with pytest.raises(ConfigError, match="valid boolean"):
-        validate_config(minimal_config)
+        Config.model_validate(minimal_config)
 
 
 @pytest.mark.parametrize("path_tuple", BOOL_PATHS)
@@ -74,7 +75,7 @@ def test_valid_bool_accepted(minimal_config, path_tuple, good_value):
     _set_nested_val(minimal_config, path_tuple, good_value)
 
     # Should not raise exception
-    validate_config(minimal_config)
+    Config.model_validate(minimal_config)
 
 
 def test_nested_total_all_quoted_rejected(minimal_config):
@@ -88,7 +89,7 @@ def test_nested_total_all_quoted_rejected(minimal_config):
         }
     }
     with pytest.raises(ConfigError, match="valid boolean"):
-        validate_config(minimal_config)
+        Config.model_validate(minimal_config)
 
 
 def test_nested_total_all_accepted(minimal_config):
@@ -101,26 +102,26 @@ def test_nested_total_all_accepted(minimal_config):
             }
         }
     }
-    validate_config(minimal_config)
+    Config.model_validate(minimal_config)
 
 
 @pytest.mark.parametrize("bad_value", ["false", "true", "False", "True", "yes", 1, 0])
 def test_figures_quoted_bool_rejected(minimal_config, bad_value):
     _set_nested_val(minimal_config, FIGURES_PATH, bad_value)
     with pytest.raises(ConfigError):
-        validate_config(minimal_config)
+        Config.model_validate(minimal_config)
 
 
 @pytest.mark.parametrize("good_value", [True, False, "all", "none", [], ["interval"]])
 def test_figures_accepted_spellings(minimal_config, good_value):
     _set_nested_val(minimal_config, FIGURES_PATH, good_value)
-    validate_config(minimal_config)
+    Config.model_validate(minimal_config)
 
 
 def test_figures_unknown_name_rejected(minimal_config):
     _set_nested_val(minimal_config, FIGURES_PATH, ["bogus"])
     with pytest.raises(ConfigError, match="unknown figure name"):
-        validate_config(minimal_config)
+        Config.model_validate(minimal_config)
 
 
 def test_flag_absent_ok(minimal_config):
@@ -129,4 +130,4 @@ def test_flag_absent_ok(minimal_config):
     # pydantic schema's StrictBool fields (Phase 3 Task 3.3) -- a deliberate
     # tightening, not a regression: `flag: null` in YAML was a silent no-op
     # under the old dict-based validator.
-    validate_config(minimal_config)
+    Config.model_validate(minimal_config)

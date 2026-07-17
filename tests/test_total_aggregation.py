@@ -12,6 +12,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from bayesian_panel_nmf.config import Config
 from bayesian_panel_nmf.data import load_and_prepare
 from bayesian_panel_nmf.validation import ConfigError
 
@@ -76,9 +77,9 @@ def panel_csv_with_total(tmp_path: Path) -> Path:
     return path
 
 
-def _make_config(csv_path: Path, outcomes: list) -> dict:
+def _make_config(csv_path: Path, outcomes: list) -> Config:
     """Build a minimal config for testing."""
-    return {
+    return Config.model_validate({
         "data": {
             "input_file": str(csv_path),
             "output_dir": "results/test",
@@ -90,7 +91,7 @@ def _make_config(csv_path: Path, outcomes: list) -> dict:
             },
             "aggregation": {"enabled": False},
         }
-    }
+    })
 
 
 # ---------------------------------------------------------------------------

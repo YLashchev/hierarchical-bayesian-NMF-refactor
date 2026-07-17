@@ -5,11 +5,12 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from bayesian_panel_nmf.config import Config
 from bayesian_panel_nmf.data import load_and_prepare
 from bayesian_panel_nmf.validation import DataError
 
 
-def _make_config(csv_path: Path, has_denom: bool = True) -> dict:
+def _make_config(csv_path: Path, has_denom: bool = True) -> Config:
     outcomes = [
         {
             "outcome_col": "outcome",
@@ -17,7 +18,7 @@ def _make_config(csv_path: Path, has_denom: bool = True) -> dict:
             "label": "total",
         }
     ]
-    return {
+    return Config.model_validate({
         "data": {
             "input_file": str(csv_path),
             "output_dir": "results/test",
@@ -29,7 +30,7 @@ def _make_config(csv_path: Path, has_denom: bool = True) -> dict:
             },
             "aggregation": {"enabled": False},
         }
-    }
+    })
 
 
 class TestDenominatorValidation:

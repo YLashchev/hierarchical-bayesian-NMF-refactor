@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from bayesian_panel_nmf.config import Config
 from bayesian_panel_nmf.data import load_and_prepare
 from bayesian_panel_nmf.validation import DataError
 
@@ -49,8 +50,8 @@ def panel_csv_clean(tmp_path: Path) -> Path:
     return path
 
 
-def _make_config(csv_path: Path) -> dict:
-    return {
+def _make_config(csv_path: Path) -> Config:
+    return Config.model_validate({
         "data": {
             "input_file": str(csv_path),
             "output_dir": "results/test",
@@ -68,7 +69,7 @@ def _make_config(csv_path: Path) -> dict:
             },
             "aggregation": {"enabled": False},
         }
-    }
+    })
 
 
 class TestDuplicateDetection:

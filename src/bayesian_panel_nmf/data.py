@@ -23,17 +23,13 @@ from bayesian_panel_nmf.arrays import (
     UNIT_COL,
     build_model_arrays,
 )
-from bayesian_panel_nmf.validation import (
-    ConfigError,
-    DataError,
-    validate_filepath,
-    validate_groups,
-)
+from bayesian_panel_nmf.checks import validate_filepath, validate_groups
+from bayesian_panel_nmf.validation import ConfigError, DataError
 
 
 def load_and_prepare(
     filepath: str,
-    config: "Config | dict",
+    config: "Config",
     groups: list[str],
     exclude_units: list[str] | None = None,
     type_config: dict | None = None,
@@ -49,9 +45,8 @@ def load_and_prepare(
     ----------
     filepath : str
         Path to input CSV file
-    config : Config or dict
-        Typed ``Config`` (preferred) or a raw config dict (validated/coerced
-        to ``Config`` on entry for back-compat).
+    config : Config
+        Typed configuration (see ``config.py``).
     groups : list of str
         Which outcome groups to include (e.g., ["total"] or ["usborn", "foreign"])
     exclude_units : list of str, optional
@@ -80,11 +75,7 @@ def load_and_prepare(
     ConfigError
         If config is missing required sections or keys
     """
-    from bayesian_panel_nmf.config import Config
-
     validate_filepath(filepath)
-    if isinstance(config, dict):
-        config = Config.model_validate(config)
     validate_groups(groups)
 
     data_config = config.data

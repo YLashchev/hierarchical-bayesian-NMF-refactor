@@ -23,12 +23,13 @@ from jax import random
 from loguru import logger
 from numpyro.infer import MCMC, NUTS
 
+from .checks import validate_data_dict, validate_rank
 from .config import Config
 from .diagnostics import convergence_summary
 from .models.cut_baseline import stage1_model
 from .models.cut_treatment import stage2_model
 from .parallelism import choose_mcmc_parallelism
-from .validation import ConfigError, DataError, validate_data_dict, validate_rank
+from .validation import ConfigError, DataError
 
 DEFAULT_NUM_STAGE1_DRAWS = 25
 DEFAULT_STAGE2_DRAWS_PER_COMPONENT = 100

@@ -6,6 +6,19 @@ All notable changes to this project will be documented in this file.
 
 ### Changed (Phase 10 cleanup)
 
+- Removed back-compat scaffolding (no shims left): (1) deleted the
+  `validation.validate_config()` wrapper — call `Config.model_validate(...)`
+  directly; (2) `data.load_and_prepare()` now requires a typed `Config` (the
+  dict-accept coercion shim is gone); (3) `validation.py` no longer re-exports
+  the `checks.py` runtime validators — import them from `bayesian_panel_nmf.checks`.
+  `validation.py` is now just the two shared exception types (`ConfigError`,
+  `DataError`). This also breaks a latent `checks`↔`validation` import cycle.
+- `_get_outcome_name` fallback changed from the fertility-specific `"births"`
+  to the domain-neutral `"outcome"`. Affects only configs that set neither
+  `data.outcome` nor an `outcomes_from_prefixes` prefix (e.g. explicit-
+  `outcomes` configs like nativity): their draws filenames change from
+  `NB_births_<type>_<rank>` to `NB_outcome_<type>_<rank>`. Prefix-based
+  configs (fertility) are unaffected.
 - `aggregate_units.add_aggregate_units()` now delegates all config-shape
   validation to the existing pydantic `AggregateUnitSpec`
   (`config.py`) instead of re-validating it by hand. Deleted the

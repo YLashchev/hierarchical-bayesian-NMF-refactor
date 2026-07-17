@@ -3,8 +3,9 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from bayesian_panel_nmf.config import Config
 from bayesian_panel_nmf.data import load_and_prepare
-from bayesian_panel_nmf.validation import ConfigError, DataError, validate_config
+from bayesian_panel_nmf.validation import ConfigError, DataError
 
 
 @pytest.fixture
@@ -58,7 +59,7 @@ def test_explicit_outcomes_still_work(panel_csv: Path) -> None:
         },
     )
 
-    result = load_and_prepare(str(panel_csv), config, groups=["a", "b"])
+    result = load_and_prepare(str(panel_csv), Config.model_validate(config), groups=["a", "b"])
 
     assert result["groups"] == ["a", "b"]
     assert sorted(result["df_preprocessed"]["group"].unique().tolist()) == ["a", "b"]
@@ -79,7 +80,7 @@ def test_prefix_outcomes_with_include(panel_csv: Path) -> None:
         },
     )
 
-    result = load_and_prepare(str(panel_csv), config, groups=["a", "b"])
+    result = load_and_prepare(str(panel_csv), Config.model_validate(config), groups=["a", "b"])
 
     assert result["groups"] == ["a", "b"]
     assert sorted(result["df_preprocessed"]["group"].unique().tolist()) == ["a", "b"]
@@ -99,7 +100,7 @@ def test_prefix_outcomes_autodiscover_shared_suffixes(panel_csv: Path) -> None:
         },
     )
 
-    result = load_and_prepare(str(panel_csv), config, groups=["a", "b"])
+    result = load_and_prepare(str(panel_csv), Config.model_validate(config), groups=["a", "b"])
 
     assert result["groups"] == ["a", "b"]
     assert sorted(result["df_preprocessed"]["group"].unique().tolist()) == ["a", "b"]
@@ -121,7 +122,7 @@ def test_validate_config_rejects_mixed_schema_modes(panel_csv: Path) -> None:
     )
 
     with pytest.raises(ConfigError, match="exactly one"):
-        validate_config(config)
+        Config.model_validate(config)
 
 
 def test_validate_config_requires_model_section(panel_csv: Path) -> None:
@@ -135,7 +136,7 @@ def test_validate_config_requires_model_section(panel_csv: Path) -> None:
         },
     )
 
-    validate_config(config)
+    Config.model_validate(config)
 
 
 def test_validate_config_requires_model_types(panel_csv: Path) -> None:
@@ -150,7 +151,7 @@ def test_validate_config_requires_model_types(panel_csv: Path) -> None:
     )
     config["model"] = {}
 
-    validate_config(config)
+    Config.model_validate(config)
 
 
 def test_validate_config_rejects_non_dict_model_types(panel_csv: Path) -> None:
@@ -166,7 +167,7 @@ def test_validate_config_rejects_non_dict_model_types(panel_csv: Path) -> None:
     config["model"] = {"types": []}
 
     with pytest.raises(ConfigError, match="valid dictionary"):
-        validate_config(config)
+        Config.model_validate(config)
 
 
 def test_prefix_outcomes_require_matching_denominator_suffixes(tmp_path: Path) -> None:
@@ -197,7 +198,7 @@ def test_prefix_outcomes_require_matching_denominator_suffixes(tmp_path: Path) -
     )
 
     with pytest.raises(DataError, match="Missing denominator columns"):
-        load_and_prepare(str(csv_path), config, groups=["a", "b"])
+        load_and_prepare(str(csv_path), Config.model_validate(config), groups=["a", "b"])
 
 
 def test_prefix_outcomes_reject_unknown_include_suffix(panel_csv: Path) -> None:
@@ -216,4 +217,4 @@ def test_prefix_outcomes_reject_unknown_include_suffix(panel_csv: Path) -> None:
     )
 
     with pytest.raises(DataError, match="Missing outcome columns"):
-        load_and_prepare(str(panel_csv), config, groups=["a"])
+        load_and_prepare(str(panel_csv), Config.model_validate(config), groups=["a"])

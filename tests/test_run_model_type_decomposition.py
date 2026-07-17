@@ -133,7 +133,7 @@ def test_clean_true_removes_existing_type_output_dir_before_rerun(
 
     assert not stale_file.exists()
     assert (output_dir / "total" / "df_total.csv").exists()
-    assert (output_dir / "total" / "NB_births_total_1.csv").exists()
+    assert (output_dir / "total" / "NB_outcome_total_1.csv").exists()
 
 
 def test_convergence_gate_failure_logs_warning_but_does_not_abort(
@@ -193,10 +193,10 @@ def test_convergence_gate_failure_logs_warning_but_does_not_abort(
     )
 
     # Pipeline must NOT abort: draws CSV still written despite failed gate.
-    draws_file = output_dir / "total" / "NB_births_total_1.csv"
+    draws_file = output_dir / "total" / "NB_outcome_total_1.csv"
     assert draws_file.exists()
 
-    convergence_file = output_dir / "total" / "NB_births_total_1_convergence.json"
+    convergence_file = output_dir / "total" / "NB_outcome_total_1_convergence.json"
     assert convergence_file.exists()
     written_gate = json.loads(convergence_file.read_text())
     assert written_gate["converged"] is False

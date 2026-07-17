@@ -15,13 +15,10 @@ from jax import block_until_ready, random
 from loguru import logger
 from numpyro.infer import MCMC, NUTS, Predictive
 
+from bayesian_panel_nmf.checks import validate_data_dict, validate_rank
 from bayesian_panel_nmf.config import Config
 from bayesian_panel_nmf.parallelism import choose_mcmc_parallelism
-from bayesian_panel_nmf.validation import (
-    DataError,
-    validate_data_dict,
-    validate_rank,
-)
+from bayesian_panel_nmf.validation import DataError
 
 
 def run_mcmc_inference(

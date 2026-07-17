@@ -2,6 +2,7 @@
 
 __version__ = "0.1.0"
 
+from bayesian_panel_nmf.checks import validate_data_dict
 from bayesian_panel_nmf.config import Config
 from bayesian_panel_nmf.data import load_and_prepare
 from bayesian_panel_nmf.diagnostics import convergence_summary
@@ -20,8 +21,6 @@ from bayesian_panel_nmf.results import format_draws
 from bayesian_panel_nmf.validation import (
     ConfigError,
     DataError,
-    validate_config,
-    validate_data_dict,
 )
 
 __all__ = [
@@ -33,8 +32,7 @@ __all__ = [
     "DataError",
     # Config
     "Config",
-    # Validation - Functions
-    "validate_config",
+    # Validation
     "validate_data_dict",
     # Data loading
     "load_and_prepare",
