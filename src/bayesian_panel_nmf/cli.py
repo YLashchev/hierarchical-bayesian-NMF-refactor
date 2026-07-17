@@ -24,6 +24,8 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from loguru import logger  # noqa: E402
+from rich.console import Console  # noqa: E402
+from rich.prompt import Confirm, Prompt  # noqa: E402
 
 from bayesian_panel_nmf.config import Config  # noqa: E402
 from bayesian_panel_nmf.logging_config import setup_logging  # noqa: E402
@@ -88,8 +90,45 @@ def _apply_mcmc_overrides(config: Config, args: argparse.Namespace) -> Config:
     return Config.model_validate(data)
 
 
+def _interactive_run_setup(args: argparse.Namespace) -> argparse.Namespace:
+    """Fill config/type/save_traces by prompting when --config is omitted.
+
+    Explicit --config bypasses every prompt. Non-TTY without --config is an
+    error (scripts must pass --config; we never guess a default config).
+    """
+    if args.config is not None:
+        return args
+    if not sys.stdin.isatty():
+        raise ConfigError("no --config given and not a terminal; pass --config")
+
+    configs = sorted(Path("configs").glob("*.yaml")) if Path("configs").is_dir() else []
+    if not configs:
+        raise ConfigError("No config files found under ./configs/; pass --config")
+
+    console = Console(stderr=True)
+    console.print("[bold]Config:[/bold]")
+    for i, p in enumerate(configs, 1):
+        console.print(f"  {i}) {p.stem}")
+    idx = int(Prompt.ask("Config", choices=[str(i) for i in range(1, len(configs) + 1)]))
+    args.config = str(configs[idx - 1])
+
+    types = list(Config.from_yaml(args.config).model.types)
+    console.print("[bold]Model type:[/bold]")
+    for i, t in enumerate(types, 1):
+        console.print(f"  {i}) {t}")
+    console.print(f"  {len(types) + 1}) (all)")
+    t_idx = int(
+        Prompt.ask("Type", choices=[str(i) for i in range(1, len(types) + 2)])
+    )
+    args.type = types[t_idx - 1] if t_idx <= len(types) else None
+
+    args.save_traces = args.save_traces or Confirm.ask("Save traces?", default=False)
+    return args
+
+
 def _run_command(args: argparse.Namespace) -> None:
     """``bpnmf run`` — port of ``scripts/run_analysis.py``'s ``main()``."""
+    args = _interactive_run_setup(args)
     log_level = "DEBUG" if args.verbose else "INFO"
     setup_logging(level=log_level, log_file=args.log_file)
 
@@ -123,8 +162,8 @@ def _add_run_parser(subparsers) -> None:
     parser.add_argument(
         "--config",
         type=str,
-        default="configs/nativity_config.yaml",
-        help="Path to config file",
+        default=None,
+        help="Path to config file (omit for an interactive picker)",
     )
     parser.add_argument(
         "--type",

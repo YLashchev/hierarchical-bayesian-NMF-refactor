@@ -22,7 +22,9 @@ def test_build_parser_dispatches_run(tmp_path):
 def test_run_defaults_match_previous_script_defaults():
     parser = cli._build_parser()
     args = parser.parse_args(["run"])
-    assert args.config == "configs/nativity_config.yaml"
+    # config defaults to None -> interactive picker (TTY) or error (non-TTY);
+    # the old silent nativity_config.yaml default was removed with the picker.
+    assert args.config is None
     assert args.type is None
     assert args.rank is None
     assert args.verbose is False
