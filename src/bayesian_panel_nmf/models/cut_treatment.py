@@ -113,7 +113,7 @@ def stage2_model(
         conc_broadcast = None
 
     if adjust_for_missingness:
-        scope(missingness_adjustment, "low_births")(
+        scope(missingness_adjustment, "suppressed_counts")(
             mu,
             missing_idx,
             exposed_idx,

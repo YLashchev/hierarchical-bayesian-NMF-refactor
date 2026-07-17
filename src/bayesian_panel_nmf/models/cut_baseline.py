@@ -118,7 +118,7 @@ def stage1_model(
                 if dispersion is not None
                 else None
             )
-            scope(missingness_adjustment, "low_births")(
+            scope(missingness_adjustment, "suppressed_counts")(
                 mu,
                 missing_idx,
                 control_idx,

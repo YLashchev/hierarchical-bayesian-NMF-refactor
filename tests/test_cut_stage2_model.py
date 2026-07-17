@@ -73,8 +73,8 @@ def test_censored_exposed_factors_present_iff_adjusting():
     t_on = trace(seed(stage2_model, jax.random.PRNGKey(0))).get_trace(
         **_kwargs(Y, control, missing)
     )
-    assert "low_births/missing_factors" in t_on
+    assert "suppressed_counts/missing_factors" in t_on
     t_off = trace(seed(stage2_model, jax.random.PRNGKey(0))).get_trace(
         **_kwargs(Y, control, missing, adjust_for_missingness=False)
     )
-    assert "low_births/missing_factors" not in t_off
+    assert "suppressed_counts/missing_factors" not in t_off

@@ -239,8 +239,8 @@ def _resolve_chains(mcmc_cfg: dict) -> tuple[int, str]:
 
 
 def _extract_fit(mcmc: MCMC) -> MCMCFit:
-    """Convert one MCMC run to host arrays; strip scoped low_births/* keys
-    via output.drop_scoped_samples (xarray rejects '/' in variable names)."""
+    """Convert one MCMC run to host arrays; strip scoped suppressed_counts/*
+    keys via results.drop_scoped_samples (xarray rejects '/' in var names)."""
     from .results import drop_scoped_samples
 
     grouped = mcmc.get_samples(group_by_chain=True)

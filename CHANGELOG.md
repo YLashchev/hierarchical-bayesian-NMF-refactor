@@ -26,6 +26,13 @@ All notable changes to this project will be documented in this file.
   validation/plumbing change — aggregation math (`_aggregate_one`,
   `_logsumexp_series`, `_source_units_for_spec`'s selection logic) is
   untouched; golden output remains bit-identical.
+- Renamed the missingness-adjustment `numpyro.handlers.scope` prefix
+  `low_births` → `suppressed_counts` (domain-neutral; the package models
+  suppressed small counts generally, not births specifically). This affects
+  only scoped sample-site keys, which are stripped before any draws/table/
+  trace serialization — draws CSVs, tables, and convergence JSON are
+  bit-identical. The `missing_factors` / `nonmissing_factors` factor names
+  were already domain-neutral and were kept.
 
 ### Added
 
