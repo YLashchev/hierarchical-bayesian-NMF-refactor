@@ -119,6 +119,7 @@ If a rank is mis-set for your data you'll typically see it in the diagnostics
 | `thinning` | `10` | |
 | `random_seed` | `8675309` | |
 | `progress_bar` | `true` | |
+| `gate_params` | null | prefixes of sample-site names the convergence gate checks; null = all (see [Interpreting diagnostics](#interpreting-diagnostics)) |
 
 ### `output`
 
@@ -245,6 +246,78 @@ with the trace sidecars (run with `--save-traces`, then
 for visual traces). In cut mode the manifest reports Stage-1 and every Stage-2
 fit separately; diagnostics are never pooled across conditional targets.
 
+### Gating only the parameters you care about (`mcmc.gate_params`)
+
+The low-rank factorization contains sites that are individually
+non-identifiable by construction (`state_fe`, `time_fe`, `time_fac`,
+`unit_weight` trade off against each other while their sum — the log-rate
+surface — is stable). Their R-hat legitimately fails even when every
+quantity you report has mixed, so a whole-posterior gate can cry wolf
+forever. `mcmc.gate_params` restricts the R-hat/ESS gate to the sample-site
+name **prefixes** you list:
+
+```yaml
+mcmc:
+  gate_params:
+    - "mu"                  # mu, mu_ctrl
+    - "te"
+    - "treatment"           # treatment_{it,state,category}_scale, treatment_kt
+    - "state_treatment"     # state_treatment_effect
+    - "category_treatment"  # category_treatment_effect
+    - "state_category"      # state_category_te, state_category_scale
+```
+
+Semantics:
+
+- **Prefix match** (`startswith`) on posterior variable names. Beware short
+  prefixes: `"state"` would also sweep in `state_treatment_effect` and
+  `state_category_*`; use the longest unambiguous prefix.
+- **Omit the key (or null) = gate everything** — the historical default; the
+  convergence JSON is unchanged. When set, the JSON gains a `gate_params`
+  key recording what was gated (provenance).
+- **You can include the non-identifiable sites too** — nothing is
+  hard-excluded; add `"state_fe"`, `"time_fe"`, `"time_fac"`,
+  `"unit_weight"` back at will, or drop the key for the full gate.
+- **Divergences are always counted over the full run** regardless of the
+  list — a divergence anywhere invalidates the geometry everywhere.
+- **Thresholds are never configurable** (R-hat < 1.01, bulk ESS > 400,
+  0 divergences).
+- **One list serves joint and both cut stages.** Each gate filters the list
+  against its own posterior: cut Stage-1 (baseline: `mu`, `time_fe`,
+  `time_fac`, `unit_weight`, `disp`) matches only `"mu"` from the list
+  above; Stage-2 components match the full treatment block. Prefixes that
+  match nothing in a given stage are silently skipped — only a list that
+  matches **zero** sites in a stage raises (typo protection). Practical
+  rule: always include `"mu"` so Stage-1 has something to gate.
+
+Try it on the smoke tests (fast, ~3-5 min each):
+
+```bash
+# 1. Baseline: run the joint smoke config as-is (gates ALL parameters —
+#    expect converged: false; the smoke settings are deliberately tiny)
+uv run bpnmf run --config configs/fertility_smoke_test.yaml
+cat results/total/NB_births_total_3_convergence.json
+
+# 2. Add gate_params to a copy and re-run — note rhat_max/ess now reflect
+#    only the gated sites, and the JSON records gate_params
+sed 's/^  random_seed:/  gate_params: ["mu", "te", "treatment", "state_treatment", "category_treatment", "state_category"]\n  random_seed:/' \
+  configs/fertility_smoke_test.yaml > /tmp/smoke_gated.yaml
+uv run bpnmf run --config /tmp/smoke_gated.yaml
+cat results/total/NB_births_total_3_convergence.json
+
+# 3. Same for cut mode (Stage-1 gates on "mu" alone; every Stage-2
+#    component gates on the treatment block):
+sed 's/^  random_seed:/  gate_params: ["mu", "te", "treatment", "state_treatment", "category_treatment", "state_category"]\n  random_seed:/' \
+  configs/fertility_cut_smoke_test.yaml > /tmp/cut_smoke_gated.yaml
+uv run bpnmf run --config /tmp/cut_smoke_gated.yaml
+# cut mode writes the same filename; it holds the Stage-1 + per-component manifest
+cat results/total/NB_births_total_3_convergence.json
+```
+
+Note: gating fewer parameters is a *reporting* choice, not a fix for the
+non-identifiability — the JSON's `gate_params` key keeps the narrowing
+visible to any reader of the artifact.
+
 ---
 
 ## CLI reference
@@ -260,7 +333,7 @@ reporting) for one or all configured model types.
 
 | Flag | Meaning |
 | ---- | ------- |
-| `--config` | Path to config YAML (default `configs/nativity_config.yaml`) |
+| `--config` | Path to config YAML. **Omit it (in a terminal) for an interactive picker** — choose a config from `./configs/*.yaml`, a model type, and save-traces. Non-TTY without `--config` errors. |
 | `--type` | Restrict to one configured model type; default runs all |
 | `--rank` | Override the rank(s) to test from the config |
 | `--verbose` / `-v` | DEBUG-level logging |
@@ -277,7 +350,7 @@ when `output.figures: true`.
 
 | Flag | Meaning |
 | ---- | ------- |
-| `--results` | Path to the draws CSV/parquet (default `results/total/NB_births_total_5.csv`) |
+| `--results` | Path to the draws CSV/parquet. **Omit it (in a terminal) for an interactive picker** — discovers draws under `./results*/` and, for cut runs, auto-attaches the `*_stage1_ppc.csv` sidecar. Non-TTY without `--results` errors. |
 | `--ppc-results` | Optional Stage-1 PPC draws CSV (cut mode) to route the PPC suite to the full Stage-1 posterior |
 | `--target` | Target unit for fit/gap/summary plots (auto-detected if omitted) |
 | `--group` | Group label to render; repeatable; omit to render every group present |
