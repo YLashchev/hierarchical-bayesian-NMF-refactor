@@ -218,8 +218,57 @@ def _add_run_parser(subparsers) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _discover_draws_files() -> list[Path]:
+    """Find run-produced draws files under ./results*/ (CSV or parquet).
+
+    Draws live directly in a type dir (never under figs/) and are the only
+    CSVs there apart from df_<type>.csv and the *_stage1_ppc.csv sidecar.
+    """
+    found = []
+    for p in sorted(Path(".").glob("results*/**/*")):
+        if p.suffix not in (".csv", ".parquet") or "figs" in p.parts:
+            continue
+        if p.name.startswith("df_") or p.stem.endswith("_ppc"):
+            continue
+        found.append(p)
+    return found
+
+
+def _interactive_viz_setup(args: argparse.Namespace) -> argparse.Namespace:
+    """Fill results/ppc_results by prompting when --results is omitted.
+
+    Explicit --results bypasses prompting. Picking a cut run auto-attaches
+    its *_stage1_ppc.csv sidecar so the PPC suite uses the full Stage-1
+    posterior without the user typing the second path.
+    """
+    if args.results is not None:
+        return args
+    if not sys.stdin.isatty():
+        raise ConfigError("no --results given and not a terminal; pass --results")
+
+    draws = _discover_draws_files()
+    if not draws:
+        raise ConfigError("No draws files found under ./results*/; pass --results")
+
+    console = Console(stderr=True)
+    console.print("[bold]Draws file:[/bold]")
+    for i, p in enumerate(draws, 1):
+        console.print(f"  {i}) {p}")
+    idx = int(Prompt.ask("Draws", choices=[str(i) for i in range(1, len(draws) + 1)]))
+    chosen = draws[idx - 1]
+    args.results = str(chosen)
+
+    if args.ppc_results is None:
+        sidecar = chosen.with_name(f"{chosen.stem}_stage1_ppc.csv")
+        if sidecar.exists():
+            args.ppc_results = str(sidecar)
+            console.print(f"  (cut run — attaching {sidecar.name})")
+    return args
+
+
 def _viz_command(args: argparse.Namespace) -> None:
     """``bpnmf viz`` — port of ``scripts/generate_full_viz.py``."""
+    args = _interactive_viz_setup(args)
     results_path = Path(args.results)
     stem = results_path.with_suffix("")
     draws_df = _read_draws(stem)
@@ -241,7 +290,7 @@ def _add_viz_parser(subparsers) -> None:
     parser.add_argument(
         "--results",
         type=str,
-        default="results/total/NB_births_total_5.csv",
+        default=None,
         help="Path to the draws CSV/parquet produced by `bpnmf run`",
     )
     parser.add_argument(

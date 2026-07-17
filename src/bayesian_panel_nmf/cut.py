@@ -348,15 +348,16 @@ def sample_untreated_predictions(
     return np.asarray(draws)
 
 
-def summarize_mcmc(fit: MCMCFit) -> dict:
+def summarize_mcmc(fit: MCMCFit, params: list[str] | None = None) -> dict:
     """Per-fit convergence gate via the existing ArviZ-based summary.
 
     Diagnostics are computed on exactly one real MCMC target -- never across
-    pooled cut components.
+    pooled cut components. ``params`` forwards to
+    ``convergence_summary`` (mcmc.gate_params).
     """
     import arviz as az
 
     idata = az.from_dict(
         {"posterior": fit.samples, "sample_stats": {"diverging": fit.diverging}}
     )
-    return convergence_summary(idata)
+    return convergence_summary(idata, params=params)

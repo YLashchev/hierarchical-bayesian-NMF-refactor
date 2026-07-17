@@ -205,7 +205,7 @@ def _run_single_rank(
         diverging = extra_fields["diverging"].reshape(mcmc.num_chains, -1)
         idata_dict["sample_stats"] = {"diverging": diverging}
     idata = az.from_dict(idata_dict)
-    gate = convergence_summary(idata)
+    gate = convergence_summary(idata, params=config.mcmc.gate_params)
     if not gate["converged"]:
         logger.warning(
             f"{model_type} rank {rank}: convergence gate FAILED — "
@@ -329,7 +329,7 @@ def _cut_stage1(
         f"{model_type} rank {rank} cut: Stage 1 finished in "
         f"{_format_elapsed(time.monotonic() - started)}"
     )
-    stage1_diag = summarize_mcmc(stage1)
+    stage1_diag = summarize_mcmc(stage1, params=config.mcmc.gate_params)
     if not stage1_diag["converged"]:
         logger.warning(
             f"{model_type} rank {rank} cut: Stage-1 convergence gate FAILED — "
@@ -419,7 +419,7 @@ def _cut_stage2_components(
     for i, ref in enumerate(refs):
         started = time.monotonic()
         fit = run_stage2_mcmc(data_dict, ref, config, settings.stage2_mcmc, fit_keys[i])
-        diag = summarize_mcmc(fit)
+        diag = summarize_mcmc(fit, params=config.mcmc.gate_params)
         logger.info(
             f"{model_type} rank {rank} cut: component {ref.component}/"
             f"{len(refs)} (stage1 chain {ref.stage1_chain}, "

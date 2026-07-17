@@ -85,7 +85,7 @@ def test_clean_true_removes_existing_type_output_dir_before_rerun(
     monkeypatch.setattr(
         run_analysis,
         "convergence_summary",
-        lambda idata: {
+        lambda idata, params=None: {
             "rhat_max": 1.0,
             "ess_bulk_min": 1000.0,
             "ess_tail_min": 1000.0,
@@ -146,7 +146,7 @@ def test_convergence_gate_failure_logs_warning_but_does_not_abort(
     monkeypatch.setattr(
         run_analysis,
         "convergence_summary",
-        lambda idata: {
+        lambda idata, params=None: {
             "rhat_max": 2.5,
             "ess_bulk_min": 3.0,
             "ess_tail_min": 5.0,

@@ -165,6 +165,11 @@ class MCMCConfig(BaseModel):
     thinning: int = 10
     random_seed: int = 8675309
     progress_bar: StrictBool = True
+    # Restrict the convergence gate's R-hat/ESS to these sample-site name
+    # prefixes (e.g. ["mu", "te"]) so non-identifiable sites (state_fe,
+    # unit_weight, ...) don't fail the gate. None = gate everything.
+    # Divergences are always counted. Thresholds are never configurable.
+    gate_params: list[str] | None = None
 
 
 class AggregateUnitSpec(BaseModel):
