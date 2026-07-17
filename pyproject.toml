@@ -16,7 +16,7 @@ dependencies = [
   "pyyaml>=6",
   "loguru>=0.7",
   # matplotlib/seaborn are hard deps: reporting + PPC figures are core
-  # features (reporting.py imports visualization.py unconditionally).
+  # features (reports.py imports plots.py unconditionally).
   "matplotlib>=3.8",
   "seaborn>=0.13.2",
   "rich>=13.0",
@@ -64,7 +64,7 @@ skip-magic-trailing-comma = false # keep multi-arg NumPyro sample()/config
 # dicts expanded one-arg-per-line rather than collapsed — readability for
 # the model file's many keyword arguments
 line-ending = "auto"
-docstring-code-format = true # visualization.py has live `>>> f(x)` doctest
+docstring-code-format = true # plots.py has live `>>> f(x)` doctest
 # examples in its numpydoc docstrings; keep them auto-formatted so they can't
 # silently drift out of the project's own style
 docstring-code-line-length = "dynamic"
@@ -100,6 +100,6 @@ ignore_missing_imports = true
 # wrong on installed packages like matplotlib). Do NOT point pyright at the
 # venv or change typeCheckingMode: verified that resolving the real venv makes
 # pyright infer numpyro/jax/pandas call sites confidently WRONG (144 new
-# errors incl. panel_nmf_model.py) rather than skipping them the way mypy's
+# errors incl. models/joint.py) rather than skipping them the way mypy's
 # ignore_missing_imports does. mypy remains the enforced type-check gate.
 reportMissingImports = false

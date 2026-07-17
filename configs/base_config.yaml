@@ -154,7 +154,7 @@ model:
 # -----------------------------------------------------------------------------
 mcmc:
   # Automatically pick num_chains and chain_method from the visible JAX
-  # devices (see choose_mcmc_parallelism in mcmc_utils.py). This is the
+  # devices (see choose_mcmc_parallelism in parallelism.py). This is the
   # recommended default -- set to false only if you need to pin an exact
   # chain count/method regardless of hardware (see the manual override
   # example in README.md).

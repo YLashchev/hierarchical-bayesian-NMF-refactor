@@ -44,7 +44,7 @@ def test_ppc_source_routing(monkeypatch, tmp_path, use_ppc_frame):
     monkeypatch.setattr(reporting, "make_all_ppc_plots", fake_ppc)
 
     # Lazy import: AGENTS.md forbids top-level matplotlib outside
-    # visualization.py. generate_reports() creates real matplotlib figures
+    # plots.py. generate_reports() creates real matplotlib figures
     # and calls seaborn's set_palette(), which mutates global rcParams
     # (axes.prop_cycle etc.) in addition to opening figures. rc_context()
     # isolates the rcParams mutation and plt.close("all") drops the

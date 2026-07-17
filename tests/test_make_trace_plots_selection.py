@@ -13,7 +13,7 @@ def _build_fake_idata(var_shapes: dict[str, tuple[int, ...]]):
     1.1.0's own migration off the deprecated InferenceData constructor) with
     given posterior variable shapes. First two dims of every array are
     always (chain, draw). Uses az.from_dict, the same construction idiom
-    scripts/run_analysis.py already uses for real trace sidecars."""
+    bpnmf traces already uses for real trace sidecars."""
     rng = np.random.default_rng(0)
     n_chain, n_draw = 2, 50
     posterior = {
