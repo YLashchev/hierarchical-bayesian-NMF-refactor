@@ -132,9 +132,7 @@ def _run_reporting(
     from bayesian_panel_nmf.reports import generate_reports
 
     aggregate_units = (
-        [spec.model_dump() for spec in output_config.aggregate_units]
-        if output_config.aggregate_units
-        else None
+        list(output_config.aggregate_units) if output_config.aggregate_units else None
     )
     generate_reports(
         draws_df,

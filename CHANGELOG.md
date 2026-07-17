@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed (Phase 10 cleanup)
+
+- `aggregate_units.add_aggregate_units()` now delegates all config-shape
+  validation to the existing pydantic `AggregateUnitSpec`
+  (`config.py`) instead of re-validating it by hand. Deleted the
+  hand-rolled `_as_bool`, `_as_str_list`, `_validate_aggregate_spec`, and
+  `_active_selectors` helpers (~54 net lines removed from
+  `aggregate_units.py`, 225→171 lines). `add_aggregate_units` now accepts
+  `Sequence[AggregateUnitSpec | dict]` and coerces plain dicts (e.g. from
+  YAML/tests) via `AggregateUnitSpec.model_validate()` at the top, wrapping
+  any `pydantic.ValidationError` as `ConfigError` to preserve the existing
+  exception contract. The "exactly one include selector" rule (business
+  logic, not shape) moved to a new `AggregateUnitSpec._check_selectors`
+  `@model_validator` in `config.py`, so it is now enforced at config-load
+  time too. The unit-name/`overwrite` collision check (also business logic)
+  stays in `add_aggregate_units`, now reading typed attributes
+  (`spec.unit`, `spec.overwrite`, ...) instead of `dict.get(...)`.
+  `pipeline.py` and `reports.py` pass typed `AggregateUnitSpec` objects
+  through end-to-end instead of `spec.model_dump()`'d dicts. Pure
+  validation/plumbing change — aggregation math (`_aggregate_one`,
+  `_logsumexp_series`, `_source_units_for_spec`'s selection logic) is
+  untouched; golden output remains bit-identical.
+
 ### Added
 
 - `tables.print_run_summary_panel()`: a rich terminal panel summarizing one

@@ -24,6 +24,7 @@ import pandas as pd
 from loguru import logger
 
 from .aggregate_units import add_aggregate_units
+from .config import AggregateUnitSpec
 from .plots import (
     PLOT_REGISTRY,
     make_all_ppc_plots,
@@ -54,7 +55,7 @@ def generate_reports(
     groups: list[str] | None = None,
     print_tables: bool = True,
     print_target_table: bool = True,
-    aggregate_units: list[dict] | None = None,
+    aggregate_units: list[AggregateUnitSpec] | None = None,
     ppc_units: list[str] | None = None,
     ppc_acf_lags: list[int] | None = None,
     ppc_unit_corr_max_time: str | None = None,

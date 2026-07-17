@@ -186,6 +186,28 @@ class AggregateUnitSpec(BaseModel):
     strict: StrictBool = False
     overwrite: StrictBool = False
 
+    @model_validator(mode="after")
+    def _check_selectors(self) -> AggregateUnitSpec:
+        if not self.unit:
+            raise ValueError("aggregate_units[].unit must be a non-empty string")
+        active = [
+            name
+            for name, value in (
+                ("include_treated_units", self.include_treated_units),
+                ("include_all_units", self.include_all_units),
+                ("include_units", self.include_units is not None),
+            )
+            if value
+        ]
+        if len(active) != 1:
+            raise ValueError(
+                f"aggregate_units[] ('{self.unit}') must have exactly one "
+                f"include selector; got {active or 'none'}"
+            )
+        if self.include_units is not None and len(self.include_units) == 0:
+            raise ValueError("aggregate_units[].include_units must be a non-empty list")
+        return self
+
 
 class OutputConfig(BaseModel):
     """``output`` section — figures, tables, reporting/PPC filters."""
