@@ -102,7 +102,7 @@ def _draws_filename(config: Config, model_type: str, rank: int) -> str:
 
 
 def _clean_scoped_samples(mcmc, model_type: str, rank: int) -> dict:
-    """Filter scoped ('/') sample keys via output.drop_scoped_samples, with
+    """Filter scoped ('/') sample keys via results.drop_scoped_samples, with
     per-run debug logging of what was dropped."""
     from bayesian_panel_nmf.results import drop_scoped_samples
 
@@ -361,7 +361,7 @@ def _cut_stage1(
             }
         ).to_netcdf(str(staging / f"{filename}_stage1_traces.nc"), engine="h5netcdf")
 
-    refs = select_stage1_draws(stage1.samples, settings, config.model.model_dump())
+    refs = select_stage1_draws(stage1.samples, settings, config.model)
     stage1_num_chains = stage1.num_chains
     del stage1, mu1  # release the full Stage-1 posterior; refs hold copies
     return stage1_diag, refs, stage1_num_chains

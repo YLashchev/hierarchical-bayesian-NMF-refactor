@@ -24,7 +24,7 @@ from loguru import logger
 from numpyro.infer import MCMC, NUTS
 
 from .checks import validate_data_dict, validate_rank
-from .config import Config
+from .config import Config, ModelConfig
 from .diagnostics import convergence_summary
 from .models.cut_baseline import stage1_model
 from .models.cut_treatment import stage2_model
@@ -152,7 +152,7 @@ def _chain_quotas(total: int, n_chains: int) -> list[int]:
 
 
 def select_stage1_draws(
-    stage1_samples: dict, settings: CutSettings, model_config: dict
+    stage1_samples: dict, settings: CutSettings, model: ModelConfig
 ) -> list[Stage1DrawRef]:
     """Seeded chain-stratified selection without replacement.
 
@@ -168,9 +168,9 @@ def select_stage1_draws(
             f"({n_chains * n_retained})"
         )
 
-    outcome_dist = model_config.get("outcome_distribution", "NB")
-    sample_disp = model_config.get("sample_disp", False)
-    nb_disp = model_config.get("nb_disp", 1e-4)
+    outcome_dist = model.outcome_distribution
+    sample_disp = model.sample_disp
+    nb_disp = model.nb_disp
     disp = stage1_samples.get("disp") if sample_disp else None
     n_units = int(mu_ctrl.shape[3])
 

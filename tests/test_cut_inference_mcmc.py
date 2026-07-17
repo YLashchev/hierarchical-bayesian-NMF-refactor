@@ -71,7 +71,7 @@ def test_stage1_and_stage2_runners_end_to_end():
     }
 
     settings = resolve_cut_settings(CONFIG)
-    refs = select_stage1_draws(fit1.samples, settings, CONFIG.model.model_dump())
+    refs = select_stage1_draws(fit1.samples, settings, CONFIG.model)
     assert len(refs) == 2
 
     fit2 = run_stage2_mcmc(

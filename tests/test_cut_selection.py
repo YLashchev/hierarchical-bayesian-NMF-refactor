@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 
+from bayesian_panel_nmf.config import ModelConfig
 from bayesian_panel_nmf.cut import (
     CutSettings,
     select_stage1_draws,
@@ -35,7 +36,9 @@ def _samples(C=2, S=10, with_disp=False):
     return samples
 
 
-MODEL_NB_FIXED = {"outcome_distribution": "NB", "nb_disp": 1e-4, "sample_disp": False}
+MODEL_NB_FIXED = ModelConfig(
+    outcome_distribution="NB", nb_disp=1e-4, sample_disp=False
+)
 
 
 def test_quota_split_and_component_order():
@@ -65,14 +68,14 @@ def test_ref_provenance_and_values():
 
 
 def test_matched_sampled_dispersion():
-    model = {**MODEL_NB_FIXED, "sample_disp": True}
+    model = MODEL_NB_FIXED.model_copy(update={"sample_disp": True})
     refs = select_stage1_draws(_samples(with_disp=True), _settings(), model)
     for r in refs:
         np.testing.assert_allclose(r.nb_concentration, np.full(D, 2.0))  # 1/0.5
 
 
 def test_poisson_has_no_concentration():
-    model = {"outcome_distribution": "Poisson"}
+    model = ModelConfig(outcome_distribution="Poisson")
     refs = select_stage1_draws(_samples(), _settings(), model)
     assert all(r.nb_concentration is None for r in refs)
 
