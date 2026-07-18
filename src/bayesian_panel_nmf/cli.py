@@ -265,6 +265,30 @@ def _interactive_viz_setup(args: argparse.Namespace) -> argparse.Namespace:
         if sidecar.exists():
             args.ppc_results = str(sidecar)
             console.print(f"  (cut run — attaching {sidecar.name})")
+
+    # Also offer the config whose `output` block drives the re-render, so bare
+    # `bpnmf viz` reproduces a configured run without --config. Option 1 keeps
+    # defaults (render all figures, ignore the output block).
+    if args.config is None:
+        configs = (
+            sorted(Path("configs").glob("*.yaml"))
+            if Path("configs").is_dir()
+            else []
+        )
+        if configs:
+            console.print("[bold]Config (drives figure selection):[/bold]")
+            console.print("  1) (none — render all figures with defaults)")
+            for i, p in enumerate(configs, 2):
+                console.print(f"  {i}) {p.stem}")
+            c_idx = int(
+                Prompt.ask(
+                    "Config",
+                    choices=[str(i) for i in range(1, len(configs) + 2)],
+                    default="1",
+                )
+            )
+            if c_idx > 1:
+                args.config = str(configs[c_idx - 2])
     return args
 
 
