@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed (model — state fixed-effect prior)
+
+- **Behavior change (new posterior).** Replaced the state fixed-effect prior
+  in both `models/joint.py` and `models/cut_baseline.py`: the old flat
+  `ImproperUniform(positive)`-then-`log` form pulled state effects toward
+  `-inf` for units with zero-count cells. New form is a hierarchical,
+  non-centered Normal on the log-rate scale:
+  `state_fe = state_fe_mu + state_fe_sigma * state_fe_z` with
+  `state_fe_mu ~ ImproperUniform(real)`, `state_fe_sigma ~ HalfNormal(0.5)`,
+  `state_fe_z ~ Normal(0,1)` per unit. Ports the fix from the `cut_bayes` /
+  `low_counts_branch` branches. Partial pooling regularizes zero-count units;
+  non-centered form samples the funnel geometry cleanly.
+  - **Sample-site change:** `state_fe` is replaced by `state_fe_mu`,
+    `state_fe_sigma`, `state_fe_z` (affects the trace sidecar and
+    `gate_params` prefixes). `state_fe_mu`/`state_fe_sigma` are identified
+    hyperparameters worth monitoring; `state_fe_z` is the non-identified
+    per-unit offset (exclude from the gate, like the old `state_fe`).
+  - Golden fixtures re-baselined; `mu`/`te`/treatment sites and the draws-CSV
+    column set are unchanged. Stage-1/Stage-2 parity re-verified
+    (`tests/test_cut_model_parity.py`).
+- Removed `configs/nativity_config.yaml` (unused example config).
+
 ### Changed (Phase 10 cleanup)
 
 - Removed back-compat scaffolding (no shims left): (1) deleted the

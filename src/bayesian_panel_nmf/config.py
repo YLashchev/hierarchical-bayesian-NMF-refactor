@@ -182,7 +182,7 @@ class MCMCConfig(BaseModel):
     random_seed: int = 8675309
     progress_bar: StrictBool = True
     # Restrict the convergence gate's R-hat/ESS to these sample-site name
-    # prefixes (e.g. ["mu", "te"]) so non-identifiable sites (state_fe,
+    # prefixes (e.g. ["mu", "te"]) so non-identifiable sites (state_fe_z,
     # unit_weight, ...) don't fail the gate. None = gate everything.
     # Divergences are always counted over the full run.
     gate_params: list[str] | None = None

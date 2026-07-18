@@ -115,7 +115,7 @@ mcmc:
 
   # default null = gate every parameter. A list of sample-site name PREFIXES
   # restricts the R-hat/ESS convergence gate to those sites, so
-  # non-identifiable ones (state_fe, time_fe, time_fac, unit_weight) don't
+  # non-identifiable ones (state_fe_z, time_fe, time_fac, unit_weight) don't
   # fail the gate. All params are still SHOWN in the diagnostics table (with a
   # gate marker); only these decide pass/fail. Divergences always counted.
   # Works for joint and both cut stages (Stage-1 matches only "mu"). See

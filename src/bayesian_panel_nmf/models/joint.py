@@ -34,11 +34,18 @@ def _define_time_factors_and_fe(K, D, rank, N, time_fac_alpha):
             raw_time_factor = jnp.log(
                 numpyro.sample("time_fac", dist.Gamma(time_fac_alpha, time_fac_alpha))
             )
+        # Hierarchical, non-centered Normal prior on state fixed effects
+        # (real/log-rate scale). Replaces the old flat ImproperUniform on the
+        # positive scale, which pulled state effects to -inf for units with
+        # zero-count cells. Partial pooling via a shared mean/scale + z-scores
+        # regularizes those units; non-centered form also samples cleanly.
+        state_fe_mu = numpyro.sample(
+            "state_fe_mu", dist.ImproperUniform(constraints.real, (), ())
+        )
+        state_fe_sigma = numpyro.sample("state_fe_sigma", dist.HalfNormal(0.5))
         with numpyro.plate("D", D):
-            state_fe_sample = numpyro.sample(
-                "state_fe", dist.ImproperUniform(constraints.positive, (), ())
-            )
-            state_fe = jnp.log(state_fe_sample).T
+            state_fe_z = numpyro.sample("state_fe_z", dist.Normal(0, 1))
+        state_fe = (state_fe_mu + state_fe_sigma * state_fe_z).T
 
         with numpyro.plate("N", N):
             time_fe_sample = numpyro.sample("time_fe", dist.Gamma(1, 1))

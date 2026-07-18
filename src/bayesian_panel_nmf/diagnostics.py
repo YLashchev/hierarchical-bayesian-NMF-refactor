@@ -63,7 +63,7 @@ def convergence_summary(
 
     The verdict and the reported rhat_max / ess_*_min are computed over
     ``params`` only (prefix match on variable name, so "mu" covers "mu" and
-    scoped variants) — so non-identifiable sites (state_fe, unit_weight, ...)
+    scoped variants) — so non-identifiable sites (state_fe_z, unit_weight, ...)
     excluded from ``params`` don't fail the gate. Default None = every
     parameter (the historical gate). Divergences are ALWAYS counted over the
     full run regardless of ``params``. ``thresholds`` defaults to the
