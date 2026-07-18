@@ -222,6 +222,10 @@ class OutputConfig(BaseModel):
     save_traces: StrictBool = False
     target_unit: str | None = None
     report_groups: list[str] | None = None
+    # Render fit/gap for the target unit AND every treated unit, restricted to
+    # the 'total' group (matches upstream's per-state supplement pages). No-op
+    # when the run has no 'total' group (e.g. education/race type runs).
+    fit_gap_per_unit: StrictBool = False
     print_tables: StrictBool = True
     print_target_table: StrictBool = True
     aggregate_units: list[AggregateUnitSpec] | None = None

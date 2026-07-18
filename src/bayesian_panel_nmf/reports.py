@@ -27,6 +27,7 @@ from .aggregate_units import add_aggregate_units
 from .config import AggregateUnitSpec
 from .plots import (
     PLOT_REGISTRY,
+    _identify_treated_units,
     make_all_ppc_plots,
     make_group_comparison_plot,
     make_interval_plot,
@@ -62,6 +63,7 @@ def generate_reports(
     ppc_exclude_units: list[str] | None = None,
     ppc_draws_df: pd.DataFrame | None = None,
     figures: list[str] | None = None,
+    fit_gap_per_unit: bool = False,
 ) -> dict:
     """Generate figures and tables from posterior draws.
 
@@ -162,7 +164,19 @@ def generate_reports(
     if not pd.api.types.is_datetime64_any_dtype(quantiles_df["time"]):
         quantiles_df["time"] = pd.to_datetime(quantiles_df["time"])
 
-    target_slug = _slug(target_unit)
+    # Units to render fit/gap for, per group. Normally just the target; with
+    # fit_gap_per_unit, also every treated unit -- but ONLY in the 'total'
+    # group (upstream renders per-state fit/gap at category='Total' only, from
+    # the total-type run). No 'total' group -> no expansion (e.g. education).
+    # Derive treated units from draws_df (has the real treatment column;
+    # quantiles_df's treated_unit flag marks only the target).
+    treated_units = _identify_treated_units(draws_df)
+
+    def _fit_gap_units(grp: str) -> list[str]:
+        if fit_gap_per_unit and grp == "total":
+            ordered = [target_unit] + [u for u in treated_units if u != target_unit]
+            return ordered
+        return [target_unit]
 
     # ---- Per-group unit-level figures ----------------------------------------
     # When only one group, write directly under figs/ (no extra nesting).
@@ -170,21 +184,23 @@ def generate_reports(
         grp_figs_dir = figs_dir / grp if len(report_groups) > 1 else figs_dir
         grp_figs_dir.mkdir(parents=True, exist_ok=True)
 
-        if "unit_fit" in selected_figures:
-            logger.debug(f"  [{grp}] fit")
-            fig, _ = make_unit_fit_plot(quantiles_df, target_unit, group=grp)
-            fig.savefig(
-                grp_figs_dir / f"fit_{target_slug}.png", dpi=150, bbox_inches="tight"
-            )
-            plt.close(fig)
+        for unit in _fit_gap_units(grp):
+            unit_slug = _slug(unit)
+            if "unit_fit" in selected_figures:
+                logger.debug(f"  [{grp}] fit {unit}")
+                fig, _ = make_unit_fit_plot(quantiles_df, unit, group=grp)
+                fig.savefig(
+                    grp_figs_dir / f"fit_{unit_slug}.png", dpi=150, bbox_inches="tight"
+                )
+                plt.close(fig)
 
-        if "unit_gap" in selected_figures:
-            logger.debug(f"  [{grp}] gap")
-            fig, _ = make_unit_gap_plot(quantiles_df, target_unit, group=grp)
-            fig.savefig(
-                grp_figs_dir / f"gap_{target_slug}.png", dpi=150, bbox_inches="tight"
-            )
-            plt.close(fig)
+            if "unit_gap" in selected_figures:
+                logger.debug(f"  [{grp}] gap {unit}")
+                fig, _ = make_unit_gap_plot(quantiles_df, unit, group=grp)
+                fig.savefig(
+                    grp_figs_dir / f"gap_{unit_slug}.png", dpi=150, bbox_inches="tight"
+                )
+                plt.close(fig)
 
         if "raw_rate" in selected_figures:
             logger.debug(f"  [{grp}] raw_rate")

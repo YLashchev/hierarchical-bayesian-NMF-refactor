@@ -143,6 +143,7 @@ def _run_reporting(
         ppc_exclude_units=output_config.ppc_exclude_units,
         ppc_draws_df=ppc_draws_df,
         figures=output_config.figures,
+        fit_gap_per_unit=output_config.fit_gap_per_unit,
     )
 
 
