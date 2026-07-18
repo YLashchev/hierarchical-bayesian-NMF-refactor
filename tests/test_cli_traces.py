@@ -41,11 +41,16 @@ def test_rows_flag_constant_site_as_fixed(tmp_path):
     assert by_name["mu"]["status"] == "PASS"
 
 
-def test_fixed_sites_excluded_from_overall_verdict(tmp_path):
+def test_gated_subset_excludes_nongated_fails_from_verdict(tmp_path):
+    # gate only mu+disp (healthy + fixed); time_fac fails but is non-gated,
+    # so the rendered verdict passes while time_fac still shows.
+    from bayesian_panel_nmf.tables import render_diagnostics_table
+
     nc = _write_nc(tmp_path / "t.nc", fixed_disp=True)
-    idata = az.from_netcdf(nc)
-    rows = parameter_diagnostics(idata, params=["mu", "disp"])  # only healthy + fixed
-    assert all(r["status"] != "FAIL" for r in rows)
+    rows = parameter_diagnostics(az.from_netcdf(nc), gate_params=["mu", "disp"])
+    assert {r["param"] for r in rows} == {"mu", "disp", "time_fac"}  # all shown
+    ok = render_diagnostics_table(rows)
+    assert ok is True  # only gated params (mu, disp) decide; time_fac non-gated
 
 
 def test_rows_sorted_worst_first(tmp_path):

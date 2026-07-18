@@ -147,7 +147,7 @@ def test_run_model_type_without_figures_does_not_import_viz(
     monkeypatch.setattr(
         run_analysis,
         "convergence_summary",
-        lambda idata, params=None: {
+        lambda idata, params=None, **kw: {
             "rhat_max": 1.0,
             "ess_bulk_min": 1000.0,
             "ess_tail_min": 1000.0,

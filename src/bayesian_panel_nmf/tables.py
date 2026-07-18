@@ -389,8 +389,11 @@ _STATUS_STYLE = {
 def render_diagnostics_table(rows: list[dict], title: str | None = None) -> bool:
     """Render per-parameter diagnostic rows as one Rich table.
 
-    ``rows`` come from ``diagnostics.parameter_diagnostics``. Returns True iff
-    no row FAILs (fixed/constant sites never fail). Display only.
+    ``rows`` come from ``diagnostics.parameter_diagnostics``. Shows every
+    parameter; the ``gate`` column marks whether it counts toward the run
+    verdict (non-gated rows are dimmed and shown for information only). ESS is
+    a single ``min(bulk, tail)`` column. Returns True iff no GATED row FAILs
+    (fixed/constant and non-gated sites never fail the run). Display only.
     """
     from rich.console import Console
     from rich.table import Table
@@ -398,21 +401,25 @@ def render_diagnostics_table(rows: list[dict], title: str | None = None) -> bool
     t = Table(title=title)
     t.add_column("Parameter")
     t.add_column("max R-hat", justify="right")
-    t.add_column("min bulk ESS", justify="right")
-    t.add_column("min tail ESS", justify="right")
+    t.add_column("min ESS", justify="right")
     t.add_column("status")
+    t.add_column("gate")
     for r in rows:
         fmt = lambda v, p: "\u2014" if v is None else f"{v:{p}}"  # noqa: E731
+        gated = r.get("gated", True)
+        # Non-gated rows are informational: dim them and blank the status
+        # style so they don't read as run failures.
+        style = _STATUS_STYLE.get(r["status"]) if gated else "dim"
         t.add_row(
             r["param"],
             fmt(r["rhat"], ".4f"),
-            fmt(r["ess_bulk"], ".0f"),
-            fmt(r["ess_tail"], ".0f"),
+            fmt(r.get("ess", r.get("ess_bulk")), ".0f"),
             r["status"],
-            style=_STATUS_STYLE.get(r["status"]),
+            "\u2713" if gated else "",
+            style=style,
         )
     Console().print(t)
-    return not any(r["status"] == "FAIL" for r in rows)
+    return not any(r["status"] == "FAIL" and r.get("gated", True) for r in rows)
 
 
 def render_component_table(fits: list[dict], title: str | None = None) -> bool:

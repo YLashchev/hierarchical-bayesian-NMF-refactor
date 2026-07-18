@@ -36,10 +36,12 @@ def test_constant_site_is_fixed_not_failed():
     assert mc["rhat"] is None
 
 
-def test_prefix_filter_matches_gate_params():
-    rows = parameter_diagnostics(_idata(fixed=True), params=["mu"])
-    # "mu" prefix matches both mu and mu_ctrl, not time_fac
-    assert {r["param"] for r in rows} == {"mu", "mu_ctrl"}
+def test_prefix_filter_tags_gated_shows_all():
+    rows = parameter_diagnostics(_idata(fixed=True), gate_params=["mu"])
+    # ALL params shown now; gate_params only tags which count toward verdict.
+    assert {r["param"] for r in rows} == {"mu", "mu_ctrl", "time_fac"}
+    gated = {r["param"]: r["gated"] for r in rows}
+    assert gated == {"mu": True, "mu_ctrl": True, "time_fac": False}
 
 
 def test_render_returns_pass_flag():

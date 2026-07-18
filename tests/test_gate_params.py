@@ -15,8 +15,12 @@ from bayesian_panel_nmf.config import Config
 from bayesian_panel_nmf.diagnostics import convergence_summary
 
 
-def _idata(n_chains=2, n_draws=200, seed=0):
-    """Two params: 'good' mixes across chains, 'bad' does not."""
+def _idata(n_chains=2, n_draws=600, seed=0):
+    """Two params: 'good' mixes across chains, 'bad' does not.
+
+    600 draws so 'good' clears ESS>400 on BOTH bulk and tail (the gate now
+    uses min(bulk, tail)).
+    """
     rng = np.random.default_rng(seed)
     good = rng.normal(size=(n_chains, n_draws))
     bad = np.stack([rng.normal(loc=0, size=n_draws), rng.normal(loc=9, size=n_draws)])

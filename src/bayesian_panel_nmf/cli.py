@@ -385,10 +385,14 @@ def _add_viz_parser(subparsers) -> None:
 
 
 def _diag_rows(idata, param_filter: str | None) -> list[dict]:
-    """parameter_diagnostics with the CLI's comma-string filter + clean error."""
+    """parameter_diagnostics with the CLI's comma-string filter + clean error.
+
+    ``--param-filter`` sets which params GATE the verdict (all params are still
+    shown; non-gated ones are dimmed), matching ``mcmc.gate_params``.
+    """
     prefixes = param_filter.split(",") if param_filter else None
     try:
-        return parameter_diagnostics(idata, params=prefixes)
+        return parameter_diagnostics(idata, gate_params=prefixes)
     except ValueError as e:
         raise ConfigError(str(e)) from e
 

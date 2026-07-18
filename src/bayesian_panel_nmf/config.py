@@ -151,6 +151,22 @@ class ModelConfig(BaseModel):
         return self
 
 
+class ConvergenceConfig(BaseModel):
+    """``mcmc.convergence`` — pass/warn/fail bands for the gate.
+
+    A parameter PASSes below ``rhat_warn`` and at/above ``ess_min``; FAILs at/
+    above ``rhat_fail`` or below ``ess_min * ess_fail_fraction``; WARNs in
+    between. ESS is min(bulk, tail). Defaults = the historical gate.
+    """
+
+    model_config = _STRICT
+
+    rhat_warn: float = 1.01
+    rhat_fail: float = 1.05
+    ess_min: float = 400.0
+    ess_fail_fraction: float = 0.25
+
+
 class MCMCConfig(BaseModel):
     """``mcmc`` section — NUTS/chain configuration."""
 
@@ -168,8 +184,12 @@ class MCMCConfig(BaseModel):
     # Restrict the convergence gate's R-hat/ESS to these sample-site name
     # prefixes (e.g. ["mu", "te"]) so non-identifiable sites (state_fe,
     # unit_weight, ...) don't fail the gate. None = gate everything.
-    # Divergences are always counted. Thresholds are never configurable.
+    # Divergences are always counted over the full run.
     gate_params: list[str] | None = None
+    # Pass/warn/fail thresholds for the convergence gate. Defaults reproduce
+    # the historical gate (R-hat < 1.01, ESS > 400, hard-FAIL below ESS 100).
+    # ESS is min(bulk, tail) per parameter.
+    convergence: ConvergenceConfig = Field(default_factory=lambda: ConvergenceConfig())
 
 
 class AggregateUnitSpec(BaseModel):

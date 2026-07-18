@@ -20,7 +20,11 @@ from loguru import logger
 from bayesian_panel_nmf.checks import _safe_rmtree
 from bayesian_panel_nmf.config import Config, OutputConfig, TypeConfig
 from bayesian_panel_nmf.data import load_and_prepare
-from bayesian_panel_nmf.diagnostics import convergence_summary
+from bayesian_panel_nmf.diagnostics import (
+    ConvergenceThresholds,
+    convergence_summary,
+    parameter_diagnostics,
+)
 from bayesian_panel_nmf.inference import generate_predictions, run_mcmc_inference
 from bayesian_panel_nmf.logging_config import setup_logging
 from bayesian_panel_nmf.models import model
@@ -206,7 +210,10 @@ def _run_single_rank(
         diverging = extra_fields["diverging"].reshape(mcmc.num_chains, -1)
         idata_dict["sample_stats"] = {"diverging": diverging}
     idata = az.from_dict(idata_dict)
-    gate = convergence_summary(idata, params=config.mcmc.gate_params)
+    thresholds = ConvergenceThresholds(**config.mcmc.convergence.model_dump())
+    gate = convergence_summary(
+        idata, params=config.mcmc.gate_params, thresholds=thresholds
+    )
     if not gate["converged"]:
         logger.warning(
             f"{model_type} rank {rank}: convergence gate FAILED — "
@@ -252,7 +259,6 @@ def _run_single_rank(
     if output_config.figures:
         _run_reporting(draws_df, report_dir, output_config)
 
-    from bayesian_panel_nmf.diagnostics import parameter_diagnostics
     from bayesian_panel_nmf.tables import print_run_summary_panel
 
     print_run_summary_panel(
@@ -265,7 +271,9 @@ def _run_single_rank(
         figures=output_config.figures,
         artifact_paths=[str(draws_file), str(convergence_file)]
         + ([str(report_dir)] if output_config.figures else []),
-        diagnostic_rows=parameter_diagnostics(idata, params=config.mcmc.gate_params),
+        diagnostic_rows=parameter_diagnostics(
+            idata, gate_params=config.mcmc.gate_params, thresholds=thresholds
+        ),
     )
 
 
@@ -332,7 +340,11 @@ def _cut_stage1(
         f"{model_type} rank {rank} cut: Stage 1 finished in "
         f"{_format_elapsed(time.monotonic() - started)}"
     )
-    stage1_diag = summarize_mcmc(stage1, params=config.mcmc.gate_params)
+    stage1_diag = summarize_mcmc(
+        stage1,
+        params=config.mcmc.gate_params,
+        thresholds=ConvergenceThresholds(**config.mcmc.convergence.model_dump()),
+    )
     if not stage1_diag["converged"]:
         logger.warning(
             f"{model_type} rank {rank} cut: Stage-1 convergence gate FAILED — "
@@ -422,7 +434,11 @@ def _cut_stage2_components(
     for i, ref in enumerate(refs):
         started = time.monotonic()
         fit = run_stage2_mcmc(data_dict, ref, config, settings.stage2_mcmc, fit_keys[i])
-        diag = summarize_mcmc(fit, params=config.mcmc.gate_params)
+        diag = summarize_mcmc(
+            fit,
+            params=config.mcmc.gate_params,
+            thresholds=ConvergenceThresholds(**config.mcmc.convergence.model_dump()),
+        )
         logger.info(
             f"{model_type} rank {rank} cut: component {ref.component}/"
             f"{len(refs)} (stage1 chain {ref.stage1_chain}, "

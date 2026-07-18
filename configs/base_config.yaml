@@ -116,10 +116,21 @@ mcmc:
   # default null = gate every parameter. A list of sample-site name PREFIXES
   # restricts the R-hat/ESS convergence gate to those sites, so
   # non-identifiable ones (state_fe, time_fe, time_fac, unit_weight) don't
-  # fail the gate. Divergences are always counted; thresholds never change.
+  # fail the gate. All params are still SHOWN in the diagnostics table (with a
+  # gate marker); only these decide pass/fail. Divergences always counted.
   # Works for joint and both cut stages (Stage-1 matches only "mu"). See
   # documentation.md → "Gating only the parameters you care about".
   # gate_params: ["mu", "te", "treatment", "state_treatment", "category_treatment", "state_category"]
+
+  # Pass/warn/fail bands for the gate (defaults shown = the historical gate).
+  # Per parameter: PASS below rhat_warn and at/above ess_min; FAIL at/above
+  # rhat_fail or below ess_min*ess_fail_fraction; WARN in between. ESS is
+  # min(bulk, tail) — one threshold covers both.
+  # convergence:
+  #   rhat_warn: 1.01
+  #   rhat_fail: 1.05
+  #   ess_min: 400
+  #   ess_fail_fraction: 0.25
 
 # -----------------------------------------------------------------------------
 # output  (optional section; every key has a default)
