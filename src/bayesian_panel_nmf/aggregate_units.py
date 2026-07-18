@@ -92,6 +92,13 @@ def _aggregate_one(
     if "treatment" in sub.columns:
         treatment_max = grouped[["treatment"]].max()
         pieces.append(cast(pd.DataFrame, treatment_max))
+    # Period boundaries are constant across the pooled units within each
+    # (time) group; carry them onto the aggregate so reporting can compute
+    # person-years. Without this they'd be re-added as all-NaN by the reindex
+    # below, making years -> NaN and rates -> inf/nan.
+    date_cols = [c for c in ("start_date", "end_date") if c in sub.columns]
+    if date_cols:
+        pieces.append(cast(pd.DataFrame, grouped[date_cols].first()))
     for col in ("mu", "mu_treated"):
         if col in sub.columns:
             logsum = cast(pd.Series, grouped[col].apply(_logsumexp_series))

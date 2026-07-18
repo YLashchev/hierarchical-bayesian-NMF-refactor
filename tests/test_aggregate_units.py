@@ -208,3 +208,25 @@ def test_collision_requires_overwrite() -> None:
         df, [{"unit": "A", "include_units": ["B"], "overwrite": True}]
     )
     assert len(result[result["unit"] == "A"]) == len(df[df["unit"] == "B"])
+
+
+def test_aggregate_carries_period_dates_not_nan() -> None:
+    """Regression: start_date/end_date must be carried onto aggregate rows.
+
+    They are constant per (time) across pooled units; if dropped, reporting's
+    person-years -> NaN and rates -> inf/nan (the Person-Years: 0 / inf bug).
+    """
+    df = _draws_df()
+    df["start_date"] = df["time"]
+    df["end_date"] = df["time"] + pd.DateOffset(months=1) - pd.Timedelta(days=1)
+
+    result = add_aggregate_units(
+        df, [{"unit": "AB", "include_treated_units": True}]
+    )
+    agg = result[result["unit"] == "AB"]
+    assert len(agg) > 0
+    assert agg["start_date"].isna().sum() == 0
+    assert agg["end_date"].isna().sum() == 0
+    # dates match the source period boundaries (constant across pooled units)
+    jan = agg[agg["time"] == pd.Timestamp("2020-01-01")].iloc[0]
+    assert jan["start_date"] == pd.Timestamp("2020-01-01")
