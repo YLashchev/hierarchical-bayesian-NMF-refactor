@@ -145,7 +145,12 @@ output:
   draws_format: "csv"      # default "csv"; "parquet" = ~5x smaller / faster (needs pyarrow)
 
   # --- reporting (defaults shown) ---
-  # target_unit: null           # default null = auto-detect (most post-treatment obs)
+  # target_unit: null           # default null = auto-detect (most post-treatment obs).
+  #                             # Point at an aggregate unit (below) for an
+  #                             # all-treated fit/gap.
+  # fit_gap_per_unit: false     # default false. true -> fit/gap for the target
+  #                             # AND each treated unit, at the "total" group
+  #                             # only (no-op when the run has no total group).
   # report_groups: null         # default null = every group; else a subset for per-unit figs
   # print_tables: true          # default true — rich terminal tables
   # print_target_table: true    # default true — the target-unit headline table
