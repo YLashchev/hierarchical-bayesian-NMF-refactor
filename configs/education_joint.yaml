@@ -60,5 +60,6 @@ mcmc:
     - "state_category"  # state_category_te, state_category_scale
 
 output:
+  draws_format: "parquet"
   figures: true
   clean: true

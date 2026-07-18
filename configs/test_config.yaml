@@ -109,7 +109,7 @@ model:
   adjust_for_missingness: true  # default true — model censored low counts
   model_treated: true         # default true — false = counterfactual-only (no treatment)
 
-  # inference_mode: null       # default null (= joint). "joint" or "cut".
+  inference_mode: cut       # default null (= joint). "joint" or "cut".
   #                            # "cut" (two-stage cut posterior) requires
   #                            # model_treated: true and reads the cut: block.
 
@@ -124,9 +124,9 @@ mcmc:
   # num_chains: 4
   # chain_method: "sequential"   # "sequential" | "parallel" | "vectorized"
 
-  num_warmup: 200         # default 1000
-  num_samples: 200        # default 2500
-  thinning: 5             # default 10 — effective samples = num_samples / thinning
+  num_warmup: 1000         # default 1000
+  num_samples: 2500        # default 2500
+  thinning: 10             # default 10 — effective samples = num_samples / thinning
   random_seed: 8675309     # default 8675309
   progress_bar: true       # default true
   gate_params: ["mu", "te", "treatment", "state_treatment", "category_treatment", "state_category"]
@@ -138,6 +138,13 @@ mcmc:
   # Works for joint and both cut stages (Stage-1 matches only "mu"). See
   # documentation.md → "Gating only the parameters you care about".
   # gate_params: ["mu", "te", "treatment", "state_treatment", "category_treatment", "state_category"]
+  #
+  #
+  convergence:
+    rhat_warn: 1.01
+    rhat_fail: 1.05
+    ess_min: 400
+    ess_fail_fraction: 0.25
 
 # -----------------------------------------------------------------------------
 # output  (optional section; every key has a default)
@@ -152,30 +159,29 @@ output:
   draws_format: "parquet"      # Default "csv"; "parquet" = ~5x smaller / faster (needs pyarrow)
 
   # --- reporting ---
-  # Fit/gap target is the pooled aggregate ("all treated") -> the aggregate
-  # fit/gap plot. fit_gap_per_unit then ALSO renders one fit/gap per
-  # individual treated unit, at the "total" group only (upstream p15 + p21).
-  target_unit: "All ban states"
+  # Fit/gap target is the pooled aggregate -> the aggregate fit/gap plot.
+  # fit_gap_per_unit then ALSO renders one fit/gap per individual treated
+  # unit (incl. Texas), at the "total" group only (upstream p15 + p21).
+  target_unit: null
   fit_gap_per_unit: true
-  # report_groups: null         # default null = every group; else a subset for per-unit figs
-  # print_tables: true          # default true — rich terminal tables
-  # print_target_table: true    # default true — the target-unit headline table
+  report_groups: null         # default null = every group; else a subset for per-unit figs
+  print_tables: true          # default true — rich terminal tables
+  print_target_table: false    # default true — the target-unit headline table
 
   # --- synthetic aggregate reporting units (reporting/PPC only; NOT modeled) ---
   # Each needs EXACTLY ONE include selector.
   aggregate_units:
     - unit: "All ban states"
-      include_treated_units: true      # selector 1
-  #     exclude_units: ["Texas"]         # optional
-  #     strict: false                    # default false — error on missing units?
-  #     overwrite: false                 # default false — replace a same-named unit?
-  #   - unit: "All treated"
-  #     include_all_units: true          # selector 2
-  #   - unit: "Custom"
-  #     include_units: ["A", "B"]        # selector 3
+      include_treated_units: true      # every treated state pooled
+    - unit: "Ban States (excl. Texas)"
+      include_treated_units: true      # same, minus Texas
+      exclude_units: ["Texas"]
 
   # --- PPC plot filtering (all default null) ---
-  ppc_units: ["All ban states"]                 # restrict PPC to these units
+  # Supplement p38: Texas + excl-Texas, 2 panels per lag. (Texas is a real
+  # unit; the aggregate is defined above. Unit-correlation PPC ignores this
+  # and always uses all units.)
+  ppc_units: ["Texas", "Ban States (excl. Texas)"]
   ppc_exclude_units: null   # drop these from PPC
   ppc_acf_lags: [6, 3, 1]              # ACF lags for temporal PPC checks
   ppc_unit_corr_max_time: "2022-04-01" # max date for the unit-correlation PPC plot
@@ -183,13 +189,14 @@ output:
 # -----------------------------------------------------------------------------
 # cut  (optional; only read when model.inference_mode: "cut")
 # -----------------------------------------------------------------------------
-# cut:
-#   num_stage1_draws: 25              # default 25 (>0); >= 50 for publication runs
-#   stage2_draws_per_component: 100   # default 100 (>0 or null); null keeps all retained
-#   # Seeds default to mcmc.random_seed + 2 (selection) and + 3 (Stage 2);
-#   # +1 is the Stage-1 PPC stream. Streams must stay distinct.
-#   # selection_seed: null            # default null
-#   # stage2_seed: null               # default null
-#   stage2_mcmc:                      # default null — overlays the mcmc block for
-#     num_warmup: 500                 # the cheaper conditional Stage-2 fits.
-#     num_samples: 1000               # (must NOT set random_seed — stage2_seed rules)
+cut:
+  num_stage1_draws: 50              # default 25 (>0); >= 50 for publication runs
+  stage2_draws_per_component: 100   # default 100 (>0 or null); null keeps all retained
+  # Seeds default to mcmc.random_seed + 2 (selection) and + 3 (Stage 2);
+  # +1 is the Stage-1 PPC stream. Streams must stay distinct.
+  # selection_seed: null            # default null
+  # stage2_seed: null               # default null
+  stage2_mcmc:                      # default null — overlays the mcmc block for
+    num_warmup: 500                 # the cheaper conditional Stage-2 fits.
+    num_samples: 1000               # (must NOT set random_seed — stage2_seed rules)
+    thinning: 1
