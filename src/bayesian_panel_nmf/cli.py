@@ -221,13 +221,13 @@ def _add_run_parser(subparsers) -> None:
 
 
 def _discover_draws_files() -> list[Path]:
-    """Find run-produced draws files under ./results*/ (CSV or parquet).
+    """Find run-produced draws files under ./*results*/ (CSV or parquet).
 
     Draws live directly in a type dir (never under figs/) and are the only
     CSVs there apart from df_<type>.csv and the *_stage1_ppc.csv sidecar.
     """
     found = []
-    for p in sorted(Path(".").glob("results*/**/*")):
+    for p in sorted(Path(".").glob("*results*/**/*")):
         if p.suffix not in (".csv", ".parquet") or "figs" in p.parts:
             continue
         if p.name.startswith("df_") or p.stem.endswith("_ppc"):
@@ -250,7 +250,7 @@ def _interactive_viz_setup(args: argparse.Namespace) -> argparse.Namespace:
 
     draws = _discover_draws_files()
     if not draws:
-        raise ConfigError("No draws files found under ./results*/; pass --results")
+        raise ConfigError("No draws files found under ./*results*/; pass --results")
 
     console = Console(stderr=True)
     console.print("[bold]Draws file:[/bold]")
@@ -603,9 +603,9 @@ def _make_trace_plots_from_netcdf(
 
 
 def _discover_trace_targets() -> list[Path]:
-    """Trace sidecars (*.nc) and cut stage2 component dirs under ./results*/."""
+    """Trace sidecars (*.nc) and cut stage2 component dirs under ./*results*/."""
     targets: list[Path] = []
-    for p in sorted(Path(".").glob("results*/**/*")):
+    for p in sorted(Path(".").glob("*results*/**/*")):
         if (
             p.is_file()
             and p.suffix == ".nc"
@@ -624,7 +624,7 @@ def _interactive_traces_setup(args: argparse.Namespace) -> argparse.Namespace:
 
     targets = _discover_trace_targets()
     if not targets:
-        raise ConfigError("No trace sidecars found under ./results*/; "
+        raise ConfigError("No trace sidecars found under ./*results*/; "
                           "run with --save-traces first")
 
     console = Console(stderr=True)

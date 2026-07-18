@@ -117,3 +117,18 @@ def test_component_dir_summarized(traces_tree, capsys):
     out = capsys.readouterr().out
     assert "component_1" in out and "component_2" in out
     assert ok is False  # time_fac fails in both fixtures
+
+
+def test_discover_finds_test_results_dir(tmp_path, monkeypatch):
+    """Regression: 'test_results/' (not prefixed 'results') must be discovered."""
+    import arviz as az
+    import numpy as np
+
+    d = tmp_path / "test_results" / "total"
+    d.mkdir(parents=True)
+    az.from_dict(
+        {"posterior": {"mu": np.random.default_rng(0).normal(size=(2, 50))}}
+    ).to_netcdf(str(d / "NB_births_total_5_traces.nc"), engine="h5netcdf")
+    monkeypatch.chdir(tmp_path)
+    found = [str(p) for p in cli._discover_trace_targets()]
+    assert any("test_results" in f for f in found)
