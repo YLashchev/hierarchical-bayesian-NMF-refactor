@@ -139,9 +139,14 @@ def add_aggregate_units(
     except ValidationError as e:
         raise ConfigError(str(e)) from e
 
-    source_df = draws_df.copy()
-    result_df = draws_df.copy()
-    existing_units = set(result_df["unit"])
+    # draws_df is only read (never mutated); avoid copying it. On large cut
+    # PPC frames (millions of rows) the old double-copy (source_df +
+    # result_df) tripled peak memory and drove the reporting OOM. result_df
+    # starts as the input and is only copied lazily when an overwrite spec
+    # filters it; the final concat allocates the combined frame once.
+    source_df = draws_df
+    result_df = draws_df
+    existing_units = set(draws_df["unit"])
     aggregate_frames: dict[str, pd.DataFrame] = {}
 
     for spec in typed_specs:
@@ -173,6 +178,11 @@ def add_aggregate_units(
     if aggregate_frames:
         frames: list[pd.DataFrame] = [cast(pd.DataFrame, result_df)]
         frames.extend(aggregate_frames.values())
-        result_df = cast(pd.DataFrame, pd.concat(frames, ignore_index=True))
+        # concat allocates a fresh combined frame (input not mutated).
+        return cast(pd.DataFrame, pd.concat(frames, ignore_index=True))
 
+    # No aggregate matched: result_df may still alias the input, so copy to
+    # keep the "returns an independent frame" contract.
+    if result_df is draws_df:
+        return draws_df.copy()
     return cast(pd.DataFrame, result_df)

@@ -17,6 +17,7 @@ Outputs placed under ``<output_dir>/figs/``:
 
 from __future__ import annotations
 
+import gc
 from pathlib import Path
 from typing import cast
 
@@ -134,7 +135,13 @@ def generate_reports(
     figs_dir = output_dir / "figs"
     figs_dir.mkdir(parents=True, exist_ok=True)
 
-    draws_for_reporting = add_aggregate_units(draws_df, aggregate_units or [])
+    # When no aggregate units are configured, reuse draws_df directly rather
+    # than holding a second full copy (both frames are read-only here). On
+    # large cut draws frames this halves the reporting-phase footprint.
+    if aggregate_units:
+        draws_for_reporting = add_aggregate_units(draws_df, aggregate_units)
+    else:
+        draws_for_reporting = draws_df
 
     # Highlight the per-unit row only when the caller set target_unit
     # explicitly; an auto-detected anchor is not highlighted.
@@ -232,7 +239,11 @@ def generate_reports(
         ppc_dir = figs_dir / "ppc"
         ppc_dir.mkdir(parents=True, exist_ok=True)
         if ppc_draws_df is not None:
-            ppc_source = add_aggregate_units(ppc_draws_df, aggregate_units or [])
+            ppc_source = (
+                add_aggregate_units(ppc_draws_df, aggregate_units)
+                if aggregate_units
+                else ppc_draws_df
+            )
         else:
             ppc_source = draws_for_reporting
         make_all_ppc_plots(
@@ -243,6 +254,12 @@ def generate_reports(
             ppc_units=ppc_units,
             ppc_exclude_units=ppc_exclude_units,
         )
+        # PPC is the memory-heaviest step (large Stage-1 PPC frame + per-draw
+        # residual matrices). Release the frame + any aggregate copy before
+        # the tables phase so the two don't peak together.
+        if ppc_source is not draws_for_reporting:
+            del ppc_source
+        gc.collect()
 
     # ---- Tables ---------------------------------------------------------------
     summary = make_summary_table(draws_for_reporting, target_unit)
