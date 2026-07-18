@@ -1862,7 +1862,11 @@ def make_all_ppc_plots(
     results["rmse"] = {"fig": fig_rmse, "pvals": pvals_rmse}
     logger.debug(f"    Generated {len(pvals_rmse)} p-values for RMSE check")
 
-    # Unit correlation
+    # Unit correlation. Deliberately NOT filtered by ppc_units: the spectral
+    # norm of the cross-unit residual correlation matrix is undefined with
+    # <2 units, so this check always runs on every unit in the frame (matches
+    # upstream, which passes the full merged_df here while filtering the
+    # per-unit checks above to ppc_states).
     logger.info("  - Unit correlation plot...")
     fig_corr, pvals_corr = make_unit_corr_ppc_plot(
         draws_df,
@@ -1871,8 +1875,6 @@ def make_all_ppc_plots(
         categories=categories,
         ndraws=ndraws,
         figsize=(10, 6),
-        ppc_units=ppc_units,
-        ppc_exclude_units=ppc_exclude_units,
     )
     results["unit_corr"] = {"fig": fig_corr, "pvals": pvals_corr}
     logger.debug(f"    Generated {len(pvals_corr)} p-values for unit correlation check")
