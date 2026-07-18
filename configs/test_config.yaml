@@ -1,0 +1,195 @@
+# =============================================================================
+# Bayesian Panel NMF — Base Configuration (annotated reference)
+# =============================================================================
+#
+# Every setting the pydantic schema (src/bayesian_panel_nmf/config.py) accepts
+# is shown here. Required keys are uncommented with example values; optional
+# keys are commented with their DEFAULT so you can see what you get if you omit
+# them. Copy this file and edit for your analysis.
+#
+#   bpnmf run --config configs/my_config.yaml     # or `bpnmf init my_config.yaml`
+#
+# Notes on strictness:
+#   - Unknown keys are REJECTED (extra="forbid") — a typo'd key fails at load.
+#   - Booleans must be UNQUOTED yaml true/false. Quoted "false" is rejected.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# data  (required)
+# -----------------------------------------------------------------------------
+data:
+  input_file: "data/raw/fertility_data.csv"   # required — path to the panel CSV
+  output_dir: "test_results"               # required — where artifacts are written
+
+  # schema  (required) — how to read your columns
+  schema:
+    unit_col: "state"
+    time_col: "time"
+    treatment_col: "exposed_births"
+    outcomes_from_prefixes:
+      outcome_prefix: "births_"
+      denominator_prefix: "pop_"
+      include:
+        - total  # required — 0 = control, 1 = treated
+        - nohs
+        - hs
+        - somecoll
+        - coll
+        - nhblack
+        - nhwhite
+        - hisp
+        - otherraceeth
+
+    # Choose EXACTLY ONE of `outcomes` or `outcomes_from_prefixes` (not both,
+    # not neither — the schema enforces this).
+
+    # # (1) explicit outcome columns:
+    # outcomes:
+    #   - outcome_col: "outcome"       # required
+    #     label: "total"              # required — referenced by model.types groups
+    #     denominator_col: "population"  # optional (default null = unweighted counts)
+
+    # (2) OR derive many outcomes from shared prefixes (comment out `outcomes`
+    #     above and uncomment this):
+    # outcomes_from_prefixes:
+    #   outcome_prefix: "births_"       # required
+    #   denominator_prefix: "pop_"      # optional (default null)
+    #   include: ["nhwhite", "hisp", "nhblack"]  # optional (default null = all)
+
+  # --- optional data keys (defaults shown) ---
+  date_format: "auto"    # default "auto" (autodetect); or "%Y-%m-%d", "%m/%d/%y", ...
+  start_date: "2016-01-01"
+  end_date: "2024-01-01"       # default null — filter rows <  this date
+
+  aggregation:
+    enabled: true                # default false
+    period: "bimonthly"           # default "bimonthly"; monthly/bimonthly/quarterly/yearly
+
+  # default false. true treats structurally-absent (group,unit,time) cells as
+  # suppressed (they enter the missingness likelihood) instead of erroring.
+  allow_unbalanced_panel: false
+
+  # default null. Explicit outcome name for the draws filename placeholder
+  # (NB_<outcome>_<type>_<rank>). Omit to derive from the outcome prefix,
+  # else falls back to "outcome".
+  # outcome: "births"
+
+# -----------------------------------------------------------------------------
+# model  (optional section; every key has a default)
+# -----------------------------------------------------------------------------
+model:
+  outcome_distribution: "NB"   # default "NB"; or "Poisson"
+
+  # Each entry under `types` is an INDEPENDENT model fit (its own draws +
+  # figures). Key name is free-form (total/age/race/...).
+  types:
+    total:
+      groups: ["total"]        # required — outcome labels this fit covers
+      ranks_to_test: [10]      # required — latent-factor counts; a list = a
+                               # sweep of independent fits (NOT model selection)
+
+      # If a group label ("total" here) is not an explicit outcome, build it
+      # with ONE of these (both default off):
+      # total_from: ["usborn", "foreign"]  # sum these subgroups
+      # total_all: false                   # default false; sum ALL outcomes
+      #                                     # (only if disjoint)
+
+      # exclude_units: ["Texas"]   # default null — drop units for THIS fit only
+
+    education:                  # a second independent fit
+      groups: ["nohs", "hs", "somecoll", "coll"]
+      ranks_to_test: [10]
+
+    race:
+      groups: ["nhblack", "nhwhite", "hisp", "otherraceeth"]
+      ranks_to_test: [10]
+
+  nb_disp: 1.0e-4              # default 1e-4 — NB dispersion (lower = more overdispersed)
+  sample_disp: false          # default false — sample dispersion vs fixed nb_disp
+  adjust_for_missingness: true  # default true — model censored low counts
+  model_treated: true         # default true — false = counterfactual-only (no treatment)
+
+  # inference_mode: null       # default null (= joint). "joint" or "cut".
+  #                            # "cut" (two-stage cut posterior) requires
+  #                            # model_treated: true and reads the cut: block.
+
+# -----------------------------------------------------------------------------
+# mcmc  (optional section; every key has a default)
+# -----------------------------------------------------------------------------
+mcmc:
+  auto_parallelism: true   # default true — pick chains/method from JAX devices
+  max_chains: 4            # default 4 — cap under auto_parallelism
+
+  # Manual override — used only when auto_parallelism: false (both default null):
+  # num_chains: 4
+  # chain_method: "sequential"   # "sequential" | "parallel" | "vectorized"
+
+  num_warmup: 200         # default 1000
+  num_samples: 200        # default 2500
+  thinning: 5             # default 10 — effective samples = num_samples / thinning
+  random_seed: 8675309     # default 8675309
+  progress_bar: true       # default true
+  gate_params: ["mu", "te", "treatment", "state_treatment", "category_treatment", "state_category"]
+
+  # default null = gate every parameter. A list of sample-site name PREFIXES
+  # restricts the R-hat/ESS convergence gate to those sites, so
+  # non-identifiable ones (state_fe, time_fe, time_fac, unit_weight) don't
+  # fail the gate. Divergences are always counted; thresholds never change.
+  # Works for joint and both cut stages (Stage-1 matches only "mu"). See
+  # documentation.md → "Gating only the parameters you care about".
+  # gate_params: ["mu", "te", "treatment", "state_treatment", "category_treatment", "state_category"]
+
+# -----------------------------------------------------------------------------
+# output  (optional section; every key has a default)
+# -----------------------------------------------------------------------------
+output:
+  # default [] (render none). Accepts: true/false, "all"/"none", or a list of
+  # figure names. Valid names: unit_fit, unit_gap, raw_rate, interval,
+  # group_comparison, ppc.
+  figures: true
+  clean: true             # default false — wipe <output_dir>/<type>/ before writing
+  save_traces: true       # Default false — write NetCDF posterior sidecars
+  draws_format: "parquet"      # Default "csv"; "parquet" = ~5x smaller / faster (needs pyarrow)
+
+  # --- reporting ---
+  # Fit/gap target is the pooled aggregate ("all treated") -> the aggregate
+  # fit/gap plot. fit_gap_per_unit then ALSO renders one fit/gap per
+  # individual treated unit, at the "total" group only (upstream p15 + p21).
+  target_unit: "All ban states"
+  fit_gap_per_unit: true
+  # report_groups: null         # default null = every group; else a subset for per-unit figs
+  # print_tables: true          # default true — rich terminal tables
+  # print_target_table: true    # default true — the target-unit headline table
+
+  # --- synthetic aggregate reporting units (reporting/PPC only; NOT modeled) ---
+  # Each needs EXACTLY ONE include selector.
+  aggregate_units:
+    - unit: "All ban states"
+      include_treated_units: true      # selector 1
+  #     exclude_units: ["Texas"]         # optional
+  #     strict: false                    # default false — error on missing units?
+  #     overwrite: false                 # default false — replace a same-named unit?
+  #   - unit: "All treated"
+  #     include_all_units: true          # selector 2
+  #   - unit: "Custom"
+  #     include_units: ["A", "B"]        # selector 3
+
+  # --- PPC plot filtering (all default null) ---
+  ppc_units: ["All ban states"]                 # restrict PPC to these units
+  ppc_exclude_units: null   # drop these from PPC
+  ppc_acf_lags: [6, 3, 1]              # ACF lags for temporal PPC checks
+  ppc_unit_corr_max_time: "2022-04-01" # max date for the unit-correlation PPC plot
+
+# -----------------------------------------------------------------------------
+# cut  (optional; only read when model.inference_mode: "cut")
+# -----------------------------------------------------------------------------
+# cut:
+#   num_stage1_draws: 25              # default 25 (>0); >= 50 for publication runs
+#   stage2_draws_per_component: 100   # default 100 (>0 or null); null keeps all retained
+#   # Seeds default to mcmc.random_seed + 2 (selection) and + 3 (Stage 2);
+#   # +1 is the Stage-1 PPC stream. Streams must stay distinct.
+#   # selection_seed: null            # default null
+#   # stage2_seed: null               # default null
+#   stage2_mcmc:                      # default null — overlays the mcmc block for
+#     num_warmup: 500                 # the cheaper conditional Stage-2 fits.
+#     num_samples: 1000               # (must NOT set random_seed — stage2_seed rules)
