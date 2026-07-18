@@ -456,10 +456,14 @@ def _select_variables_to_plot(
     nothing matches.
 
     Without --param-filter: scalar/low-dimensional parameters (dispersion,
-    treatment/category scales) first, then higher-dimensional matrix
-    parameters (treatment effects, factors, fixed effects), in a fixed
-    priority order. Falls back to the first 5 available variables if none
-    of the priority names are present.
+    treatment/category scales, the state_fe hyperparameters state_fe_mu/
+    state_fe_sigma) first, then higher-dimensional matrix parameters
+    (treatment effects, factors, per-unit fixed effects incl. state_fe_z),
+    in a fixed priority order. The large derived log-rate surfaces mu/mu_ctrl
+    are excluded by default (thousands of cells; a subsampled trace is not a
+    useful convergence view -- the gate summarizes them, and --param-filter
+    mu still reaches them). Falls back to the first 5 available variables if
+    none of the priority names are present.
     """
     if param_filters:
         vars_to_plot = [
@@ -474,16 +478,21 @@ def _select_variables_to_plot(
 
     scalar_priority = [
         "disp",
+        "treatment_it_scale",
         "treatment_state_scale",
         "treatment_category_scale",
         "state_category_scale",
+        "state_fe_mu",
+        "state_fe_sigma",
     ]
     matrix_params = [
         "te",
         "state_treatment_effect",
         "category_treatment_effect",
+        "state_category_te",
+        "treatment_kt",
         "time_fac",
-        "state_fe",
+        "state_fe_z",
         "time_fe",
         "unit_weight",
     ]
