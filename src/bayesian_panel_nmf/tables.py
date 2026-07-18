@@ -378,6 +378,80 @@ def _print_rich_tables(
 # -----------------------------------------------------------------------------
 
 
+_STATUS_STYLE = {
+    "PASS": "bold green",
+    "WARN": "yellow",
+    "FAIL": "bold red",
+    "fixed": "dim",
+}
+
+
+def render_diagnostics_table(rows: list[dict], title: str | None = None) -> bool:
+    """Render per-parameter diagnostic rows as one Rich table.
+
+    ``rows`` come from ``diagnostics.parameter_diagnostics``. Returns True iff
+    no row FAILs (fixed/constant sites never fail). Display only.
+    """
+    from rich.console import Console
+    from rich.table import Table
+
+    t = Table(title=title)
+    t.add_column("Parameter")
+    t.add_column("max R-hat", justify="right")
+    t.add_column("min bulk ESS", justify="right")
+    t.add_column("min tail ESS", justify="right")
+    t.add_column("status")
+    for r in rows:
+        fmt = lambda v, p: "\u2014" if v is None else f"{v:{p}}"  # noqa: E731
+        t.add_row(
+            r["param"],
+            fmt(r["rhat"], ".4f"),
+            fmt(r["ess_bulk"], ".0f"),
+            fmt(r["ess_tail"], ".0f"),
+            r["status"],
+            style=_STATUS_STYLE.get(r["status"]),
+        )
+    Console().print(t)
+    return not any(r["status"] == "FAIL" for r in rows)
+
+
+def render_component_table(fits: list[dict], title: str | None = None) -> bool:
+    """Render one row per cut Stage-2 component from manifest fit records.
+
+    Each ``fit`` is a ``build_cut_convergence_manifest`` component record
+    (``component``, ``stage1_chain``, ``rhat_max``, ``ess_bulk_min``,
+    ``divergences``, ``converged``). Lists EVERY component, not just the
+    worst. Returns True iff all components converged. Display only;
+    diagnostics are never pooled across components.
+    """
+    from rich.console import Console
+    from rich.table import Table
+
+    t = Table(title=title)
+    t.add_column("Component", justify="right")
+    t.add_column("S1 chain", justify="right")
+    t.add_column("max R-hat", justify="right")
+    t.add_column("min bulk ESS", justify="right")
+    t.add_column("div", justify="right")
+    t.add_column("status")
+    all_ok = True
+    for f in sorted(fits, key=lambda r: int(r["component"])):
+        ok = bool(f.get("converged", False))
+        all_ok = all_ok and ok
+        status = "PASS" if ok else "FAIL"
+        t.add_row(
+            str(f["component"]),
+            str(f.get("stage1_chain", "\u2014")),
+            f"{f['rhat_max']:.4f}" if "rhat_max" in f else "\u2014",
+            f"{f['ess_bulk_min']:.0f}" if "ess_bulk_min" in f else "\u2014",
+            str(f.get("divergences", "\u2014")),
+            status,
+            style=_STATUS_STYLE.get(status),
+        )
+    Console().print(t)
+    return all_ok
+
+
 def print_run_summary_panel(
     model_type: str,
     rank: int,
@@ -387,6 +461,8 @@ def print_run_summary_panel(
     convergence: dict,
     figures: list[str],
     artifact_paths: list[str] | str | Path,
+    diagnostic_rows: list[dict] | None = None,
+    component_fits: list[dict] | None = None,
 ) -> None:
     """Render a rich Panel summarizing one completed rank run.
 
@@ -421,22 +497,29 @@ def print_run_summary_panel(
     status = (
         "[bold green]PASS[/bold green]" if converged else "[bold red]FAIL[/bold red]"
     )
+    div = convergence.get("divergences", 0)
+
+    # Per-parameter (joint) or per-component (cut) diagnostics table, worst
+    # first, printed before the panel. Constant sites show as 'fixed', never
+    # FAIL. The panel then carries the one-line verdict + divergences (the
+    # gate itself is convergence_summary; this is display only).
+    if diagnostic_rows is not None:
+        render_diagnostics_table(
+            diagnostic_rows, title=f"Convergence — {model_type} rank {rank}"
+        )
+    elif component_fits is not None:
+        render_component_table(
+            component_fits,
+            title=f"Convergence by component — {model_type} rank {rank}",
+        )
 
     lines = [
         f"[bold]Model type:[/bold] {model_type}   [bold]Rank:[/bold] {rank}",
         f"[bold]Chains:[/bold] {num_chains} ({chain_method})   "
         f"[bold]Distribution:[/bold] {outcome_distribution}",
         "",
-        f"[bold]Convergence:[/bold] {status}",
+        f"[bold]Convergence:[/bold] {status}   [bold]divergences:[/bold] {div}",
     ]
-    if "rhat_max" in convergence:
-        lines.append(f"  max R-hat: {convergence['rhat_max']:.4f}")
-    if "ess_bulk_min" in convergence:
-        lines.append(f"  min bulk ESS: {convergence['ess_bulk_min']:.0f}")
-    if "ess_tail_min" in convergence:
-        lines.append(f"  min tail ESS: {convergence['ess_tail_min']:.0f}")
-    if "divergences" in convergence:
-        lines.append(f"  divergences: {convergence['divergences']}")
 
     lines.append("")
     lines.append(f"[bold]Figures:[/bold] {', '.join(figures) if figures else '(none)'}")

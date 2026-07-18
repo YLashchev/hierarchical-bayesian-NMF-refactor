@@ -251,6 +251,7 @@ def _run_single_rank(
     if output_config.figures:
         _run_reporting(draws_df, report_dir, output_config)
 
+    from bayesian_panel_nmf.diagnostics import parameter_diagnostics
     from bayesian_panel_nmf.tables import print_run_summary_panel
 
     print_run_summary_panel(
@@ -263,6 +264,7 @@ def _run_single_rank(
         figures=output_config.figures,
         artifact_paths=[str(draws_file), str(convergence_file)]
         + ([str(report_dir)] if output_config.figures else []),
+        diagnostic_rows=parameter_diagnostics(idata, params=config.mcmc.gate_params),
     )
 
 
@@ -621,6 +623,7 @@ def _run_cut_rank(
         convergence=manifest,
         figures=output_config.figures,
         artifact_paths=artifact_paths,
+        component_fits=manifest["stage2"]["fits"],
     )
 
 

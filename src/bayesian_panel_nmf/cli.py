@@ -28,6 +28,7 @@ from rich.console import Console  # noqa: E402
 from rich.prompt import Confirm, Prompt  # noqa: E402
 
 from bayesian_panel_nmf.config import Config  # noqa: E402
+from bayesian_panel_nmf.diagnostics import parameter_diagnostics  # noqa: E402
 from bayesian_panel_nmf.logging_config import setup_logging  # noqa: E402
 from bayesian_panel_nmf.pipeline import (  # noqa: E402
     _read_draws,
@@ -36,6 +37,7 @@ from bayesian_panel_nmf.pipeline import (  # noqa: E402
     _validate_run_analysis_config,
 )
 from bayesian_panel_nmf.reports import generate_reports  # noqa: E402
+from bayesian_panel_nmf.tables import render_diagnostics_table  # noqa: E402
 from bayesian_panel_nmf.validation import ConfigError, DataError  # noqa: E402
 
 matplotlib.use("Agg")  # headless — no display needed
@@ -324,97 +326,20 @@ def _add_viz_parser(subparsers) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _trace_diag_rows(idata, prefixes: list[str] | None) -> list[dict]:
-    """Per-parameter diagnostic rows, worst first; constant sites -> 'fixed'.
-
-    A site is 'fixed' iff it has zero variance across (chain, draw) in THIS
-    file — empirical, so disp under sample_disp:false and cut Stage-2's
-    mu_ctrl are labeled without any hard-coded model knowledge. Fixed sites
-    get no R-hat/ESS (mathematically undefined) and never count as FAIL.
-    """
-    names = list(idata.posterior.data_vars)
-    if prefixes:
-        names = [v for v in names if any(v.startswith(p) for p in prefixes)]
-        if not names:
-            raise ConfigError(
-                f"No parameters matched {prefixes} "
-                f"(available: {list(idata.posterior.data_vars)})"
-            )
-
-    fixed: list[str] = []
-    varying: list[str] = []
-    for v in names:
-        vals = np.asarray(idata.posterior[v].values)
-        span = vals.max(axis=(0, 1)) - vals.min(axis=(0, 1))
-        (fixed if np.all(span == 0) else varying).append(v)
-
-    rows: list[dict] = []
-    if varying:
-        # round_to="none": rounded R-hat (arviz default 2dp) can push 1.005
-        # up to the 1.01 threshold and fake a FAIL.
-        summary_df = az.summary(
-            idata, var_names=varying, kind="diagnostics", round_to="none"
-        )
-        summary_df["base_param"] = summary_df.index.to_series().apply(
-            lambda x: x.split("[")[0]
-        )
-        for name, group in summary_df.groupby("base_param"):
-            rhat = float(group["r_hat"].max())
-            ess_bulk = float(group["ess_bulk"].min())
-            ess_tail = float(group["ess_tail"].min())
-            status = "PASS" if rhat < 1.01 and ess_bulk > 400 else "WARN"
-            if rhat >= 1.01 or ess_bulk < 100:
-                status = "FAIL"
-            rows.append(
-                {
-                    "param": name,
-                    "rhat": rhat,
-                    "ess_bulk": ess_bulk,
-                    "ess_tail": ess_tail,
-                    "status": status,
-                }
-            )
-    rows.sort(key=lambda r: r["rhat"], reverse=True)
-    for v in sorted(fixed):
-        rows.append(
-            {"param": v, "rhat": None, "ess_bulk": None, "ess_tail": None,
-             "status": "fixed"}
-        )
-    return rows
-
-
-_STATUS_STYLE = {"PASS": "bold green", "WARN": "yellow", "FAIL": "bold red",
-                 "fixed": "dim"}
-
-
-def _print_diag_table(rows: list[dict], title: str) -> bool:
-    """Render diagnostic rows as one Rich table; True iff no FAIL row."""
-    from rich.table import Table
-
-    t = Table(title=title)
-    t.add_column("Parameter")
-    t.add_column("max R-hat", justify="right")
-    t.add_column("min bulk ESS", justify="right")
-    t.add_column("min tail ESS", justify="right")
-    t.add_column("status")
-    for r in rows:
-        fmt = lambda v, p: "—" if v is None else f"{v:{p}}"  # noqa: E731
-        t.add_row(
-            r["param"], fmt(r["rhat"], ".4f"), fmt(r["ess_bulk"], ".0f"),
-            fmt(r["ess_tail"], ".0f"), r["status"],
-            style=_STATUS_STYLE.get(r["status"]),
-        )
-    Console().print(t)
-    return not any(r["status"] == "FAIL" for r in rows)
+def _diag_rows(idata, param_filter: str | None) -> list[dict]:
+    """parameter_diagnostics with the CLI's comma-string filter + clean error."""
+    prefixes = param_filter.split(",") if param_filter else None
+    try:
+        return parameter_diagnostics(idata, params=prefixes)
+    except ValueError as e:
+        raise ConfigError(str(e)) from e
 
 
 def _print_trace_diagnostics(nc_path: Path, param_filter: str | None) -> bool:
     """Rich R-hat/ESS table for one sidecar. True iff no parameter FAILs."""
     logger.info(f"Loading NetCDF traces: {nc_path.name}")
-    idata = az.from_netcdf(nc_path)
-    prefixes = param_filter.split(",") if param_filter else None
-    rows = _trace_diag_rows(idata, prefixes)
-    return _print_diag_table(rows, title=nc_path.stem)
+    rows = _diag_rows(az.from_netcdf(nc_path), param_filter)
+    return render_diagnostics_table(rows, title=nc_path.stem)
 
 
 def _print_component_summary(comp_dir: Path, param_filter: str | None) -> bool:
@@ -429,14 +354,14 @@ def _print_component_summary(comp_dir: Path, param_filter: str | None) -> bool:
     if not nc_files:
         raise ConfigError(f"No component .nc files in {comp_dir}")
 
-    prefixes = param_filter.split(",") if param_filter else None
+    style = {"PASS": "bold green", "WARN": "yellow", "FAIL": "bold red", "fixed": "dim"}
     t = Table(title=f"{comp_dir.name} — {len(nc_files)} components")
     for col in ("Component", "worst param", "max R-hat", "min bulk ESS", "status"):
         t.add_column(col, justify="right" if "R-hat" in col or "ESS" in col else "left")
 
     all_ok, n_fail = True, 0
     for nc in nc_files:
-        rows = _trace_diag_rows(az.from_netcdf(nc), prefixes)
+        rows = _diag_rows(az.from_netcdf(nc), param_filter)
         varying = [r for r in rows if r["status"] != "fixed"]
         worst = varying[0] if varying else rows[0]
         status = worst["status"] if varying else "fixed"
@@ -447,7 +372,7 @@ def _print_component_summary(comp_dir: Path, param_filter: str | None) -> bool:
             nc.stem, worst["param"],
             "—" if worst["rhat"] is None else f"{worst['rhat']:.4f}",
             "—" if worst["ess_bulk"] is None else f"{worst['ess_bulk']:.0f}",
-            status, style=_STATUS_STYLE.get(status),
+            status, style=style.get(status),
         )
     console = Console()
     console.print(t)

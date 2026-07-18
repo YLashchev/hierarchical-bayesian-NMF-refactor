@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 from bayesian_panel_nmf import cli
+from bayesian_panel_nmf.diagnostics import parameter_diagnostics
 from bayesian_panel_nmf.validation import ConfigError
 
 
@@ -32,7 +33,7 @@ def _write_nc(path: Path, *, fixed_disp: bool, seed: int = 0) -> Path:
 
 def test_rows_flag_constant_site_as_fixed(tmp_path):
     nc = _write_nc(tmp_path / "t.nc", fixed_disp=True)
-    rows = cli._trace_diag_rows(az.from_netcdf(nc), None)
+    rows = parameter_diagnostics(az.from_netcdf(nc))
     by_name = {r["param"]: r for r in rows}
     assert by_name["disp"]["status"] == "fixed"
     assert by_name["disp"]["rhat"] is None
@@ -43,13 +44,13 @@ def test_rows_flag_constant_site_as_fixed(tmp_path):
 def test_fixed_sites_excluded_from_overall_verdict(tmp_path):
     nc = _write_nc(tmp_path / "t.nc", fixed_disp=True)
     idata = az.from_netcdf(nc)
-    rows = cli._trace_diag_rows(idata, ["mu", "disp"])  # only healthy + fixed
+    rows = parameter_diagnostics(idata, params=["mu", "disp"])  # only healthy + fixed
     assert all(r["status"] != "FAIL" for r in rows)
 
 
 def test_rows_sorted_worst_first(tmp_path):
     nc = _write_nc(tmp_path / "t.nc", fixed_disp=False)
-    rows = cli._trace_diag_rows(az.from_netcdf(nc), None)
+    rows = parameter_diagnostics(az.from_netcdf(nc))
     assert rows[0]["param"] == "time_fac"  # worst rhat on top
 
 
