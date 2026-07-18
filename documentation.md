@@ -355,17 +355,36 @@ when `output.figures: true`.
 | `--target` | Target unit for fit/gap/summary plots (auto-detected if omitted) |
 | `--group` | Group label to render; repeatable; omit to render every group present |
 
-### `bpnmf traces <nc_path> [options]`
+### `bpnmf traces [nc_path] [options]`
 
-Default: prints a numeric R-hat/ESS pass/warn/fail table per parameter
+Default: a color-coded R-hat/ESS table per parameter, worst first
 (computed natively from the NetCDF sidecar via ArviZ). With `--plots`:
 renders PNG trace plots instead.
+
+Three input forms:
+
+- **Omit `nc_path`** (in a terminal): interactive picker over every trace
+  sidecar and cut `*_stage2_traces/` directory found under `./results*/`.
+- **A `.nc` file**: full per-parameter table for that fit (joint sidecar,
+  cut Stage-1 sidecar, or a single Stage-2 `component_NNNN.nc`).
+- **A `*_stage2_traces/` directory** (cut mode): one summary row per
+  component — worst parameter, its R-hat/ESS, status — plus a pass count.
+  Diagnostics stay per-component; nothing is pooled across components.
+
+Sites that are **constant in the file** (zero posterior variance) are shown
+dimmed as `fixed` with no R-hat/ESS and never count as failures. This is
+detected empirically, so it is always right for the model at hand: `disp`
+under `sample_disp: false` is `fixed` in both models, `mu_ctrl` is `fixed`
+only in cut Stage-2 components (where the baseline is deliberately frozen),
+and a sampled `disp` gets real diagnostics.
 
 | Flag | Meaning |
 | ---- | ------- |
 | `--plots` | Render PNG trace plots instead of the numeric table |
 | `--param-filter` | Comma-separated parameter-name prefixes to restrict to |
 | `--out-dir` | Output directory for `--plots` (default `<input_dir>/figs/diagnostics/`) |
+
+Exit code is 0 only if no gated parameter FAILs — usable in scripts.
 
 ### `bpnmf init [path] [--force]`
 

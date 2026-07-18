@@ -324,45 +324,138 @@ def _add_viz_parser(subparsers) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _trace_diag_rows(idata, prefixes: list[str] | None) -> list[dict]:
+    """Per-parameter diagnostic rows, worst first; constant sites -> 'fixed'.
+
+    A site is 'fixed' iff it has zero variance across (chain, draw) in THIS
+    file — empirical, so disp under sample_disp:false and cut Stage-2's
+    mu_ctrl are labeled without any hard-coded model knowledge. Fixed sites
+    get no R-hat/ESS (mathematically undefined) and never count as FAIL.
+    """
+    names = list(idata.posterior.data_vars)
+    if prefixes:
+        names = [v for v in names if any(v.startswith(p) for p in prefixes)]
+        if not names:
+            raise ConfigError(
+                f"No parameters matched {prefixes} "
+                f"(available: {list(idata.posterior.data_vars)})"
+            )
+
+    fixed: list[str] = []
+    varying: list[str] = []
+    for v in names:
+        vals = np.asarray(idata.posterior[v].values)
+        span = vals.max(axis=(0, 1)) - vals.min(axis=(0, 1))
+        (fixed if np.all(span == 0) else varying).append(v)
+
+    rows: list[dict] = []
+    if varying:
+        # round_to="none": rounded R-hat (arviz default 2dp) can push 1.005
+        # up to the 1.01 threshold and fake a FAIL.
+        summary_df = az.summary(
+            idata, var_names=varying, kind="diagnostics", round_to="none"
+        )
+        summary_df["base_param"] = summary_df.index.to_series().apply(
+            lambda x: x.split("[")[0]
+        )
+        for name, group in summary_df.groupby("base_param"):
+            rhat = float(group["r_hat"].max())
+            ess_bulk = float(group["ess_bulk"].min())
+            ess_tail = float(group["ess_tail"].min())
+            status = "PASS" if rhat < 1.01 and ess_bulk > 400 else "WARN"
+            if rhat >= 1.01 or ess_bulk < 100:
+                status = "FAIL"
+            rows.append(
+                {
+                    "param": name,
+                    "rhat": rhat,
+                    "ess_bulk": ess_bulk,
+                    "ess_tail": ess_tail,
+                    "status": status,
+                }
+            )
+    rows.sort(key=lambda r: r["rhat"], reverse=True)
+    for v in sorted(fixed):
+        rows.append(
+            {"param": v, "rhat": None, "ess_bulk": None, "ess_tail": None,
+             "status": "fixed"}
+        )
+    return rows
+
+
+_STATUS_STYLE = {"PASS": "bold green", "WARN": "yellow", "FAIL": "bold red",
+                 "fixed": "dim"}
+
+
+def _print_diag_table(rows: list[dict], title: str) -> bool:
+    """Render diagnostic rows as one Rich table; True iff no FAIL row."""
+    from rich.table import Table
+
+    t = Table(title=title)
+    t.add_column("Parameter")
+    t.add_column("max R-hat", justify="right")
+    t.add_column("min bulk ESS", justify="right")
+    t.add_column("min tail ESS", justify="right")
+    t.add_column("status")
+    for r in rows:
+        fmt = lambda v, p: "—" if v is None else f"{v:{p}}"  # noqa: E731
+        t.add_row(
+            r["param"], fmt(r["rhat"], ".4f"), fmt(r["ess_bulk"], ".0f"),
+            fmt(r["ess_tail"], ".0f"), r["status"],
+            style=_STATUS_STYLE.get(r["status"]),
+        )
+    Console().print(t)
+    return not any(r["status"] == "FAIL" for r in rows)
+
+
 def _print_trace_diagnostics(nc_path: Path, param_filter: str | None) -> bool:
-    """Numeric R-hat/ESS pass-fail table, ported from
-    ``scripts/analyze_traces.py``. Returns True iff every parameter group
-    passed the gate."""
+    """Rich R-hat/ESS table for one sidecar. True iff no parameter FAILs."""
     logger.info(f"Loading NetCDF traces: {nc_path.name}")
     idata = az.from_netcdf(nc_path)
+    prefixes = param_filter.split(",") if param_filter else None
+    rows = _trace_diag_rows(idata, prefixes)
+    return _print_diag_table(rows, title=nc_path.stem)
 
-    var_names = None
-    if param_filter:
-        prefixes = param_filter.split(",")
-        var_names = [
-            v
-            for v in idata.posterior.data_vars
-            if any(v.startswith(p) for p in prefixes)
-        ]
-        if not var_names:
-            logger.error("No parameters matched --param-filter.")
-            return False
 
-    logger.info("Computing metrics via ArviZ...")
-    summary_df = az.summary(idata, var_names=var_names, filter_vars="like")
-    summary_df["base_param"] = summary_df.index.to_series().apply(
-        lambda x: x.split("[")[0]
-    )
+def _print_component_summary(comp_dir: Path, param_filter: str | None) -> bool:
+    """One row per cut Stage-2 component: worst parameter's diagnostics.
 
-    all_ok = True
-    for name, group in summary_df.groupby("base_param"):
-        rhat = float(group["r_hat"].max())
-        ess = float(group["ess_bulk"].min())
+    Diagnostics stay per-component (never pooled across conditional
+    targets); this only tabulates each component's own gate side by side.
+    """
+    from rich.table import Table
 
-        status = "PASS" if rhat < 1.01 and ess > 400 else "WARN"
-        if rhat >= 1.01 or ess < 100:
-            status = "FAIL"
+    nc_files = sorted(comp_dir.glob("*.nc"))
+    if not nc_files:
+        raise ConfigError(f"No component .nc files in {comp_dir}")
+
+    prefixes = param_filter.split(",") if param_filter else None
+    t = Table(title=f"{comp_dir.name} — {len(nc_files)} components")
+    for col in ("Component", "worst param", "max R-hat", "min bulk ESS", "status"):
+        t.add_column(col, justify="right" if "R-hat" in col or "ESS" in col else "left")
+
+    all_ok, n_fail = True, 0
+    for nc in nc_files:
+        rows = _trace_diag_rows(az.from_netcdf(nc), prefixes)
+        varying = [r for r in rows if r["status"] != "fixed"]
+        worst = varying[0] if varying else rows[0]
+        status = worst["status"] if varying else "fixed"
+        if status == "FAIL":
             all_ok = False
-
-        print(f"\n{name}: {status}")
-        print(f"  max R-hat: {rhat:.4f}")
-        print(f"  min ESS:   {ess:.0f}")
-
+            n_fail += 1
+        t.add_row(
+            nc.stem, worst["param"],
+            "—" if worst["rhat"] is None else f"{worst['rhat']:.4f}",
+            "—" if worst["ess_bulk"] is None else f"{worst['ess_bulk']:.0f}",
+            status, style=_STATUS_STYLE.get(status),
+        )
+    console = Console()
+    console.print(t)
+    console.print(
+        f"{len(nc_files) - n_fail}/{len(nc_files)} components pass "
+        "(use --param-filter to narrow; full per-component tables: "
+        "point at one component .nc)"
+    )
     return all_ok
 
 
@@ -526,13 +619,56 @@ def _make_trace_plots_from_netcdf(
     return saved
 
 
+def _discover_trace_targets() -> list[Path]:
+    """Trace sidecars (*.nc) and cut stage2 component dirs under ./results*/."""
+    targets: list[Path] = []
+    for p in sorted(Path(".").glob("results*/**/*")):
+        if (
+            p.is_file()
+            and p.suffix == ".nc"
+            and not any(part.endswith("_stage2_traces") for part in p.parts)
+        ) or p.is_dir() and p.name.endswith("_stage2_traces"):
+            targets.append(p)
+    return targets
+
+
+def _interactive_traces_setup(args: argparse.Namespace) -> argparse.Namespace:
+    """Fill nc_path by prompting when omitted; explicit path bypasses."""
+    if args.nc_path is not None:
+        return args
+    if not sys.stdin.isatty():
+        raise ConfigError("no nc_path given and not a terminal; pass a path")
+
+    targets = _discover_trace_targets()
+    if not targets:
+        raise ConfigError("No trace sidecars found under ./results*/; "
+                          "run with --save-traces first")
+
+    console = Console(stderr=True)
+    console.print("[bold]Traces:[/bold]")
+    for i, p in enumerate(targets, 1):
+        label = f"{p}  (per-component)" if p.is_dir() else str(p)
+        console.print(f"  {i}) {label}")
+    idx = int(
+        Prompt.ask("Traces", choices=[str(i) for i in range(1, len(targets) + 1)])
+    )
+    args.nc_path = str(targets[idx - 1])
+    return args
+
+
 def _traces_command(args: argparse.Namespace) -> None:
     """``bpnmf traces`` — folds ``scripts/analyze_traces.py`` (default,
     numeric table) and ``scripts/make_trace_plots.py`` (``--plots``, PNGs)."""
+    args = _interactive_traces_setup(args)
     nc_path = Path(args.nc_path)
     if not nc_path.exists():
         logger.error(f"File not found: {nc_path}")
         sys.exit(1)
+
+    if nc_path.is_dir():
+        # cut stage2 component dir -> per-component summary table
+        all_ok = _print_component_summary(nc_path, args.param_filter)
+        sys.exit(0 if all_ok else 1)
 
     if not args.plots:
         all_ok = _print_trace_diagnostics(nc_path, args.param_filter)
@@ -566,7 +702,11 @@ def _add_traces_parser(subparsers) -> None:
         help="Compute R-hat/ESS diagnostics or render trace plots from a NetCDF sidecar",
     )
     parser.add_argument(
-        "nc_path", help="Path to NetCDF traces file (e.g. ..._traces.nc)"
+        "nc_path",
+        nargs="?",
+        default=None,
+        help="NetCDF traces file, or a *_stage2_traces/ dir for a cut "
+        "per-component summary. Omit (in a terminal) for an interactive picker.",
     )
     parser.add_argument(
         "--plots",
