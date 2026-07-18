@@ -136,6 +136,9 @@ def generate_reports(
 
     draws_for_reporting = add_aggregate_units(draws_df, aggregate_units or [])
 
+    # Highlight the per-unit row only when the caller set target_unit
+    # explicitly; an auto-detected anchor is not highlighted.
+    highlight_unit = target_unit
     if target_unit is None:
         target_unit = _auto_detect_target(draws_df)
     if target_unit is None:
@@ -291,7 +294,13 @@ def generate_reports(
     )
 
     if print_tables:
-        _print_rich_tables(summary, per_unit, target_unit, print_target_table)
+        _print_rich_tables(
+            summary,
+            per_unit,
+            target_unit,
+            print_target_table,
+            highlight_unit=highlight_unit,
+        )
 
     return {
         "summary": summary,

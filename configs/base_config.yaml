@@ -145,8 +145,11 @@ output:
   draws_format: "csv"      # default "csv"; "parquet" = ~5x smaller / faster (needs pyarrow)
 
   # --- reporting (defaults shown) ---
-  # target_unit: null           # default null = auto-detect (most post-treatment obs).
-  #                             # Point at an aggregate unit (below) for an
+  # target_unit: null           # default null = auto-detect the anchor unit
+  #                             # (most post-treatment obs) for fit/gap/summary,
+  #                             # but highlight NO row in the per-unit table.
+  #                             # Set an explicit unit to also bold-green its
+  #                             # row. Point at an aggregate unit (below) for an
   #                             # all-treated fit/gap.
   # fit_gap_per_unit: false     # default false. true -> fit/gap for the target
   #                             # AND each treated unit, at the "total" group

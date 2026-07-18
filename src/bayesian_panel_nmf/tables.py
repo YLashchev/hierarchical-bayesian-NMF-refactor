@@ -318,7 +318,14 @@ def _print_rich_tables(
     per_unit: pd.DataFrame,
     target_unit: str,
     print_target_table: bool = True,
+    highlight_unit: str | None = None,
 ) -> None:
+    """Print the headline + per-unit rich tables.
+
+    ``target_unit`` anchors the headline table title. ``highlight_unit`` is the
+    unit whose per-unit row is bold-green; pass None (e.g. when the target was
+    auto-detected rather than explicitly set) for no highlight.
+    """
     from rich.console import Console
     from rich.table import Table
 
@@ -347,7 +354,11 @@ def _print_rich_tables(
     t.add_column("Excess % (95% CI)", justify="right")
     for _, r in per_unit.iterrows():
         row = r.to_dict()
-        style = "bold green" if row["unit"] == target_unit else None
+        style = (
+            "bold green"
+            if highlight_unit is not None and row["unit"] == highlight_unit
+            else None
+        )
         exp_ci = (
             f"{row['expected_mean']:,.0f} "
             f"({row['expected_lower_95']:,.0f}, {row['expected_upper_95']:,.0f})"

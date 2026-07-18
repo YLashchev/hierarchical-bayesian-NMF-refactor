@@ -143,7 +143,11 @@ def test_rich_table_prints_group_column(monkeypatch: pytest.MonkeyPatch) -> None
     assert len(captured) == 2
     table = captured[1]
     assert any(column.header == "Group" for column in table.columns)
-    assert "g" in str(table.rows[0])
+    # the 'g' group cell is in the Group column's cells (row repr never holds
+    # cell text; the old `'g' in str(rows[0])` only passed by matching the
+    # 'g' in a "bold green" row style, which no longer applies by default).
+    group_col = next(c for c in table.columns if c.header == "Group")
+    assert "g" in group_col._cells
 
 
 def test_per_unit_post_treatment_uses_mu_not_ypred(tmp_path: Path) -> None:
