@@ -269,20 +269,43 @@ def _interactive_viz_setup(args: argparse.Namespace) -> argparse.Namespace:
 
 
 def _viz_command(args: argparse.Namespace) -> None:
-    """``bpnmf viz`` — port of ``scripts/generate_full_viz.py``."""
+    """``bpnmf viz`` — re-render figures/tables from an existing draws artifact.
+
+    With ``--config``, uses the SAME reporting path (and full ``output`` block:
+    figures, aggregate_units, ppc_*, fit_gap_per_unit, ...) as ``bpnmf run``,
+    so a re-render reproduces the configured run. ``--target``/``--group``
+    override the config. Without ``--config``, renders every figure with
+    defaults (the original behavior).
+    """
     args = _interactive_viz_setup(args)
     results_path = Path(args.results)
     stem = results_path.with_suffix("")
     draws_df = _read_draws(stem)
     output_dir = results_path.parent
     ppc_draws_df = pd.read_csv(args.ppc_results) if args.ppc_results else None
-    generate_reports(
-        draws_df,
-        output_dir=output_dir,
-        target_unit=args.target,
-        groups=args.group,
-        ppc_draws_df=ppc_draws_df,
-    )
+
+    if args.config:
+        from bayesian_panel_nmf.pipeline import _run_reporting
+
+        output_config = load_config(args.config).output
+        # CLI flags override the config where given.
+        if args.target is not None:
+            output_config = output_config.model_copy(
+                update={"target_unit": args.target}
+            )
+        if args.group is not None:
+            output_config = output_config.model_copy(
+                update={"report_groups": args.group}
+            )
+        _run_reporting(draws_df, output_dir, output_config, ppc_draws_df=ppc_draws_df)
+    else:
+        generate_reports(
+            draws_df,
+            output_dir=output_dir,
+            target_unit=args.target,
+            groups=args.group,
+            ppc_draws_df=ppc_draws_df,
+        )
 
 
 def _add_viz_parser(subparsers) -> None:
@@ -294,6 +317,17 @@ def _add_viz_parser(subparsers) -> None:
         type=str,
         default=None,
         help="Path to the draws CSV/parquet produced by `bpnmf run`",
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help=(
+            "Config YAML whose `output` block drives the re-render (figures, "
+            "aggregate_units, ppc_*, fit_gap_per_unit, ...) — same as `bpnmf "
+            "run`. Omit to render every figure with defaults. --target/--group "
+            "override the config."
+        ),
     )
     parser.add_argument(
         "--ppc-results",

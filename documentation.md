@@ -342,18 +342,28 @@ reporting) for one or all configured model types.
 | `--chains` | Override chain count (`max_chains` under auto_parallelism, or literal `num_chains` with `--chain-method`) |
 | `--chain-method` | Force `sequential`/`parallel`/`vectorized`, disabling `mcmc.auto_parallelism` |
 
-### `bpnmf viz --results <draws.csv|.parquet> [options]`
+### `bpnmf viz [--results <draws>] [--config <cfg>] [options]`
 
 Re-renders figures + tables from an existing draws artifact without
 re-running MCMC — the same reporting path `bpnmf run` calls automatically
 when `output.figures: true`.
 
+**To reproduce a configured run's figures, pass the same `--config`.** Without
+it, viz renders every figure with defaults and ignores the `output` block
+(so PPC lags, `aggregate_units`, `fit_gap_per_unit`, etc. would be lost). With
+`--config`, viz drives the identical reporting path `bpnmf run` uses:
+
+```bash
+bpnmf viz --config configs/my_config.yaml --results results/total/NB_births_total_5.parquet
+```
+
 | Flag | Meaning |
 | ---- | ------- |
 | `--results` | Path to the draws CSV/parquet. **Omit it (in a terminal) for an interactive picker** — discovers draws under `./results*/` and, for cut runs, auto-attaches the `*_stage1_ppc.csv` sidecar. Non-TTY without `--results` errors. |
+| `--config` | Config YAML whose `output` block drives the re-render (figures, `aggregate_units`, `ppc_*`, `fit_gap_per_unit`, ...). Omit to render every figure with defaults. `--target`/`--group` override the config. |
 | `--ppc-results` | Optional Stage-1 PPC draws CSV (cut mode) to route the PPC suite to the full Stage-1 posterior |
-| `--target` | Target unit for fit/gap/summary plots (auto-detected if omitted) |
-| `--group` | Group label to render; repeatable; omit to render every group present |
+| `--target` | Target unit for fit/gap/summary plots (auto-detected if omitted); overrides `--config` |
+| `--group` | Group label to render; repeatable; omit to render every group present; overrides `--config` |
 
 ### `bpnmf traces [nc_path] [options]`
 
