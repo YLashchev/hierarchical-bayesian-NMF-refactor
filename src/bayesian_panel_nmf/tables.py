@@ -489,6 +489,12 @@ def print_run_summary_panel(
     after a rank's convergence gate and figures have been written, from
     both the joint (``_run_single_rank``) and cut (``_run_cut_rank``) paths.
 
+    The panel reports the divergence count as a plain fact and carries NO
+    roll-up PASS/FAIL verdict: per-parameter/per-component status (the
+    config-driven ``ConvergenceThresholds`` bands) is shown in the diagnostics
+    table above, and the authoritative gate is the ``_convergence.json`` write
+    plus its logged warning in the pipeline.
+
     Parameters
     ----------
     model_type : str
@@ -497,10 +503,10 @@ def print_run_summary_panel(
     chain_method : str
     outcome_distribution : str
     convergence : dict
-        The convergence gate dict (``diagnostics.convergence_summary()`` /
+        The convergence dict (``diagnostics.convergence_summary()`` /
         ``cut.summarize_mcmc()`` / ``results.build_cut_convergence_manifest()``
-        shape): at minimum a ``"converged"`` bool, plus any of
-        ``rhat_max``, ``ess_bulk_min``, ``ess_tail_min``, ``divergences``.
+        shape). Only ``divergences`` is read here for display; the roll-up
+        ``converged`` bool is intentionally not surfaced in the panel.
     figures : list of str
         Figure names selected for this run (``PLOT_REGISTRY`` subset).
     artifact_paths : list of str, or str/Path
@@ -511,16 +517,14 @@ def print_run_summary_panel(
 
     console = Console()
 
-    converged = bool(convergence.get("converged", False))
-    status = (
-        "[bold green]PASS[/bold green]" if converged else "[bold red]FAIL[/bold red]"
-    )
     div = convergence.get("divergences", 0)
 
     # Per-parameter (joint) or per-component (cut) diagnostics table, worst
-    # first, printed before the panel. Constant sites show as 'fixed', never
-    # FAIL. The panel then carries the one-line verdict + divergences (the
-    # gate itself is convergence_summary; this is display only).
+    # first, printed before the panel. Constant sites show as 'fixed'. The
+    # per-row PASS/WARN/FAIL there is the config-driven ConvergenceThresholds
+    # verdict; the panel deliberately carries NO roll-up pass/fail (that gate
+    # lives in the _convergence.json write + its logged warning), only the
+    # factual divergence count. Display only.
     if diagnostic_rows is not None:
         render_diagnostics_table(
             diagnostic_rows, title=f"Convergence — {model_type} rank {rank}"
@@ -536,7 +540,7 @@ def print_run_summary_panel(
         f"[bold]Chains:[/bold] {num_chains} ({chain_method})   "
         f"[bold]Distribution:[/bold] {outcome_distribution}",
         "",
-        f"[bold]Convergence:[/bold] {status}   [bold]divergences:[/bold] {div}",
+        f"[bold]Divergences:[/bold] {div}",
     ]
 
     lines.append("")
@@ -553,9 +557,8 @@ def print_run_summary_panel(
         Panel(
             "\n".join(lines),
             title=f"Run summary — {model_type} rank {rank}",
-            border_style="green" if converged else "red",
         )
     )
     logger.debug(
-        f"{model_type} rank {rank}: run-summary panel printed (converged={converged})"
+        f"{model_type} rank {rank}: run-summary panel printed (divergences={div})"
     )

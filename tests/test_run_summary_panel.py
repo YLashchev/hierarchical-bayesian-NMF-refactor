@@ -1,7 +1,9 @@
 """print_run_summary_panel: additive rich terminal panel, no file/data output.
 
-Small synthetic args, no MCMC. Verifies the panel renders without error and
-shows the model type plus a PASS/FAIL convergence verdict.
+Small synthetic args, no MCMC. Verifies the panel renders without error, shows
+the model type, and reports the divergence count as a plain fact. The panel
+carries NO roll-up PASS/FAIL verdict — per-row status lives in the diagnostics
+table and the authoritative gate is the _convergence.json write in the pipeline.
 """
 
 import bayesian_panel_nmf.tables as tables_mod
@@ -19,7 +21,7 @@ class _RecordingConsole:
         _RecordingConsole.last_panels.append(renderable)
 
 
-def test_panel_shows_pass_for_converged_gate(monkeypatch):
+def test_panel_shows_divergences_and_no_verdict(monkeypatch):
     monkeypatch.setattr("rich.console.Console", _RecordingConsole)
 
     tables_mod.print_run_summary_panel(
@@ -28,7 +30,7 @@ def test_panel_shows_pass_for_converged_gate(monkeypatch):
         num_chains=4,
         chain_method="parallel",
         outcome_distribution="Poisson",
-        convergence={"converged": True, "rhat_max": 1.001},
+        convergence={"converged": True, "rhat_max": 1.001, "divergences": 0},
         figures=["interval"],
         artifact_paths="results/nativity",
     )
@@ -36,10 +38,13 @@ def test_panel_shows_pass_for_converged_gate(monkeypatch):
     assert _RecordingConsole.last_panels, "expected a Panel to be printed"
     text = str(_RecordingConsole.last_panels[-1].renderable)
     assert "nativity" in text
-    assert "PASS" in text
+    assert "Divergences:" in text and "0" in text
+    # No roll-up verdict in the panel regardless of converged state.
+    assert "PASS" not in text
+    assert "FAIL" not in text
 
 
-def test_panel_shows_fail_for_unconverged_gate(monkeypatch):
+def test_panel_reports_divergence_count_when_present(monkeypatch):
     monkeypatch.setattr("rich.console.Console", _RecordingConsole)
 
     tables_mod.print_run_summary_panel(
@@ -56,4 +61,7 @@ def test_panel_shows_fail_for_unconverged_gate(monkeypatch):
     assert _RecordingConsole.last_panels, "expected a Panel to be printed"
     text = str(_RecordingConsole.last_panels[-1].renderable)
     assert "nativity" in text
-    assert "FAIL" in text
+    assert "Divergences:" in text and "3" in text
+    # Unconverged run still shows no verdict word in the panel.
+    assert "PASS" not in text
+    assert "FAIL" not in text
