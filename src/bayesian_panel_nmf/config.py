@@ -179,6 +179,11 @@ class MCMCConfig(BaseModel):
     num_warmup: int = 1000
     num_samples: int = 2500
     thinning: int = 10
+    # NUTS target acceptance probability. 0.8 is the numpyro default; raise
+    # (0.9-0.99) for high-curvature/funnel geometry to shrink the step size
+    # and reduce divergences at the cost of more leapfrog steps per sample.
+    # Overridable per-stage via cut.stage2_mcmc (shallow-merged over mcmc).
+    target_accept: float = Field(default=0.8, gt=0.0, lt=1.0)
     random_seed: int = 8675309
     progress_bar: StrictBool = True
     # Restrict the convergence gate's R-hat/ESS to these sample-site name

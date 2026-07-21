@@ -30,7 +30,9 @@ def test_run_mcmc_inference_blocks_until_samples_ready(
             seen.append(group_by_chain)
             return samples
 
-    monkeypatch.setattr(inference, "NUTS", lambda model_fn: ("kernel", model_fn))
+    monkeypatch.setattr(
+        inference, "NUTS", lambda model_fn, **kwargs: ("kernel", model_fn)
+    )
     monkeypatch.setattr(inference, "MCMC", DummyMCMC)
     monkeypatch.setattr(
         inference, "choose_mcmc_parallelism", lambda max_chains: (1, "sequential")

@@ -39,7 +39,7 @@ def test_auto_parallelism_true_uses_choose_mcmc_parallelism(
     monkeypatch, make_inference_config
 ):
     monkeypatch.setattr(inference, "MCMC", _DummyMCMC)
-    monkeypatch.setattr(inference, "NUTS", lambda model_fn: model_fn)
+    monkeypatch.setattr(inference, "NUTS", lambda model_fn, **kwargs: model_fn)
     monkeypatch.setattr(
         inference, "choose_mcmc_parallelism", lambda max_chains: (2, "vectorized")
     )
@@ -61,7 +61,7 @@ def test_auto_parallelism_true_is_the_default_when_key_absent(
 ):
     """auto_parallelism defaults to True when the key is missing entirely."""
     monkeypatch.setattr(inference, "MCMC", _DummyMCMC)
-    monkeypatch.setattr(inference, "NUTS", lambda model_fn: model_fn)
+    monkeypatch.setattr(inference, "NUTS", lambda model_fn, **kwargs: model_fn)
     called = []
     monkeypatch.setattr(
         inference,
@@ -86,7 +86,7 @@ def test_auto_parallelism_false_uses_literal_config_values(
     monkeypatch, make_inference_config
 ):
     monkeypatch.setattr(inference, "MCMC", _DummyMCMC)
-    monkeypatch.setattr(inference, "NUTS", lambda model_fn: model_fn)
+    monkeypatch.setattr(inference, "NUTS", lambda model_fn, **kwargs: model_fn)
 
     def _fail_if_called(max_chains):
         raise AssertionError("choose_mcmc_parallelism should not be called")
@@ -118,7 +118,7 @@ def test_auto_parallelism_false_defaults_chain_method_to_sequential(
     to 'sequential' (the safe manual-override default), not the old
     hardcoded 'parallel'."""
     monkeypatch.setattr(inference, "MCMC", _DummyMCMC)
-    monkeypatch.setattr(inference, "NUTS", lambda model_fn: model_fn)
+    monkeypatch.setattr(inference, "NUTS", lambda model_fn, **kwargs: model_fn)
     monkeypatch.setattr(
         inference,
         "choose_mcmc_parallelism",
@@ -143,7 +143,7 @@ def _patch_for_call(monkeypatch):
     """Shared monkeypatching: mock MCMC/NUTS/block_until_ready so no real
     sampling runs. Caller patches jax.local_device_count separately."""
     monkeypatch.setattr(inference, "MCMC", _DummyMCMC)
-    monkeypatch.setattr(inference, "NUTS", lambda model_fn: model_fn)
+    monkeypatch.setattr(inference, "NUTS", lambda model_fn, **kwargs: model_fn)
     monkeypatch.setattr(inference, "block_until_ready", lambda value: value)
 
 

@@ -236,12 +236,28 @@ def _resolve_chains(mcmc_cfg: dict) -> tuple[int, str]:
     """Chain count/method: auto (device-based) or literal config values."""
     if mcmc_cfg.get("auto_parallelism", True):
         return choose_mcmc_parallelism(max_chains=mcmc_cfg.get("max_chains", 4))
-    return mcmc_cfg.get("num_chains", 4), mcmc_cfg.get("chain_method", "sequential")
+    # num_chains/chain_method are present-but-None when unset (pydantic
+    # model_dump), so .get(key, default) returns None, not the default;
+    # fall back explicitly, matching inference.run_mcmc_inference.
+    num_chains = mcmc_cfg.get("num_chains") or 4
+    chain_method = mcmc_cfg.get("chain_method") or "sequential"
+    return num_chains, chain_method
 
 
 def _extract_fit(mcmc: MCMC) -> MCMCFit:
     """Convert one MCMC run to host arrays; strip scoped suppressed_counts/*
-    keys via results.drop_scoped_samples (xarray rejects '/' in var names)."""
+    keys via results.drop_scoped_samples (xarray rejects '/' in var names).
+
+    Before returning, purge NumPyro's cached device (JAX) arrays off the MCMC
+    object. NumPyro retains the posterior in ``_states``/``_last_state`` and
+    keeps per-signature entries in ``_cache``/``_init_state_cache``; across the
+    cut Stage-2 loop these leak ~1 GB of device buffers per component (verified:
+    ``jax.live_arrays()`` climbs monotonically otherwise, and neither
+    ``gc.collect()`` nor ``jax.clear_caches()`` reclaims them because the object
+    stays reachable). Clearing the attributes here — after extraction to host
+    numpy — releases them the moment the caller drops the fit. Output is
+    unaffected: ``samples``/``diverging`` are already ``np.asarray`` host copies.
+    """
     from .results import drop_scoped_samples
 
     grouped = mcmc.get_samples(group_by_chain=True)
@@ -250,12 +266,19 @@ def _extract_fit(mcmc: MCMC) -> MCMCFit:
         mcmc.num_chains, -1
     )
     num_retained = int(next(iter(samples.values())).shape[1])
-    return MCMCFit(
+    fit = MCMCFit(
         samples=samples,
         diverging=diverging,
         num_chains=int(mcmc.num_chains),
         num_retained=num_retained,
     )
+    for _attr in ("_states", "_states_flat", "_last_state", "_warmup_state"):
+        if hasattr(mcmc, _attr):
+            setattr(mcmc, _attr, None)
+    for _attr in ("_cache", "_init_state_cache"):
+        if hasattr(mcmc, _attr):
+            setattr(mcmc, _attr, {})
+    return fit
 
 
 def run_stage1_mcmc(data_dict: dict, rank: int, config: Config) -> MCMCFit:
@@ -267,7 +290,7 @@ def run_stage1_mcmc(data_dict: dict, rank: int, config: Config) -> MCMCFit:
     num_chains, chain_method = _resolve_chains(mcmc_cfg.model_dump())
     logger.info(f"cut Stage 1: num_chains={num_chains}, chain_method={chain_method!r}")
     mcmc = MCMC(
-        NUTS(stage1_model),
+        NUTS(stage1_model, target_accept_prob=mcmc_cfg.target_accept),
         num_warmup=mcmc_cfg.num_warmup,
         num_samples=mcmc_cfg.num_samples,
         num_chains=num_chains,
@@ -308,7 +331,7 @@ def run_stage2_mcmc(
     model_cfg = config.model
     num_chains, chain_method = _resolve_chains(stage2_mcmc)
     mcmc = MCMC(
-        NUTS(stage2_model),
+        NUTS(stage2_model, target_accept_prob=stage2_mcmc.get("target_accept", 0.8)),
         num_warmup=stage2_mcmc.get("num_warmup", 1000),
         num_samples=stage2_mcmc.get("num_samples", 2500),
         num_chains=num_chains,

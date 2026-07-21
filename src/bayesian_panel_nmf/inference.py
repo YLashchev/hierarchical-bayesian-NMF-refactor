@@ -108,7 +108,7 @@ def run_mcmc_inference(
     rng_key = random.PRNGKey(random_seed)
     rng_key, rng_key_ = random.split(rng_key)
 
-    kernel = NUTS(model_fn)
+    kernel = NUTS(model_fn, target_accept_prob=mcmc_cfg.target_accept)
     mcmc = MCMC(
         kernel,
         num_warmup=num_warmup,
