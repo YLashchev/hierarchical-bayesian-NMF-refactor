@@ -117,6 +117,7 @@ If a rank is mis-set for your data you'll typically see it in the diagnostics
 | `num_chains` / `chain_method` | null | only used when auto_parallelism=false |
 | `num_warmup` / `num_samples` | `1000` / `2500` | |
 | `thinning` | `10` | |
+| `target_accept` | `0.8` | NUTS target acceptance probability. Raise toward `0.9`–`0.99` for funnel/high-curvature geometry (smaller step size → fewer divergences, more leapfrog steps per sample). Overridable per-stage via `cut.stage2_mcmc.target_accept`. |
 | `random_seed` | `8675309` | |
 | `progress_bar` | `true` | |
 | `gate_params` | null | prefixes of sample-site names the convergence gate checks; null = all (see [Interpreting diagnostics](#interpreting-diagnostics)) |
@@ -159,10 +160,14 @@ the orchestration entry point that calls into both).
 After each rank's artifacts are written, `bpnmf run` calls
 `tables.print_run_summary_panel()`: a rich terminal panel echoing that run's
 config (model type, rank, chains/method, outcome distribution), the
-convergence gate verdict (green PASS / red FAIL, plus R-hat/ESS/divergences
-when present), the selected figures, and the written artifact paths. Purely
-additive terminal output — no file or data side effects, so it never touches
-a golden-checked artifact.
+**divergence count** as a plain fact, the selected figures, and the written
+artifact paths. The panel carries **no roll-up PASS/FAIL verdict** — the
+per-parameter / per-component diagnostics table printed above it shows the
+config-driven `ConvergenceThresholds` status (PASS/WARN/FAIL) per site, and the
+authoritative gate is the `*_convergence.json` write plus its logged warning
+(see [Interpreting diagnostics](#interpreting-diagnostics)). Purely additive
+terminal output — no file or data side effects, so it never touches a
+golden-checked artifact.
 
 | Registry name | Function | Artifact |
 | --- | --- | --- |
@@ -364,6 +369,29 @@ bpnmf viz --config configs/my_config.yaml --results results/total/NB_births_tota
 | `--ppc-results` | Optional Stage-1 PPC draws CSV (cut mode) to route the PPC suite to the full Stage-1 posterior |
 | `--target` | Target unit for fit/gap/summary plots (auto-detected if omitted); overrides `--config` |
 | `--group` | Group label to render; repeatable; omit to render every group present; overrides `--config` |
+| `--tables-only` | Print/write the effect tables (`summary_table*.csv`, `post_treatment_summary.csv`, and their rich terminal render) and skip **all** figures. Fast way to re-inspect effects. Orthogonal to `--group`/`--target` (those still choose *which* group/unit; `--tables-only` only drops figures). |
+
+**Which results directory does viz read?** There is no config-driven default —
+the draws-file path you pass *is* the locator, and its parent directory is where
+tables/figures are written (`output_dir = <results path>.parent`). Even with
+`--config`, the config only drives figure selection / `aggregate_units` /
+`target` — **not** where to look; `output.output_dir` is not consulted by viz.
+Omit `--results` in a terminal for an interactive picker that globs
+`./*results*/**/*` under the current working directory (so `results/`,
+`test_results/`, `test_results_cut/`, … all match; `figs/`, `df_*`, and `*_ppc`
+are excluded). Non-TTY without `--results` errors.
+
+**Group selection nuance.** `--group` filters the **per-unit** table
+(computed per `(unit, group)`) as expected. The **headline** summary table is
+unit-anchored and sums over whatever groups are present, so on a multi-group
+(K>1) run it pools groups rather than breaking them out; use `--group` to
+restrict the input frame if you want a single group's headline.
+
+```bash
+# effects tables only, one group, from an explicit cut draws file
+bpnmf viz --results test_results_cut/education/NB_births_education_10_cut.csv \
+  --config configs/my_config.yaml --tables-only --group hs
+```
 
 ### `bpnmf traces [nc_path] [options]`
 

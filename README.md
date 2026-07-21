@@ -41,7 +41,16 @@ Regenerate figures from an existing draws CSV without re-running MCMC:
 
 ```bash
 uv run bpnmf viz --results results/total/NB_births_total_3.csv
+
+# effects tables only (no figures) — fast re-inspection of the numbers
+uv run bpnmf viz --results results/total/NB_births_total_3.csv --tables-only
 ```
+
+The draws-file path you pass is also what selects the results directory (tables
+and figures are written to its parent); omit `--results` in a terminal for an
+interactive picker over draws found under `./*results*/`. See
+`documentation.md` → CLI reference for `--tables-only`, group selection, and
+how the results directory is resolved.
 
 An ArviZ-based convergence gate (rank-normalized R-hat, bulk/tail ESS,
 divergences) always runs after MCMC and is written to `*_convergence.json`

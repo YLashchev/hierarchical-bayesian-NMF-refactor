@@ -110,6 +110,11 @@ mcmc:
   num_warmup: 1000         # default 1000
   num_samples: 2500        # default 2500
   thinning: 10             # default 10 — effective samples = num_samples / thinning
+  target_accept: 0.8       # default 0.8 (numpyro NUTS default). Raise toward
+                           # 0.9–0.99 for funnel/high-curvature geometry: it
+                           # shrinks the step size, reducing divergences at the
+                           # cost of more leapfrog steps per sample. Overridable
+                           # per-stage via cut.stage2_mcmc.target_accept.
   random_seed: 8675309     # default 8675309
   progress_bar: true       # default true
 
@@ -188,5 +193,11 @@ output:
 #   # selection_seed: null            # default null
 #   # stage2_seed: null               # default null
 #   stage2_mcmc:                      # default null — overlays the mcmc block for
-#     num_warmup: 500                 # the cheaper conditional Stage-2 fits.
-#     num_samples: 1000               # (must NOT set random_seed — stage2_seed rules)
+#     num_warmup: 500                 # the cheaper conditional Stage-2 fits. Any
+#     num_samples: 1000               # mcmc key is accepted here and shallow-
+#     thinning: 1                     # merged over the top-level mcmc block for
+#     target_accept: 0.95             # Stage 2 only (Stage 1 keeps the mcmc
+#                                     # block's values). The fixed-mu_ctrl
+#                                     # conditional geometry is funnel-prone, so
+#                                     # a higher target_accept is often set here.
+#                                     # (must NOT set random_seed — stage2_seed rules)

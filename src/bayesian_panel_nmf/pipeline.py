@@ -126,12 +126,21 @@ def _run_reporting(
     output_dir,
     output_config: OutputConfig,
     ppc_draws_df=None,
+    figures_override: list[str] | None = None,
 ) -> None:
-    """Generate figures + tables under ``<output_dir>/figs/``."""
+    """Generate figures + tables under ``<output_dir>/figs/``.
+
+    ``figures_override`` (when not ``None``) replaces ``output_config.figures``
+    for this render -- e.g. ``[]`` from ``viz --tables-only`` to write/print
+    tables while skipping every figure.
+    """
     from bayesian_panel_nmf.reports import generate_reports
 
     aggregate_units = (
         list(output_config.aggregate_units) if output_config.aggregate_units else None
+    )
+    figures = (
+        figures_override if figures_override is not None else output_config.figures
     )
     generate_reports(
         draws_df,
@@ -146,7 +155,7 @@ def _run_reporting(
         ppc_unit_corr_max_time=output_config.ppc_unit_corr_max_time,
         ppc_exclude_units=output_config.ppc_exclude_units,
         ppc_draws_df=ppc_draws_df,
-        figures=output_config.figures,
+        figures=figures,
         fit_gap_per_unit=output_config.fit_gap_per_unit,
     )
 
