@@ -116,15 +116,28 @@ def test_stage1_poisson_has_no_disp_site():
     assert "disp" not in t_cut
 
 
-TREATMENT_SITES = [
+SAMPLE_SCALE_SITES = [
     "treatment_it_scale",
     "treatment_state_scale",
     "treatment_category_scale",
     "state_category_scale",
+    "category_treatment_effect",
+]
+
+# Non-centered sites: treatment_kt/state_treatment_effect/state_category_te
+# are numpyro.deterministic (z * scale) in both models now, not sample sites
+# -- they carry no "fn"/log_prob. Parity for them is checked as exact value
+# equality (via their *_z sample-site substitution + log_prob parity below),
+# not log_prob equality like the still-centered sites.
+DETERMINISTIC_TREATMENT_SITES = [
     "treatment_kt",
     "state_treatment_effect",
     "state_category_te",
-    "category_treatment_effect",
+]
+Z_SITES = [
+    "treatment_kt_z",
+    "state_treatment_effect_z",
+    "state_category_te_z",
 ]
 
 
@@ -133,7 +146,7 @@ def test_stage2_te_mu_and_priors_match_joint_treatment_block():
     t_joint = trace(_traceable(joint_model, 0)).get_trace(
         model_treated=True, **_stage1_kwargs(d)
     )
-    sub = {name: t_joint[name]["value"] for name in TREATMENT_SITES}
+    sub = {name: t_joint[name]["value"] for name in SAMPLE_SCALE_SITES + Z_SITES}
     t_cut = trace(
         substitute(seed(stage2_model, jax.random.PRNGKey(1)), data=sub)
     ).get_trace(
@@ -151,7 +164,13 @@ def test_stage2_te_mu_and_priors_match_joint_treatment_block():
     np.testing.assert_array_equal(
         np.asarray(t_cut["mu"]["value"]), np.asarray(t_joint["mu"]["value"])
     )
-    for name in TREATMENT_SITES:
+    for name in DETERMINISTIC_TREATMENT_SITES:
+        np.testing.assert_array_equal(
+            np.asarray(t_cut[name]["value"]),
+            np.asarray(t_joint[name]["value"]),
+            err_msg=name,
+        )
+    for name in SAMPLE_SCALE_SITES + Z_SITES:
         lp_joint = np.asarray(t_joint[name]["fn"].log_prob(t_joint[name]["value"]))
         lp_cut = np.asarray(t_cut[name]["fn"].log_prob(t_cut[name]["value"]))
         np.testing.assert_array_equal(lp_cut, lp_joint, err_msg=name)

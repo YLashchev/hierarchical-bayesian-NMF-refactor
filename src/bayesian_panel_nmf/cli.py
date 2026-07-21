@@ -321,7 +321,13 @@ def _viz_command(args: argparse.Namespace) -> None:
             output_config = output_config.model_copy(
                 update={"report_groups": args.group}
             )
-        _run_reporting(draws_df, output_dir, output_config, ppc_draws_df=ppc_draws_df)
+        _run_reporting(
+            draws_df,
+            output_dir,
+            output_config,
+            ppc_draws_df=ppc_draws_df,
+            figures_override=[] if args.tables_only else None,
+        )
     else:
         generate_reports(
             draws_df,
@@ -329,6 +335,7 @@ def _viz_command(args: argparse.Namespace) -> None:
             target_unit=args.target,
             groups=args.group,
             ppc_draws_df=ppc_draws_df,
+            figures=[] if args.tables_only else None,
         )
 
 
@@ -375,6 +382,12 @@ def _add_viz_parser(subparsers) -> None:
         action="append",
         help="Group label for per-unit plots. Repeat for multiple groups; "
         "omit to render every group present in the draws CSV.",
+    )
+    parser.add_argument(
+        "--tables-only",
+        action="store_true",
+        help="Print/write the effect tables (summary, per-unit) only; skip all "
+        "figures. Fast way to re-inspect effects from an existing draws artifact.",
     )
     parser.set_defaults(func=_viz_command)
 
@@ -458,12 +471,17 @@ def _select_variables_to_plot(
     Without --param-filter: scalar/low-dimensional parameters (dispersion,
     treatment/category scales, the state_fe hyperparameters state_fe_mu/
     state_fe_sigma) first, then higher-dimensional matrix parameters
-    (treatment effects, factors, per-unit fixed effects incl. state_fe_z),
-    in a fixed priority order. The large derived log-rate surfaces mu/mu_ctrl
-    are excluded by default (thousands of cells; a subsampled trace is not a
-    useful convergence view -- the gate summarizes them, and --param-filter
-    mu still reaches them). Falls back to the first 5 available variables if
-    none of the priority names are present.
+    (treatment effects, factors, per-unit fixed effects incl. state_fe_z and
+    the non-centered treatment_kt_z/state_treatment_effect_z/
+    state_category_te_z raw z-scores), in a fixed priority order. The
+    deterministic treatment_kt/state_treatment_effect/state_category_te
+    remain plotted too -- they are the identified reported quantities, only
+    their raw z-scores are non-identified nuisance. The large derived
+    log-rate surfaces mu/mu_ctrl are excluded by default (thousands of
+    cells; a subsampled trace is not a useful convergence view -- the gate
+    summarizes them, and --param-filter mu still reaches them). Falls back
+    to the first 5 available variables if none of the priority names are
+    present.
     """
     if param_filters:
         vars_to_plot = [
@@ -493,6 +511,9 @@ def _select_variables_to_plot(
         "treatment_kt",
         "time_fac",
         "state_fe_z",
+        "treatment_kt_z",
+        "state_treatment_effect_z",
+        "state_category_te_z",
         "time_fe",
         "unit_weight",
     ]

@@ -177,18 +177,33 @@ def model(
             "state_category_scale", dist.HalfNormal(scale=1)
         )
 
+        # Non-centered: treatment_kt/state_treatment_effect/state_category_te
+        # each sample a standard-normal z inside the same plate, then scale
+        # deterministically. Their scale priors are tight/weakly-identified
+        # (HalfNormal(0.1) / HalfNormal(1) with sparse exposed-cell data),
+        # producing a centered-parameterization funnel (divergences, ESS<30)
+        # -- same fix already applied to state_fe above. category_treatment_effect
+        # is left centered: its scale is data-informed (ESS ~1000, PASS), where
+        # centered mixes better (see jax-hygiene / non-centered-default guidance).
         with numpyro.plate("num_treated", num_treated):
-            treatment_kt = numpyro.sample(
-                "treatment_kt", dist.Normal(scale=treatment_it_scale)
-            )
+            treatment_kt_z = numpyro.sample("treatment_kt_z", dist.Normal(0, 1))
+        treatment_kt = numpyro.deterministic(
+            "treatment_kt", treatment_kt_z * treatment_it_scale
+        )
         with numpyro.plate("num_states", D):
-            state_treatment_effect = numpyro.sample(
-                "state_treatment_effect", dist.Normal(scale=treatment_state_scale)
+            state_treatment_effect_z = numpyro.sample(
+                "state_treatment_effect_z", dist.Normal(0, 1)
             )
             with numpyro.plate("num_cats", K):
-                state_category_te = numpyro.sample(
-                    "state_category_te", dist.Normal(scale=state_category_scale)
+                state_category_te_z = numpyro.sample(
+                    "state_category_te_z", dist.Normal(0, 1)
                 )
+        state_treatment_effect = numpyro.deterministic(
+            "state_treatment_effect", state_treatment_effect_z * treatment_state_scale
+        )
+        state_category_te = numpyro.deterministic(
+            "state_category_te", state_category_te_z * state_category_scale
+        )
         with numpyro.plate("num_cats", K):
             category_treatment_effect = numpyro.sample(
                 "category_treatment_effect", dist.Normal(scale=treatment_category_scale)
