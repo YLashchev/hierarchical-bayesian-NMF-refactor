@@ -114,7 +114,7 @@ mcmc:
 uv run bpnmf run --config configs/my_config.yaml
 ```
 
-See `configs/base_config.yaml` for every supported option with inline comments. `configs/nativity_config.yaml` and `configs/fertility_config.yaml` are working end-to-end examples.
+See `configs/base_config.yaml` for every supported option with inline comments. `configs/fertility_config.yaml` and `configs/education_joint.yaml` are working end-to-end examples.
 
 ## Configuration Highlights
 
@@ -286,7 +286,7 @@ draws_df = format_draws(mcmc.get_samples(group_by_chain=True), predictions, data
 ## Development
 
 ```bash
-uv run pytest              # 333 regression + integration tests
+uv run pytest              # full regression + integration suite (400+ tests)
 uv run ruff check .
 uv run ruff format .
 ```
@@ -311,7 +311,7 @@ Built-in but still being hardened:
 - [ ] **Unit test coverage** — current suite is mostly integration / regression against synthetic CSVs; add targeted unit tests for functions in `models/`, `inference.py`, and `results.py`
 - [ ] **GPU support** — JAX already runs on GPU; surface a config flag + verify chain parallelism against `numpyro.set_host_device_count`
 - [ ] **Server/HPC multi-model-type parallelism** — model types currently always run sequentially in one process (chain-level parallelism via `mcmc.auto_parallelism` is automatic within each fit). If running many independent model types on a server/HPC host becomes a bottleneck, revisit process-level parallelism across model types, with the same CPU/RAM oversubscription guards the removed `analysis_workers` mechanism had.
-- [ ] **Reference-style post-hoc diagnostics** — optionally save selected latent draws (`te`, treatment effects, `unit_weight`, `time_fac`, `disp`) so R-hat/ESS can be computed after a run without calling NumPyro `summary()` during production. Prefer Parquet or compact sidecar files over widening the main CSV; keep full-run diagnostics off by default.
+- [ ] **Reference-style post-hoc diagnostics** — optionally save selected latent draws (`te`, treatment effects, `unit_weight`, `time_fac`, `disp`) as compact sidecar files so R-hat/ESS can be computed after a run without calling NumPyro `summary()` during production; keep full-run diagnostics off by default. (Parquet output for the main draws artifact already shipped via `output.draws_format: "parquet"`.)
 - [ ] **Spillover analysis** — diagnostics for contamination between treated and neighboring control units
 - [ ] **Donor-pool sensitivity** — systematic leave-one-out / leave-region-out robustness checks
 - [ ] **Additional outcome distributions** — Gaussian, Student-t for continuous outcomes

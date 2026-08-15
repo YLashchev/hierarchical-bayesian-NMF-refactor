@@ -99,7 +99,7 @@ core modeling assumption. The untreated outcome surface is approximated by
 factorization). A higher rank is a more flexible baseline (captures more
 shared structure) but is harder to identify and slower to converge; a lower
 rank is more parsimonious but may underfit. Typical values are small
-single digits — the shipped fertility/nativity configs use `5`.
+single digits — the shipped fertility/education configs use `5`.
 
 `ranks_to_test` is a **list**, and each value produces its own independent
 fit and its own output files (`{dist}_{outcome}_{type}_{rank}.*`) — it is a
@@ -121,6 +121,9 @@ If a rank is mis-set for your data you'll typically see it in the diagnostics
 | `random_seed` | `8675309` | |
 | `progress_bar` | `true` | |
 | `gate_params` | null | prefixes of sample-site names the convergence gate checks; null = all (see [Interpreting diagnostics](#interpreting-diagnostics)) |
+| `convergence.rhat_warn` / `convergence.rhat_fail` | `1.01` / `1.05` | R-hat PASS/WARN and FAIL band edges for the per-site diagnostics status |
+| `convergence.ess_min` | `400.0` | ESS warn line — `converged` requires `min(bulk, tail) ESS >= ess_min` |
+| `convergence.ess_fail_fraction` | `0.25` | ESS below `ess_min * ess_fail_fraction` (= 100 by default) is a hard FAIL |
 
 ### `output`
 
@@ -180,8 +183,9 @@ golden-checked artifact.
 
 `output.figures` accepts:
 
-- `true` (default-equivalent "render everything") or `false` (render no
-  figures) — the original boolean spelling still works.
+- `true` ("render everything") or `false` (render no
+  figures) — the original boolean spelling still works. The config default
+  is `false` (equivalently `[]`), i.e. render nothing.
 - `"all"` / `"none"` — explicit string spellings of the same two extremes.
 - a list of registry names, e.g. `figures: ["interval", "ppc"]` — renders
   only those. Unknown names are rejected at config-load time.
@@ -206,7 +210,7 @@ appends `_cut`.
 | File | Contents |
 | ---- | -------- |
 | `{stem}.csv` or `.parquet` | Tidy posterior draws (one row per draw × group × unit × time): `.draw/.chain/.iteration`, `unit/time/group`, `outcome/denominator/treatment`, `ypred` (counterfactual untreated), `mu` (log-rate control), `mu_treated`. Format set by `output.draws_format`. This is the large artifact (100 MB–1 GB for multi-group types). |
-| `{stem}_convergence.json` | Always-on gate: `{rhat_max, ess_bulk_min, ess_tail_min, divergences, converged}` (R-hat<1.01, bulk ESS>400, 0 divergences). |
+| `{stem}_convergence.json` | Always-on gate: `{rhat_max, ess_bulk_min, ess_tail_min, divergences, converged}` (defaults: R-hat<1.01, ESS≥400, 0 divergences; bands configurable via `mcmc.convergence`). |
 | `df_{type}.csv` | Preprocessed observed data (standardized columns). |
 | `{stem}_traces.nc` | Full posterior NetCDF sidecar (only with `--save-traces`). |
 | `figs/` | PPC panels, fit/gap/interval/raw-rate plots, summary tables (when `output.figures: true`). |
@@ -239,10 +243,14 @@ and a verdict:
 | Field | Meaning | Pass threshold |
 | ----- | ------- | -------------- |
 | `rhat_max` | worst rank-normalized R-hat across parameters | `< 1.01` |
-| `ess_bulk_min` | smallest bulk effective sample size | `> 400` |
-| `ess_tail_min` | smallest tail effective sample size | (reported; not gated) |
+| `ess_bulk_min` | smallest bulk effective sample size | `>= 400` |
+| `ess_tail_min` | smallest tail effective sample size | gated jointly with bulk: the gate uses `min(bulk, tail) >= 400` |
 | `divergences` | total divergent transitions | `== 0` |
-| `converged` | `true` only if R-hat, bulk ESS, and divergences all pass | — |
+| `converged` | `true` only if R-hat, min(bulk, tail) ESS, and divergences all pass the PASS band | — |
+
+The numeric bars above are the **defaults**; the band edges are configurable
+via `mcmc.convergence.{rhat_warn, rhat_fail, ess_min, ess_fail_fraction}`
+(PASS/WARN/FAIL per site; the divergence `== 0` requirement is fixed).
 
 A failed gate logs a warning and the run continues — it never silently drops
 output. On failure: increase `mcmc.num_warmup`/`num_samples`, or investigate
@@ -285,8 +293,10 @@ Semantics:
   `"unit_weight"` back at will, or drop the key for the full gate.
 - **Divergences are always counted over the full run** regardless of the
   list — a divergence anywhere invalidates the geometry everywhere.
-- **Thresholds are never configurable** (R-hat < 1.01, bulk ESS > 400,
-  0 divergences).
+- **Threshold bands are configurable** via `mcmc.convergence`
+  (`rhat_warn` / `rhat_fail` / `ess_min` / `ess_fail_fraction`); the defaults
+  reproduce the historical gate (R-hat < 1.01, ESS ≥ 400, 0 divergences —
+  divergences are always a hard gate).
 - **One list serves joint and both cut stages.** Each gate filters the list
   against its own posterior: cut Stage-1 (baseline: `mu`, `time_fe`,
   `time_fac`, `unit_weight`, `disp`) matches only `"mu"` from the list
@@ -351,7 +361,7 @@ reporting) for one or all configured model types.
 
 Re-renders figures + tables from an existing draws artifact without
 re-running MCMC — the same reporting path `bpnmf run` calls automatically
-when `output.figures: true`.
+when `output.figures` resolves to a non-empty figure list.
 
 **To reproduce a configured run's figures, pass the same `--config`.** Without
 it, viz renders every figure with defaults and ignores the `output` block
@@ -364,7 +374,8 @@ bpnmf viz --config configs/my_config.yaml --results results/total/NB_births_tota
 
 | Flag | Meaning |
 | ---- | ------- |
-| `--results` | Path to the draws CSV/parquet. **Omit it (in a terminal) for an interactive picker** — discovers draws under `./results*/` and, for cut runs, auto-attaches the `*_stage1_ppc.csv` sidecar. Non-TTY without `--results` errors. |
+| `--results` | Path to the draws CSV/parquet. **Omit it (in a terminal) for an interactive picker** — discovers draws under `./*results*/**/*` and, for cut runs, auto-attaches the `*_stage1_ppc.csv` sidecar, then offers an optional config
+file to drive figure selection / `target` / `aggregate_units`. Non-TTY without `--results` errors. |
 | `--config` | Config YAML whose `output` block drives the re-render (figures, `aggregate_units`, `ppc_*`, `fit_gap_per_unit`, ...). Omit to render every figure with defaults. `--target`/`--group` override the config. |
 | `--ppc-results` | Optional Stage-1 PPC draws CSV (cut mode) to route the PPC suite to the full Stage-1 posterior |
 | `--target` | Target unit for fit/gap/summary plots (auto-detected if omitted); overrides `--config` |
@@ -402,7 +413,7 @@ renders PNG trace plots instead.
 Three input forms:
 
 - **Omit `nc_path`** (in a terminal): interactive picker over every trace
-  sidecar and cut `*_stage2_traces/` directory found under `./results*/`.
+  sidecar and cut `*_stage2_traces/` directory found under `./*results*/**/*`.
 - **A `.nc` file**: full per-parameter table for that fit (joint sidecar,
   cut Stage-1 sidecar, or a single Stage-2 `component_NNNN.nc`).
 - **A `*_stage2_traces/` directory** (cut mode): one summary row per
@@ -422,7 +433,9 @@ and a sampled `disp` gets real diagnostics.
 | `--param-filter` | Comma-separated parameter-name prefixes to restrict to |
 | `--out-dir` | Output directory for `--plots` (default `<input_dir>/figs/diagnostics/`) |
 
-Exit code is 0 only if no gated parameter FAILs — usable in scripts.
+Exit code is 0 only if no gated parameter FAILs (numeric-table and
+directory-summary modes — usable in scripts; `--plots` exits non-zero only
+when no plots were written, not on gate FAILs).
 
 ### `bpnmf init [path] [--force]`
 
