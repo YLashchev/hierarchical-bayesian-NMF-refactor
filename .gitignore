@@ -26,6 +26,7 @@ scripts/booboo_append_slop.sh
 
 # ── Results & generated output ──────────────────────────────────────
 results/**
+test_results*/
 *.log
 
 # ── Data ────────────────────────────────────────────────────────────
