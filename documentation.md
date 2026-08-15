@@ -1,13 +1,12 @@
 # bayesian_panel_nmf — Documentation
 
-Central reference for the Bayesian hierarchical panel model with low-rank
-factorization. This document is built up alongside the codebase; sections are
-added as features land.
+Reference for the Bayesian hierarchical panel model with low-rank
+factorization. Grows alongside the codebase.
 
 > **Methodology note.** This is a low-rank factor-model approach: untreated
 > outcomes are approximated by a small number of latent factors. It is **not**
-> a difference-in-differences / parallel-trends design — the analysis relies on
-> factor structure, not on matched pre-trends.
+> a difference-in-differences / parallel-trends design — it relies on
+> factor structure, not matched pre-trends.
 
 ---
 
@@ -21,8 +20,7 @@ cd bayesian_panel_nmf
 uv sync --all-extras --dev
 ```
 
-This installs the full stack, pinned in `pyproject.toml` and locked in
-`uv.lock`:
+Installs the full stack, pinned in `pyproject.toml` and locked in `uv.lock`:
 
 | Package | Floor | Notes |
 | --------- | ------- | ------- |
@@ -36,10 +34,10 @@ This installs the full stack, pinned in `pyproject.toml` and locked in
 ### GPU / accelerator
 
 JAX selects the accelerator wheel via its own extras (e.g. `jax[cuda13]`).
-The default install is CPU-only; see the
+Default install is CPU-only; see the
 [JAX installation guide](https://docs.jax.dev/en/latest/installation.html)
-for CUDA/ROCm/TPU wheels. Chain parallelism is chosen automatically from the
-visible devices (see `mcmc.auto_parallelism`).
+for CUDA/ROCm/TPU wheels. Chain parallelism picks itself from the visible
+devices (see `mcmc.auto_parallelism`).
 
 ### Verify the install
 
@@ -54,8 +52,8 @@ uv run python -c "import jax, numpyro, arviz; print(jax.__version__, numpyro.__v
 
 Configs are YAML files validated by a typed schema (`bayesian_panel_nmf.config.Config`,
 pydantic v2). Unknown keys are **rejected** (typos fail fast), and booleans must be
-unquoted (`true`/`false`, not `"true"`). Every default below lives in one place —
-the schema — so a value you omit resolves identically everywhere.
+unquoted (`true`/`false`, not `"true"`). Every default below lives in the schema,
+so an omitted value resolves the same way everywhere.
 
 ### `data` (required)
 
@@ -91,21 +89,21 @@ of `outcomes` (explicit list of `{outcome_col, label, denominator_col?}`) or
 
 Each entry under `model.types` is an **independent model fit** over a set of
 outcome `groups`. The map key is a label you choose (e.g. `total`, `age`,
-`race`) — it names the output subdirectory and has no effect on the model.
+`race`) — it names the output subdirectory only, nothing else.
 
 **`rank` is the number of latent factors** in the low-rank factorization — the
 core modeling assumption. The untreated outcome surface is approximated by
-`rank` shared time/unit factors (this is the "NMF": nonnegative matrix
-factorization). A higher rank is a more flexible baseline (captures more
-shared structure) but is harder to identify and slower to converge; a lower
-rank is more parsimonious but may underfit. Typical values are small
-single digits — the shipped fertility/education configs use `5`.
+`rank` shared time/unit factors (the "NMF": nonnegative matrix
+factorization). A higher rank fits more shared structure but is harder to
+identify and slower to converge; a lower rank is more parsimonious but may
+underfit. Typical values are small single digits — the shipped
+fertility/education configs use `5`.
 
-`ranks_to_test` is a **list**, and each value produces its own independent
-fit and its own output files (`{dist}_{outcome}_{type}_{rank}.*`) — it is a
+`ranks_to_test` is a **list**; each value produces its own independent
+fit and output files (`{dist}_{outcome}_{type}_{rank}.*`) — a
 sweep, **not** automatic model selection. `ranks_to_test: [3, 5, 10]` runs
-three full analyses so you can compare them; `ranks_to_test: [5]` runs one.
-If a rank is mis-set for your data you'll typically see it in the diagnostics
+three full analyses to compare; `ranks_to_test: [5]` runs one.
+A mis-set rank usually shows up in the diagnostics
 (persistent non-convergence, very low ESS) — see "Interpreting diagnostics".
 
 ### `mcmc`
@@ -155,10 +153,10 @@ entries `reports.generate_reports()` renders; `summary_table` (and the
 other CSV tables) is not in the registry and always renders regardless of
 this selection.
 
-Figure/table orchestration is split across three modules: `plots.py` (matplotlib
+Figure/table code is split across three modules: `plots.py` (matplotlib
 plotting primitives), `tables.py` (pure pandas/numpy table computation plus rich
 terminal rendering — no matplotlib), and `reports.py` (`generate_reports()`,
-the orchestration entry point that calls into both).
+the entry point that calls into both).
 
 After each rank's artifacts are written, `bpnmf run` calls
 `tables.print_run_summary_panel()`: a rich terminal panel echoing that run's
@@ -192,9 +190,9 @@ golden-checked artifact.
 
 All spellings normalize to a canonical `list[str]` (the names to render).
 `bpnmf run` skips reporting entirely (no figures *and* no
-tables) when the normalized selection is empty, matching the pre-existing
+tables) when the normalized selection is empty, matching the original
 `figures: false` behavior. Calling `reports.generate_reports(..., figures=
-["interval"])` directly always still writes the always-on tables — only the
+["interval"])` directly still always writes the always-on tables — only the
 PLOT_REGISTRY figures are gated at that level.
 
 ---
@@ -209,7 +207,7 @@ appends `_cut`.
 
 | File | Contents |
 | ---- | -------- |
-| `{stem}.csv` or `.parquet` | Tidy posterior draws (one row per draw × group × unit × time): `.draw/.chain/.iteration`, `unit/time/group`, `outcome/denominator/treatment`, `ypred` (counterfactual untreated), `mu` (log-rate control), `mu_treated`. Format set by `output.draws_format`. This is the large artifact (100 MB–1 GB for multi-group types). |
+| `{stem}.csv` or `.parquet` | Tidy posterior draws (one row per draw × group × unit × time): `.draw/.chain/.iteration`, `unit/time/group`, `outcome/denominator/treatment`, `ypred` (counterfactual untreated), `mu` (log-rate control), `mu_treated`. Format set by `output.draws_format`. The large artifact (100 MB–1 GB for multi-group types). |
 | `{stem}_convergence.json` | Always-on gate: `{rhat_max, ess_bulk_min, ess_tail_min, divergences, converged}` (defaults: R-hat<1.01, ESS≥400, 0 divergences; bands configurable via `mcmc.convergence`). |
 | `df_{type}.csv` | Preprocessed observed data (standardized columns). |
 | `{stem}_traces.nc` | Full posterior NetCDF sidecar (only with `--save-traces`). |
@@ -219,7 +217,7 @@ appends `_cut`.
 
 | File | Contents |
 | ---- | -------- |
-| `{stem}_cut.csv`/`.parquet` | Combined Stage-2 draws with provenance columns `cut_component, stage1_draw, stage1_chain, stage1_iteration`. `.draw` is globally unique across components; `.chain`/`.iteration` are the real Stage-2 chain/subsample index. |
+| `{stem}_cut.csv`/`.parquet` | Combined Stage-2 draws with columns `cut_component, stage1_draw, stage1_chain, stage1_iteration`. `.draw` is globally unique across components; `.chain`/`.iteration` are the real Stage-2 chain/subsample index. |
 | `{stem}_cut_stage1_ppc.csv` | Full Stage-1 posterior-predictive draws (feeds the PPC suite only). Always CSV. |
 | `{stem}_cut_convergence.json` | Per-stage manifest: Stage-1 gate + every conditional Stage-2 fit's gate; top-level `converged` true only if Stage 1 and all components passed. |
 | `{stem}_cut_stage1_traces.nc`, `{stem}_cut_stage2_traces/component_*.nc` | Trace sidecars (only with `--save-traces`). |
@@ -253,8 +251,8 @@ via `mcmc.convergence.{rhat_warn, rhat_fail, ess_min, ess_fail_fraction}`
 (PASS/WARN/FAIL per site; the divergence `== 0` requirement is fixed).
 
 A failed gate logs a warning and the run continues — it never silently drops
-output. On failure: increase `mcmc.num_warmup`/`num_samples`, or investigate
-with the trace sidecars (run with `--save-traces`, then
+output. On failure: increase `mcmc.num_warmup`/`num_samples`, or check
+the trace sidecars (run with `--save-traces`, then
 `bpnmf traces <nc_path>` for the numeric table or `bpnmf traces <nc_path> --plots`
 for visual traces). In cut mode the manifest reports Stage-1 and every Stage-2
 fit separately; diagnostics are never pooled across conditional targets.
@@ -264,8 +262,8 @@ fit separately; diagnostics are never pooled across conditional targets.
 The low-rank factorization contains sites that are individually
 non-identifiable by construction (`state_fe`, `time_fe`, `time_fac`,
 `unit_weight` trade off against each other while their sum — the log-rate
-surface — is stable). Their R-hat legitimately fails even when every
-quantity you report has mixed, so a whole-posterior gate can cry wolf
+surface — is stable). Their R-hat can legitimately fail even when every
+quantity you report has mixed, so gating the whole posterior cries wolf
 forever. `mcmc.gate_params` restricts the R-hat/ESS gate to the sample-site
 name **prefixes** you list:
 
@@ -285,9 +283,9 @@ Semantics:
 - **Prefix match** (`startswith`) on posterior variable names. Beware short
   prefixes: `"state"` would also sweep in `state_treatment_effect` and
   `state_category_*`; use the longest unambiguous prefix.
-- **Omit the key (or null) = gate everything** — the historical default; the
+- **Omit the key (or null) = gate everything** — the original default; the
   convergence JSON is unchanged. When set, the JSON gains a `gate_params`
-  key recording what was gated (provenance).
+  key recording what was gated.
 - **You can include the non-identifiable sites too** — nothing is
   hard-excluded; add `"state_fe"`, `"time_fe"`, `"time_fac"`,
   `"unit_weight"` back at will, or drop the key for the full gate.
@@ -295,7 +293,7 @@ Semantics:
   list — a divergence anywhere invalidates the geometry everywhere.
 - **Threshold bands are configurable** via `mcmc.convergence`
   (`rhat_warn` / `rhat_fail` / `ess_min` / `ess_fail_fraction`); the defaults
-  reproduce the historical gate (R-hat < 1.01, ESS ≥ 400, 0 divergences —
+  reproduce the original gate (R-hat < 1.01, ESS ≥ 400, 0 divergences —
   divergences are always a hard gate).
 - **One list serves joint and both cut stages.** Each gate filters the list
   against its own posterior: cut Stage-1 (baseline: `mu`, `time_fe`,
@@ -309,11 +307,11 @@ Try it on the smoke tests (fast, ~3-5 min each):
 
 ```bash
 # 1. Baseline: run the joint smoke config as-is (gates ALL parameters —
-#    expect converged: false; the smoke settings are deliberately tiny)
+#    expect converged: false; the smoke settings are tiny on purpose)
 uv run bpnmf run --config configs/fertility_smoke_test.yaml
 cat results/total/NB_births_total_3_convergence.json
 
-# 2. Add gate_params to a copy and re-run — note rhat_max/ess now reflect
+# 2. Add gate_params to a copy and re-run — rhat_max/ess now reflect
 #    only the gated sites, and the JSON records gate_params
 sed 's/^  random_seed:/  gate_params: ["mu", "te", "treatment", "state_treatment", "category_treatment", "state_category"]\n  random_seed:/' \
   configs/fertility_smoke_test.yaml > /tmp/smoke_gated.yaml
@@ -329,9 +327,9 @@ uv run bpnmf run --config /tmp/cut_smoke_gated.yaml
 cat results/total/NB_births_total_3_convergence.json
 ```
 
-Note: gating fewer parameters is a *reporting* choice, not a fix for the
+Gating fewer parameters is a *reporting* choice, not a fix for the
 non-identifiability — the JSON's `gate_params` key keeps the narrowing
-visible to any reader of the artifact.
+visible to anyone reading the artifact.
 
 ---
 
@@ -365,8 +363,8 @@ when `output.figures` resolves to a non-empty figure list.
 
 **To reproduce a configured run's figures, pass the same `--config`.** Without
 it, viz renders every figure with defaults and ignores the `output` block
-(so PPC lags, `aggregate_units`, `fit_gap_per_unit`, etc. would be lost). With
-`--config`, viz drives the identical reporting path `bpnmf run` uses:
+(so PPC lags, `aggregate_units`, `fit_gap_per_unit`, etc. are lost). With
+`--config`, viz uses the same reporting path as `bpnmf run`:
 
 ```bash
 bpnmf viz --config configs/my_config.yaml --results results/total/NB_births_total_5.parquet
@@ -396,7 +394,7 @@ are excluded). Non-TTY without `--results` errors.
 (computed per `(unit, group)`) as expected. The **headline** summary table is
 unit-anchored and sums over whatever groups are present, so on a multi-group
 (K>1) run it pools groups rather than breaking them out; use `--group` to
-restrict the input frame if you want a single group's headline.
+restrict the input frame for a single group's headline.
 
 ```bash
 # effects tables only, one group, from an explicit cut draws file
@@ -420,11 +418,11 @@ Three input forms:
   component — worst parameter, its R-hat/ESS, status — plus a pass count.
   Diagnostics stay per-component; nothing is pooled across components.
 
-Sites that are **constant in the file** (zero posterior variance) are shown
+Sites that are **constant in the file** (zero posterior variance) show
 dimmed as `fixed` with no R-hat/ESS and never count as failures. This is
-detected empirically, so it is always right for the model at hand: `disp`
+detected empirically, so it is always correct for the model at hand: `disp`
 under `sample_disp: false` is `fixed` in both models, `mu_ctrl` is `fixed`
-only in cut Stage-2 components (where the baseline is deliberately frozen),
+only in cut Stage-2 components (where the baseline is frozen by design),
 and a sampled `disp` gets real diagnostics.
 
 | Flag | Meaning |
@@ -469,7 +467,7 @@ approximation. An explicit `cut.stage2_mcmc.random_seed` is therefore rejected:
 
 The cut posterior is `p(φ|Z)·p(θ|Y,φ)` — exposed outcomes must never feed back
 into the untreated baseline. `models/joint.py`, `models/cut_baseline.py`, and
-`models/cut_treatment.py` deliberately duplicate the factor/treatment blocks
+`models/cut_treatment.py` duplicate the factor/treatment blocks on purpose
 rather than import shared helpers, so an edit to one cannot silently change the
 other's isolation guarantee. Parity is enforced by `tests/test_cut_model_parity.py`
 instead of by code sharing.
@@ -479,5 +477,5 @@ instead of by code sharing.
 `choose_mcmc_parallelism` (in `parallelism.py`) picks `chain_method` from the
 visible JAX devices: sequential on one CPU, vectorized on one GPU, parallel
 across multiple devices. XLA's CPU backend shares one thread pool across
-logical devices, so forcing multiple CPU devices for `parallel` gives no clean
+logical devices, so forcing multiple CPU devices for `parallel` gives no real
 speedup — sequential is the honest default rather than false parallelism.

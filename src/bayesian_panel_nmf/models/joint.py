@@ -34,11 +34,10 @@ def _define_time_factors_and_fe(K, D, rank, N, time_fac_alpha):
             raw_time_factor = jnp.log(
                 numpyro.sample("time_fac", dist.Gamma(time_fac_alpha, time_fac_alpha))
             )
-        # Hierarchical, non-centered Normal prior on state fixed effects
-        # (real/log-rate scale). Replaces the old flat ImproperUniform on the
-        # positive scale, which pulled state effects to -inf for units with
-        # zero-count cells. Partial pooling via a shared mean/scale + z-scores
-        # regularizes those units; non-centered form also samples cleanly.
+        # Non-centered hierarchical Normal prior on state fixed effects
+        # (log-rate scale). A flat prior pulls units with zero-count cells
+        # to -inf; partial pooling via a shared mean/scale + z-scores fixes
+        # that and samples cleanly.
         state_fe_mu = numpyro.sample(
             "state_fe_mu", dist.ImproperUniform(constraints.real, (), ())
         )
@@ -127,10 +126,9 @@ def model(
             "(counterfactual prediction)."
         )
 
-    # treated time period onward
     K, D, N = denominators.shape
 
-    # Set the masking arrays to just be a vacuous "True" if not set
+    # Vacuous "True" mask when not set.
     if control_idx_array is None:
         control_idx = np.ones_like(denominators, dtype=np.bool_).reshape(-1)
         num_treated = 0
@@ -148,16 +146,15 @@ def model(
         K, D, rank, N, time_fac_alpha
     )
 
-    # create fixed effects, accounting for dimensions of each and broadcasting apropriately
+    # state_fe broadcasts over time (K, D, 1); time_fe broadcasts over units (K, 1, N).
     fixed_effects = state_fe[:, :, None] + time_fe[:, None, :]
 
     f_all = numpyro.deterministic(
         "mu_ctrl",
         time_factor
         + fixed_effects
-        +
-        # we want births per 10k
-        jnp.log(denominators),
+        # log(denominators) converts the log-rate surface to a log-count rate.
+        + jnp.log(denominators),
     )
 
     if model_treated:
@@ -181,10 +178,10 @@ def model(
         # each sample a standard-normal z inside the same plate, then scale
         # deterministically. Their scale priors are tight/weakly-identified
         # (HalfNormal(0.1) / HalfNormal(1) with sparse exposed-cell data),
-        # producing a centered-parameterization funnel (divergences, ESS<30)
-        # -- same fix already applied to state_fe above. category_treatment_effect
-        # is left centered: its scale is data-informed (ESS ~1000, PASS), where
-        # centered mixes better (see jax-hygiene / non-centered-default guidance).
+        # which centered parameterization turns into a funnel (divergences,
+        # ESS < 30) -- same fix as state_fe above. category_treatment_effect
+        # stays centered: its scale is data-informed (ESS ~1000, PASS), and
+        # centered mixes better when the scale is well constrained.
         with numpyro.plate("num_treated", num_treated):
             treatment_kt_z = numpyro.sample("treatment_kt_z", dist.Normal(0, 1))
         treatment_kt = numpyro.deterministic(
@@ -247,7 +244,7 @@ def model(
             mask = ~missing_idx & control_idx
 
         if adjust_for_missingness:
-            # adjust for the fact that low and nonzero births are masked from the dataset
+            # small nonzero counts are censored in the source data; integrate over them.
             disp_broadcast = (
                 dispersion[None, :, None] * jnp.ones_like(mu)
                 if dispersion is not None
@@ -275,11 +272,7 @@ def model(
     if outcome_dist == "Poisson":
         numpyro.sample("y_obs", dist.Poisson(rate=jnp.exp(f)), obs=y_obs)
     else:
-        # Dispersion is concentration = alpha of gamma
-        # e^f = \alpha / \beta
-        # \lambda = Gamma(a, b)
-
-        # Broadcast and mask dispersion for NegBin likelihood
+        # NegativeBinomial2 dispersion is the gamma-mixture concentration.
         disp_broadcast = dispersion[None, :, None] * jnp.ones_like(mu)
         if y is not None:
             mask_ = ~missing_idx if model_treated else (~missing_idx & control_idx)

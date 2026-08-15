@@ -68,12 +68,10 @@ def generate_reports(
 ) -> dict:
     """Generate figures and tables from posterior draws.
 
-    For each outcome group present in ``draws_df`` (or each group in
-    ``groups`` if provided), per-unit plots (fit, gap, raw_rate) are
-    written under ``figs/<group>/`` so every group defined in the config
-    gets its own artifacts. Cross-group plots/tables (interval,
-    group_comparison, ppc/, summary_table, expected_vs_observed,
-    post_treatment_summary) live directly under ``figs/``.
+    Per-unit plots (fit, gap, raw_rate) are written under ``figs/<group>/``
+    for each group in ``draws_df`` (or ``groups`` if given). Cross-group
+    plots/tables (interval, group_comparison, ppc/, summary_table,
+    expected_vs_observed, post_treatment_summary) go directly under ``figs/``.
 
     Parameters
     ----------
@@ -94,18 +92,17 @@ def generate_reports(
         Print the target-unit headline table (Table 1). Ignored if
         ``print_tables`` is ``False``.
     ppc_draws_df : pd.DataFrame, optional
-        Alternative posterior product for the PPC suite only (cut mode: the
-        full Stage-1 posterior with untreated ypred). All other figures and
-        tables continue to use ``draws_df``. Reporting-only aggregate units
-        are applied to it before plotting.
+        Alternative posterior draws for the PPC suite only (cut mode: the
+        full Stage-1 posterior with untreated ypred). Every other figure and
+        table still uses ``draws_df``. Aggregate units are applied to it
+        before plotting.
     figures : list of str, optional
         Subset of ``PLOT_REGISTRY`` names to render (``"unit_fit", "unit_gap",
         "raw_rate", "interval", "group_comparison", "ppc"``). ``None``
-        (default) renders every registry entry, matching the pre-selection
-        behavior. An empty list renders none. Unknown names raise
-        ``ValueError``. Tables (summary_table, expected_vs_observed,
-        post_treatment_summary) are always written regardless of this
-        selection -- only PLOT_REGISTRY figures are gated.
+        (default) renders every registry entry. Empty list renders none.
+        Unknown names raise ``ValueError``. Tables (summary_table,
+        expected_vs_observed, post_treatment_summary) always write --
+        only PLOT_REGISTRY figures are gated by this.
 
     Returns
     -------
@@ -122,10 +119,9 @@ def generate_reports(
                 f"names are {sorted(PLOT_REGISTRY)}"
             )
         selected_figures = set(figures)
-    # Lazy import: AGENTS.md forbids top-level matplotlib/pyplot outside
-    # plots.py. matplotlib is already loaded transitively via
-    # ``from .plots import ...`` above; this binds local names for
-    # the Agg backend call and ``plt.close()`` calls below.
+    # Lazy import: matplotlib/pyplot stays out of top-level imports outside
+    # plots.py (AGENTS.md). Already loaded transitively via the plots import
+    # above; this just binds local names for Agg + plt.close() below.
     import matplotlib
     import matplotlib.pyplot as plt
 
@@ -135,16 +131,15 @@ def generate_reports(
     figs_dir = output_dir / "figs"
     figs_dir.mkdir(parents=True, exist_ok=True)
 
-    # When no aggregate units are configured, reuse draws_df directly rather
-    # than holding a second full copy (both frames are read-only here). On
-    # large cut draws frames this halves the reporting-phase footprint.
+    # Reuse draws_df directly when there are no aggregate units, instead of
+    # copying it -- halves memory on large cut draws frames.
     if aggregate_units:
         draws_for_reporting = add_aggregate_units(draws_df, aggregate_units)
     else:
         draws_for_reporting = draws_df
 
-    # Highlight the per-unit row only when the caller set target_unit
-    # explicitly; an auto-detected anchor is not highlighted.
+    # Only highlight the per-unit row when target_unit was set explicitly,
+    # not when auto-detected.
     highlight_unit = target_unit
     if target_unit is None:
         target_unit = _auto_detect_target(draws_df)
@@ -175,11 +170,11 @@ def generate_reports(
         quantiles_df["time"] = pd.to_datetime(quantiles_df["time"])
 
     # Units to render fit/gap for, per group. Normally just the target; with
-    # fit_gap_per_unit, also every treated unit -- but ONLY in the 'total'
-    # group (upstream renders per-state fit/gap at category='Total' only, from
-    # the total-type run). No 'total' group -> no expansion (e.g. education).
-    # Derive treated units from draws_df (has the real treatment column;
-    # quantiles_df's treated_unit flag marks only the target).
+    # fit_gap_per_unit, every treated unit too, but only in the 'total' group
+    # (matches upstream, which renders per-state fit/gap only from the
+    # total-type run). No 'total' group present -> no expansion, e.g. education.
+    # Use draws_df for treated units: it has the real treatment column, unlike
+    # quantiles_df where treated_unit only flags the target.
     treated_units = _identify_treated_units(draws_df)
 
     def _fit_gap_units(grp: str) -> list[str]:
@@ -254,9 +249,9 @@ def generate_reports(
             ppc_units=ppc_units,
             ppc_exclude_units=ppc_exclude_units,
         )
-        # PPC is the memory-heaviest step (large Stage-1 PPC frame + per-draw
-        # residual matrices). Release the frame + any aggregate copy before
-        # the tables phase so the two don't peak together.
+        # PPC is the heaviest step in memory (large Stage-1 PPC frame + per-draw
+        # residual matrices). Free it before the tables phase so the two don't
+        # peak together.
         if ppc_source is not draws_for_reporting:
             del ppc_source
         gc.collect()

@@ -25,9 +25,8 @@ from pydantic import (
 from bayesian_panel_nmf.plots import PLOT_REGISTRY
 from bayesian_panel_nmf.validation import ConfigError
 
-# Canonical figure names accepted by output.figures list form. Imported
-# directly from PLOT_REGISTRY (rather than a hardcoded duplicate set) so the
-# two can't drift.
+# Canonical figure names for output.figures list form. Imported from
+# PLOT_REGISTRY instead of a duplicate set, so the two can't drift.
 _FIGURE_NAMES = frozenset(PLOT_REGISTRY.keys())
 
 _STRICT = ConfigDict(extra="forbid")
@@ -263,14 +262,12 @@ class OutputConfig(BaseModel):
     @field_validator("figures", mode="before")
     @classmethod
     def _normalize_figures(cls, v: Any) -> list[str]:
-        """Normalize every accepted spelling to the canonical form: a list of
-        registry names to render (empty list means render none).
+        """Normalize any accepted spelling to a list of registry names.
 
-        Accepts ``bool`` (true -> all registry names, false -> []),
-        ``"all"``/``"none"``, or an explicit ``list[str]`` subset (unknown
-        names rejected against ``PLOT_REGISTRY``). Rejects quoted-string
-        booleans (e.g. ``"false"``) the same way ``StrictBool`` elsewhere in
-        this schema does, rather than silently truthy-coercing them.
+        Accepts ``bool`` (true -> all names, false -> []), ``"all"``/``"none"``,
+        or an explicit ``list[str]`` (unknown names rejected against
+        ``PLOT_REGISTRY``). A quoted string boolean like ``"false"`` is
+        rejected, same as ``StrictBool`` elsewhere in this schema.
         """
         if isinstance(v, bool):
             return sorted(_FIGURE_NAMES) if v else []

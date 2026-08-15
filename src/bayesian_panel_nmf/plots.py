@@ -32,25 +32,11 @@ _LEGACY_COLUMNS = set(_COLUMN_MAPPING.keys())
 
 
 def _standardize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Normalize column names to standardized format.
-
-    Handles both standardized names (unit, group, denominator, treatment)
-    and legacy names (state, category, population, exposure_code).
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Input DataFrame with either standardized or legacy column names.
-
-    Returns
-    -------
-    pd.DataFrame
-        DataFrame with standardized column names. Original DataFrame is not modified.
+    """Rename legacy columns (state/category/population/exposure_code) to
+    standardized names (unit/group/denominator/treatment). Returns a copy.
     """
     df = df.copy()
 
-    # Rename legacy columns to standardized names
     rename_map = {}
     for legacy, standard in _COLUMN_MAPPING.items():
         if legacy in df.columns and standard not in df.columns:
@@ -73,34 +59,16 @@ def _detect_outcome_column(df: pd.DataFrame) -> str:
 
 
 def _identify_treated_units(df: pd.DataFrame) -> list[str]:
-    """
-    Identify units that have treatment at any time point.
-
-    In the original R code, this was the 'banned_state' concept - units
-    that have treatment == 1 at some point.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        DataFrame with standardized columns including 'unit' and 'treatment'.
-
-    Returns
-    -------
-    list of str
-        List of unit names that have treatment == 1 at any time point.
-    """
+    """Units treated at any time point (upstream R's 'banned_state' concept)."""
     if "treated_unit" in df.columns:
-        # Legacy column was renamed
         treated_mask = cast(pd.Series, df["treated_unit"]) == 1
         units = cast(pd.Series, df.loc[treated_mask, "unit"])
         return units.drop_duplicates().tolist()
     elif "treatment" in df.columns:
-        # Infer from treatment column
         treated_mask = cast(pd.Series, df["treatment"]) == 1
         units = cast(pd.Series, df.loc[treated_mask, "unit"])
         return units.drop_duplicates().tolist()
     else:
-        # No treatment column - return all units
         units = cast(pd.Series, df["unit"])
         return units.drop_duplicates().tolist()
 
@@ -148,28 +116,21 @@ def _prepare_ppc_residuals(
     *,
     sort_by_time: bool = False,
 ) -> tuple[pd.DataFrame, list[str], list[str]]:
-    """Shared setup for the per-draw residual PPC checks (max-abs residual,
-    ACF, RMSE): standardize columns, resolve the outcome column and
-    categories, restrict to the control period and configured/default
-    units, and compute observed/predicted residuals against the
-    counterfactual rate.
+    """Shared setup for the residual PPC checks (abs residual, ACF, RMSE):
+    standardize columns, resolve the outcome column and categories,
+    restrict to the control period and selected units, and compute
+    observed/predicted residuals against the counterfactual rate.
 
-    Set ``sort_by_time=True`` for checks that require chronological order
-    within each (unit, group, draw) group (currently only ACF, which
-    computes a lagged autocorrelation and would get a wrong answer on an
-    arbitrary row order).
+    ``sort_by_time=True`` sorts within each (unit, group, draw) group —
+    required for ACF, which needs chronological order to lag correctly.
 
     Returns
     -------
-    df_control : pd.DataFrame
-        Filtered rows with ``pred_diff`` and ``obs_diff`` columns added.
-    resolved_categories : list of str
-        ``categories`` if given, otherwise every group present in
-        ``draws_df`` — callers use this to filter their own stats/pvals
-        frames identically to how the pre-extraction code did.
-    selected_units : list of str
-        Units remaining in ``df_control`` after unit filtering — callers
-        use this to filter their own stats/pvals frames.
+    df_control : filtered rows with ``pred_diff``/``obs_diff`` added.
+    resolved_categories : ``categories``, or every group in ``draws_df``.
+    selected_units : units left in ``df_control`` after filtering.
+
+    Callers use the last two to filter their own stats/pvals frames the same way.
     """
     df = _standardize_columns(draws_df)
 
@@ -203,36 +164,18 @@ def _prepare_ppc_residuals(
 
 
 def _compute_autocorrelation(x: np.ndarray, lag: int) -> float:
-    """
-    Compute autocorrelation at a specific lag.
-
-    Parameters
-    ----------
-    x : np.ndarray
-        1D array of values.
-    lag : int
-        Lag for autocorrelation.
-
-    Returns
-    -------
-    float
-        Autocorrelation at the specified lag.
-    """
+    """Autocorrelation of 1D array ``x`` at ``lag``. NaN if too short or zero-variance."""
     x = np.asarray(x)
     n = len(x)
 
     if n <= lag:
         return np.nan
 
-    # Remove mean
     x_centered = x - np.nanmean(x)
-
-    # Compute autocorrelation
     var = np.nansum(x_centered**2)
     if var == 0:
         return np.nan
 
-    # Autocorrelation at lag
     acf = np.nansum(x_centered[:-lag] * x_centered[lag:]) / var
 
     return acf
@@ -257,25 +200,22 @@ def _setup_plot_style():
 
 
 def _new_fig(figsize: tuple[int, int], **kwargs) -> tuple[Figure, Axes]:
-    """Thin wrapper around ``plt.subplots`` for the single-axes case —
-    mechanical figure/axis creation scaffolding shared by every make_*
-    function below."""
+    """Wrapper around ``plt.subplots`` for a single axes."""
     return plt.subplots(figsize=figsize, **kwargs)
 
 
 def _new_grid_fig(
     figsize: tuple[int, int], nrows: int, ncols: int, **kwargs
 ) -> tuple[Figure, np.ndarray]:
-    """Thin wrapper around ``plt.subplots`` for the faceted-grid case —
-    always returns a 2D ndarray of Axes (``squeeze=False``-style shape)."""
+    """Wrapper around ``plt.subplots`` for a faceted grid; always returns
+    a 2D Axes array."""
     return plt.subplots(nrows, ncols, figsize=figsize, **kwargs)
 
 
 def _empty_placeholder_fig(
     figsize: tuple[int, int], message: str, title: str | None = None
 ) -> tuple[Figure, Axes]:
-    """Blank figure/axes with a centered placeholder message, used by every
-    make_* function's empty-data early-return branch."""
+    """Blank figure with a centered message — used by make_* functions when there's no data."""
     fig, ax = _new_fig(figsize)
     ax.text(0.5, 0.5, message, ha="center", va="center", transform=ax.transAxes)
     if title is not None:
@@ -289,7 +229,7 @@ def _finalize(
     *,
     rotate_xticks: bool = False,
 ) -> Figure:
-    """Common plot teardown: optional x-tick rotation, then ``tight_layout``."""
+    """Optional x-tick rotation, then ``tight_layout``."""
     if rotate_xticks and axes is not None:
         ax_list = axes if isinstance(axes, (list, np.ndarray)) else [axes]
         for ax in ax_list:
@@ -308,36 +248,10 @@ def _create_faceted_histograms(
     figsize: tuple[int, int],
     ncol: int = 3,
 ) -> Figure:
-    """
-    Create faceted histogram plot with p-value annotations.
-
-    Parameters
-    ----------
-    stats_df : pd.DataFrame
-        DataFrame with statistics for histograms.
-    pvals_df : pd.DataFrame
-        DataFrame with p-values for each facet.
-    x_col : str
-        Column name for x-axis values.
-    title : str
-        Plot title.
-    xlabel : str
-        X-axis label.
-    facet_cols : list of str
-        Columns to use for faceting (e.g., ['unit', 'group']).
-    figsize : tuple
-        Figure size (width, height).
-    ncol : int
-        Number of columns in facet grid.
-
-    Returns
-    -------
-    matplotlib.Figure
-        The figure object.
-    """
+    """Grid of histograms, one per combination of ``facet_cols``, each
+    annotated with its p-value from ``pvals_df``."""
     _setup_plot_style()
 
-    # Get unique facet combinations
     if len(facet_cols) == 1:
         facet_keys = stats_df[facet_cols[0]].unique()
         facet_labels = [str(k) for k in facet_keys]
@@ -360,7 +274,6 @@ def _create_faceted_histograms(
     ):
         ax = axes[i]
 
-        # Filter data for this facet
         if len(facet_cols) == 1:
             mask = stats_df[facet_cols[0]] == facet_key
             pval_mask = pvals_df[facet_cols[0]] == facet_key
@@ -389,13 +302,9 @@ def _create_faceted_histograms(
             ax.set_title(facet_label)
             continue
 
-        # Draw histogram
         ax.hist(facet_data, bins=30, alpha=0.5, color="steelblue", edgecolor="white")
-
-        # Draw vertical line at x=0
         ax.axvline(x=0, color="red", linestyle="--", linewidth=1.5)
 
-        # Add p-value annotation
         pval_row = pvals_df.loc[pval_mask]
         if len(pval_row) > 0:
             pval = pval_row["pval"].values[0]
@@ -415,11 +324,9 @@ def _create_faceted_histograms(
         ax.set_xlabel("")
         ax.set_ylabel("")
 
-    # Hide unused axes
     for j in range(n_facets, len(axes)):
         axes[j].set_visible(False)
 
-    # Set common labels
     fig.suptitle(title, fontsize=14, fontweight="bold", y=1.02)
     fig.supxlabel(xlabel, fontsize=12)
     fig.supylabel("Count", fontsize=12)
@@ -435,49 +342,23 @@ def make_abs_ppc_plot(
     ppc_units: list[str] | None = None,
     ppc_exclude_units: list[str] | None = None,
 ) -> tuple[Figure, pd.DataFrame]:
-    """
-    Posterior Predictive Check: Maximum Absolute Residual.
+    """PPC: max absolute residual per unit/group/draw, observed vs predicted.
+    Tests whether the model captures extreme deviations.
 
-    Computes the maximum absolute residual for each unit/group/draw and compares
-    observed vs predicted. Tests whether the model captures extreme deviations.
+    obs_diff = outcome - exp(mu); pred_diff = ypred - exp(mu)
+    Statistic: max(|obs_diff|) vs max(|pred_diff|); p-value = P(observed max < predicted max).
 
-    Residuals:
-    - obs_diff = outcome - exp(mu)
-    - pred_diff = ypred - exp(mu)
-
-    Statistic: max(|obs_diff|) vs max(|pred_diff|)
-    P-value: proportion where observed max < predicted max
-
-    Parameters
-    ----------
-    draws_df : pd.DataFrame
-        DataFrame with MCMC draws. Must contain columns:
-        - .draw: draw identifier
-        - unit: panel entity (D dimension)
-        - group: outcome category (K dimension)
-        - treatment: binary treatment indicator
-        - outcome (or the specified outcome_col): observed outcome
-        - ypred: posterior predictive value
-        - mu: counterfactual log-rate
-    outcome_col : str, default='outcome'
-        Name of the outcome column.
-    categories : list of str, optional
-        Categories (K dimension) to include. If None, uses all categories.
-    figsize : tuple, default=(12, 8)
-        Figure size (width, height).
+    ``draws_df`` needs: .draw, unit, group, treatment, outcome_col, ypred, mu.
 
     Returns
     -------
-    fig : matplotlib.Figure
-        Faceted histogram plot.
-    pvals_df : pd.DataFrame
-        DataFrame with columns: unit, group, pval
+    fig : faceted histogram, one panel per unit/group.
+    pvals_df : columns unit, group, pval.
     """
     df_control, categories, selected_units = _prepare_ppc_residuals(
         draws_df, outcome_col, categories, ppc_units, ppc_exclude_units
     )
 
-    # Compute max absolute residual per unit/group/draw
     max_stats = (
         df_control.groupby(["unit", "group", ".draw"])
         .agg(
@@ -489,18 +370,15 @@ def make_abs_ppc_plot(
 
     max_stats["diff_in_diff"] = max_stats["max_obs_diff"] - max_stats["max_pred_diff"]
 
-    # Compute p-values
     pvals_df = (
         max_stats.groupby(["unit", "group"])
         .agg(pval=("diff_in_diff", lambda x: np.mean(x < 0)))
         .reset_index()
     )
 
-    # Filter pvals to categories and selected units
     pvals_df = pvals_df[pvals_df["group"].isin(categories)]
     pvals_df = pvals_df[pvals_df["unit"].isin(selected_units)]
 
-    # Create faceted plot
     fig = _create_faceted_histograms(
         stats_df=max_stats[max_stats["unit"].isin(selected_units)],
         pvals_df=pvals_df,
@@ -523,38 +401,17 @@ def make_acf_ppc_plot(
     ppc_units: list[str] | None = None,
     ppc_exclude_units: list[str] | None = None,
 ) -> tuple[Figure, pd.DataFrame]:
-    """
-    Posterior Predictive Check: Autocorrelation of Residuals.
+    """PPC: residual autocorrelation at ``lag``, per unit/group/draw, observed vs predicted.
 
-    Computes autocorrelation of residuals at the specified lag for each
-    unit/group/draw and compares observed vs predicted.
+    obs_diff = outcome - exp(mu); pred_diff = ypred - exp(mu)
+    Statistic: acf(obs_diff, lag) vs acf(pred_diff, lag); p-value = P(obs_acf - pred_acf < 0).
 
-    Residuals:
-    - obs_diff = outcome - exp(mu)
-    - pred_diff = ypred - exp(mu)
-
-    Statistic: acf(obs_diff, lag) vs acf(pred_diff, lag)
-    P-value: proportion where (obs_acf - pred_acf) < 0
-
-    Parameters
-    ----------
-    draws_df : pd.DataFrame
-        DataFrame with MCMC draws. See make_abs_ppc_plot for required columns.
-    lag : int, default=6
-        Lag for autocorrelation computation.
-    outcome_col : str, default='outcome'
-        Name of the outcome column.
-    categories : list of str, optional
-        Categories (K dimension) to include. If None, uses all categories.
-    figsize : tuple, default=(12, 8)
-        Figure size (width, height).
+    Same required columns as ``make_abs_ppc_plot``.
 
     Returns
     -------
-    fig : matplotlib.Figure
-        Faceted histogram plot.
-    pvals_df : pd.DataFrame
-        DataFrame with columns: unit, group, pval
+    fig : faceted histogram, one panel per unit/group.
+    pvals_df : columns unit, group, pval.
     """
     df_control, categories, selected_units = _prepare_ppc_residuals(
         draws_df,
@@ -565,7 +422,6 @@ def make_acf_ppc_plot(
         sort_by_time=True,
     )
 
-    # Compute ACF per unit/group/draw
     def compute_acf_stats(group_df):
         obs_vals = group_df["obs_diff"].values
         pred_vals = group_df["pred_diff"].values
@@ -582,11 +438,8 @@ def make_acf_ppc_plot(
         .apply(compute_acf_stats, include_groups=False)
         .reset_index()
     )
-
-    # Remove NaN values
     acf_stats = acf_stats.dropna(subset=["diff_in_ac"])
 
-    # Compute p-values
     pvals_df = (
         acf_stats.groupby(["unit", "group"])
         .agg(pval=("diff_in_ac", lambda x: np.mean(x < 0)))
@@ -596,7 +449,6 @@ def make_acf_ppc_plot(
     pvals_df = pvals_df[pvals_df["group"].isin(categories)]
     pvals_df = pvals_df[pvals_df["unit"].isin(selected_units)]
 
-    # Create faceted plot
     fig = _create_faceted_histograms(
         stats_df=acf_stats[acf_stats["unit"].isin(selected_units)],
         pvals_df=pvals_df,
@@ -618,42 +470,22 @@ def make_rmse_ppc_plot(
     ppc_units: list[str] | None = None,
     ppc_exclude_units: list[str] | None = None,
 ) -> tuple[Figure, pd.DataFrame]:
-    """
-    Posterior Predictive Check: RMSE of Residuals.
+    """PPC: RMSE of residuals per unit/group/draw, observed vs predicted.
 
-    Computes RMSE of residuals for each unit/group/draw and compares
-    observed vs predicted.
+    obs_diff = outcome - exp(mu); pred_diff = ypred - exp(mu)
+    Statistic: sqrt(mean(obs_diff^2)) vs sqrt(mean(pred_diff^2)); p-value = P(observed RMSE < predicted RMSE).
 
-    Residuals:
-    - obs_diff = outcome - exp(mu)
-    - pred_diff = ypred - exp(mu)
-
-    Statistic: sqrt(mean(obs_diff^2)) vs sqrt(mean(pred_diff^2))
-    P-value: proportion where observed RMSE < predicted RMSE
-
-    Parameters
-    ----------
-    draws_df : pd.DataFrame
-        DataFrame with MCMC draws. See make_abs_ppc_plot for required columns.
-    outcome_col : str, default='outcome'
-        Name of the outcome column.
-    categories : list of str, optional
-        Categories (K dimension) to include. If None, uses all categories.
-    figsize : tuple, default=(12, 8)
-        Figure size (width, height).
+    Same required columns as ``make_abs_ppc_plot``.
 
     Returns
     -------
-    fig : matplotlib.Figure
-        Faceted histogram plot.
-    pvals_df : pd.DataFrame
-        DataFrame with columns: unit, group, pval
+    fig : faceted histogram, one panel per unit/group.
+    pvals_df : columns unit, group, pval.
     """
     df_control, categories, selected_units = _prepare_ppc_residuals(
         draws_df, outcome_col, categories, ppc_units, ppc_exclude_units
     )
 
-    # Compute RMSE per unit/group/draw
     rmse_stats = (
         df_control.groupby(["unit", "group", ".draw"])
         .agg(
@@ -667,7 +499,6 @@ def make_rmse_ppc_plot(
         rmse_stats["rmse_obs_diff"] - rmse_stats["rmse_pred_diff"]
     )
 
-    # Compute p-values (filter to treated units for display)
     pvals_df = (
         rmse_stats.groupby(["unit", "group"])
         .agg(pval=("diff_in_diff", lambda x: np.mean(x < 0)))
@@ -677,11 +508,9 @@ def make_rmse_ppc_plot(
     pvals_df = pvals_df[pvals_df["group"].isin(categories)]
     pvals_df = pvals_df[pvals_df["unit"].isin(selected_units)]
 
-    # Filter stats to selected units for plotting
     rmse_stats_plot = rmse_stats[rmse_stats["unit"].isin(selected_units)]
     rmse_stats_plot = rmse_stats_plot[rmse_stats_plot["group"].isin(categories)]
 
-    # Create faceted plot
     fig = _create_faceted_histograms(
         stats_df=rmse_stats_plot,
         pvals_df=pvals_df,
@@ -705,55 +534,30 @@ def make_unit_corr_ppc_plot(
     ppc_units: list[str] | None = None,
     ppc_exclude_units: list[str] | None = None,
 ) -> tuple[Figure, pd.DataFrame]:
-    """
-    Posterior Predictive Check: Cross-Unit Correlation (Spectral Norm).
+    """PPC: spectral norm (largest eigenvalue) of the cross-unit residual
+    correlation matrix, per time point, observed vs predicted. Tests
+    whether the model captures cross-sectional dependence.
 
-    Computes the spectral norm (largest eigenvalue) of the correlation matrix
-    of residuals across units (D dimension) for each time point. Tests whether
-    the model captures cross-sectional dependence.
+    obs_diff = outcome - exp(mu); pred_diff = ypred - exp(mu)
+    Statistic: sqrt(max eigenvalue of correlation matrix); p-value = P(observed < predicted).
 
-    Residuals:
-    - obs_diff = outcome - exp(mu)
-    - pred_diff = ypred - exp(mu)
-
-    Statistic: sqrt(max eigenvalue of correlation matrix)
-    P-value: proportion where observed spectral norm < predicted spectral norm
-
-    Parameters
-    ----------
-    draws_df : pd.DataFrame
-        DataFrame with MCMC draws. See make_abs_ppc_plot for required columns.
-    max_treat_date : str, optional
-        Maximum date to include (filters time < max_treat_date).
-        Format: 'YYYY-MM-DD'. If None, uses control period only.
-    outcome_col : str, default='outcome'
-        Name of the outcome column.
-    categories : list of str, optional
-        Categories (K dimension) to include. If None, uses all categories.
-    ndraws : int, default=1000
-        Maximum number of draws to use (for computational efficiency).
-    figsize : tuple, default=(10, 6)
-        Figure size (width, height).
+    Same required columns as ``make_abs_ppc_plot``. ``max_treat_date``
+    (format YYYY-MM-DD) restricts to time < that date; otherwise uses the
+    control period only. ``ndraws`` caps draws used, for speed.
 
     Returns
     -------
-    fig : matplotlib.Figure
-        Faceted histogram plot (by category only).
-    pvals_df : pd.DataFrame
-        DataFrame with columns: group, pval
+    fig : faceted histogram, one panel per category.
+    pvals_df : columns group, pval.
     """
-    # Standardize column names
     df = _standardize_columns(draws_df)
 
-    # Handle outcome column
     if outcome_col not in df.columns:
         outcome_col = _detect_outcome_column(df)
 
-    # Get categories
     if categories is None:
         categories = df["group"].unique().tolist()
 
-    # Filter to categories
     df = df[df["group"].isin(categories)]
 
     if ppc_units is not None or ppc_exclude_units is not None:
@@ -765,26 +569,22 @@ def make_unit_corr_ppc_plot(
             ppc_exclude_units=ppc_exclude_units,
         )
 
-    # Filter by max_treat_date if provided
     if max_treat_date is not None and "time" in df.columns:
         df["time"] = pd.to_datetime(df["time"])
         df = df[df["time"] < pd.to_datetime(max_treat_date)]
     elif "treatment" in df.columns:
-        # Use control period only
-        df = df[df["treatment"] == 0]
+        df = df[df["treatment"] == 0]  # control period only
 
-    # Limit draws for computational efficiency
     if ".draw" in df.columns:
         unique_draws = df[".draw"].unique()
         if len(unique_draws) > ndraws:
             selected_draws = unique_draws[:ndraws]
             df = df[df[".draw"].isin(selected_draws)]
 
-    # Compute residuals
     df["obs_residual"] = df[outcome_col] - np.exp(df["mu"])
     df["pred_residual"] = df["ypred"] - np.exp(df["mu"])
 
-    # Filter out units with too much missing data (>25%)
+    # drop units with >25% missing outcome
     na_frac = df.groupby(["unit", "group"])[outcome_col].apply(
         lambda x: x.isna().mean()
     )
@@ -795,31 +595,26 @@ def make_unit_corr_ppc_plot(
     df = df.merge(valid_units, on=["unit", "group"], how="inner")
 
     def compute_spectral_norm(residuals_matrix: np.ndarray) -> float:
-        """Compute spectral norm from correlation matrix."""
-        # Remove columns with all NaN
+        """Largest eigenvalue of the correlation matrix, sqrt'd."""
         valid_cols = ~np.all(np.isnan(residuals_matrix), axis=0)
         residuals_matrix = residuals_matrix[:, valid_cols]
 
         if residuals_matrix.shape[1] < 2:
             return np.nan
 
-        # Compute correlation matrix with pairwise complete observations
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             corr_matrix = np.corrcoef(residuals_matrix.T)
 
         if np.any(np.isnan(corr_matrix)):
-            # Handle NaN in correlation matrix
             corr_matrix = np.nan_to_num(corr_matrix, nan=0.0)
             np.fill_diagonal(corr_matrix, 1.0)
 
-        # Compute eigenvalues
         eigenvalues = np.linalg.eigvalsh(corr_matrix)
         max_eigenvalue = np.max(eigenvalues)
 
         return np.sqrt(max(max_eigenvalue, 0))
 
-    # Compute spectral norm per category/draw
     eval_results = []
 
     for group in categories:
@@ -835,7 +630,7 @@ def make_unit_corr_ppc_plot(
         for draw in unique_draws:
             draw_df = group_df[group_df[".draw"] == draw]
 
-            # Create residual matrices (time x unit)
+            # time x unit residual matrices
             obs_matrix = np.full((len(times), len(units)), np.nan)
             pred_matrix = np.full((len(times), len(units)), np.nan)
 
@@ -875,7 +670,6 @@ def make_unit_corr_ppc_plot(
         )
         return fig, pd.DataFrame(columns=["group", "pval"])
 
-    # Compute p-values
     pvals_df = (
         eval_stats.groupby("group")
         .agg(pval=("eval_diff", lambda x: np.mean(x < 0)))
@@ -884,7 +678,6 @@ def make_unit_corr_ppc_plot(
 
     pvals_df = pvals_df[pvals_df["group"].isin(categories)]
 
-    # Create faceted plot (by category only)
     fig = _create_faceted_histograms(
         stats_df=eval_stats,
         pvals_df=pvals_df,
@@ -910,83 +703,37 @@ def make_raw_rate_plot(
     plot_type: str = "rate",  # 'rate' or 'count'
     figsize: tuple[int, int] = (10, 6),
 ) -> tuple[Figure, Axes]:
-    """
-    Create a time series plot showing rates by treatment group.
-
-    Creates a line plot with different colors for Treated, Control, and optionally
-    a specific unit as a separate group. Supports smoothing and treatment date markers.
+    """Time series of rates (or counts) for Treated vs Control units, with
+    optional smoothing, treatment-date markers, and one unit split out.
 
     Parameters
     ----------
-    df : pd.DataFrame
-        DataFrame with columns: unit, time, group, outcome, denominator, treatment
-        (or legacy column names: state, category, population, exposure_code).
-        The 'unit' column represents the D dimension (panel entities such as
-        states, hospitals, counties, firms, etc.).
-    group : str, optional
-        Group/category (K dimension) to filter to (e.g., 'total', 'usborn').
-        If None, aggregates all groups together.
-    unit_col : str, default='unit'
-        Name of the column containing unit identifiers (D dimension).
-        Use this if your data has a different column name for the panel entity.
-    rate_multiplier : float, default=1000
-        Multiplier for rate calculation (e.g., 1000 = per 1,000 population).
-    treatment_dates : dict, optional
-        Dictionary of {label: date} for vertical marker lines.
-        Example: {'Policy Change': '2022-06-24', 'Implementation': '2022-09-01'}
-    separate_unit : str, optional
-        If provided, show this specific unit as a separate group from other
-        treated units. Useful for highlighting a particular unit of interest.
-    smooth_window : int, optional
-        Rolling window size for smoothing. If None, no smoothing applied.
-    plot_type : str, default='rate'
-        What to plot on y-axis: 'rate' (outcome/denominator * rate_multiplier)
-        or 'count' (raw outcome counts).
-    figsize : tuple, default=(10, 6)
-        Figure size (width, height).
-
-    Returns
-    -------
-    fig : matplotlib.Figure
-        The figure object.
-    ax : matplotlib.Axes
-        The axes object.
-
-    Examples
-    --------
-    >>> fig, ax = make_raw_rate_plot(df, group="total", rate_multiplier=1000)
-    >>> fig.savefig("rate_plot.png")
-
-    >>> # Separate a specific unit
-    >>> fig, ax = make_raw_rate_plot(
-    ...     df,
-    ...     group="total",
-    ...     treatment_dates={"Policy": "2022-06-24"},
-    ...     separate_unit="TX",
-    ...     smooth_window=3,
-    ... )
+    df : columns unit, time, group, outcome, denominator, treatment (or
+        legacy names). ``unit`` is a panel entity (state, hospital, etc.).
+    group : filter to this group/category; None aggregates all groups.
+    unit_col : column holding unit identifiers, if not already ``unit``.
+    rate_multiplier : e.g. 1000 = rate per 1,000.
+    treatment_dates : {label: date} for vertical marker lines,
+        e.g. {'Policy Change': '2022-06-24'}.
+    separate_unit : plot this unit separately from other treated units.
+    smooth_window : rolling-mean window; None = no smoothing.
+    plot_type : 'rate' (outcome/denominator * rate_multiplier) or 'count'.
     """
     _setup_plot_style()
 
-    # Standardize column names
     df = _standardize_columns(df)
 
-    # Handle custom unit column name
     if unit_col != "unit" and unit_col in df.columns:
         df = df.rename(columns={unit_col: "unit"})
 
-    # Ensure time is datetime
     if "time" in df.columns:
         df["time"] = pd.to_datetime(df["time"])
 
-    # Filter to specific group if provided
     if group is not None and "group" in df.columns:
         df = df[df["group"] == group].copy()
 
-    # Identify treated units
     treated_units = _identify_treated_units(df)
 
-    # Assign treatment group labels
     def assign_treatment_group(row):
         if separate_unit is not None and row["unit"] == separate_unit:
             return separate_unit
@@ -997,14 +744,12 @@ def make_raw_rate_plot(
 
     df["treatment_group"] = df.apply(assign_treatment_group, axis=1)
 
-    # Aggregate by treatment_group and time
     agg_df = (
         df.groupby(["treatment_group", "time"])
         .agg(outcome=("outcome", "sum"), denominator=("denominator", "sum"))
         .reset_index()
     )
 
-    # Compute y-value based on plot_type
     if plot_type == "count":
         agg_df["y_value"] = agg_df["outcome"]
         ylabel = "Count"
@@ -1014,7 +759,6 @@ def make_raw_rate_plot(
         ) * rate_multiplier
         ylabel = f"Rate per {rate_multiplier:,.0f}"
 
-    # Apply smoothing if requested
     if smooth_window is not None and smooth_window > 1:
         agg_df = agg_df.sort_values(["treatment_group", "time"])
         agg_df["y_smooth"] = agg_df.groupby("treatment_group")["y_value"].transform(
@@ -1023,22 +767,18 @@ def make_raw_rate_plot(
     else:
         agg_df["y_smooth"] = agg_df["y_value"]
 
-    # Sort by time
     agg_df = agg_df.sort_values("time")
 
-    # Define colors
     colors = {
         "Treated": "#E41A1C",  # Red
         "Control": "#999999",  # Gray
     }
-    # Add color for separate_unit if specified
     if separate_unit is not None:
         colors[separate_unit] = "#FF7F00"  # Orange
 
-    # Create plot
     fig, ax = _new_fig(figsize)
 
-    # Plot order: Control first (in back), then Treated, then separate_unit
+    # Control drawn first so it sits behind Treated/separate_unit
     plot_order = ["Control", "Treated"]
     if separate_unit is not None:
         plot_order.append(separate_unit)
@@ -1061,7 +801,7 @@ def make_raw_rate_plot(
             alpha=alpha,
         )
 
-        # If smoothed, also show raw data as faint points
+        # smoothed line + faint raw points
         if smooth_window is not None and smooth_window > 1:
             ax.scatter(
                 group_data["time"],
@@ -1071,7 +811,6 @@ def make_raw_rate_plot(
                 s=10,
             )
 
-    # Add treatment date markers with rotated labels
     if treatment_dates is not None:
         marker_colors = [
             "#FF8C00",
@@ -1083,7 +822,6 @@ def make_raw_rate_plot(
             date = pd.to_datetime(date_str)
             color = marker_colors[i % len(marker_colors)]
             ax.axvline(x=date, color=color, linestyle="--", linewidth=1.5, alpha=0.8)
-            # Add rotated label near top of plot
             y_pos = ax.get_ylim()[1] * 0.95
             ax.text(
                 date,
@@ -1098,7 +836,6 @@ def make_raw_rate_plot(
                 fontweight="bold",
             )
 
-    # Styling
     group_label = f" ({group})" if group else ""
     ax.set_xlabel("Time", fontsize=11)
     ax.set_ylabel(f"{ylabel}{group_label}", fontsize=11)
@@ -1120,52 +857,24 @@ def make_group_comparison_plot(
     plot_type: str = "rate",  # 'rate' or 'count'
     figsize: tuple[int, int] = (12, 8),
 ) -> tuple[Figure, np.ndarray]:
-    """
-    Create a faceted plot comparing rates across different outcome groups.
-
-    Each subplot shows treated vs control time series for a different group/category
-    (K dimension).
+    """Faceted plot: one subplot per group, each showing Treated vs Control
+    time series.
 
     Parameters
     ----------
-    df : pd.DataFrame
-        DataFrame with columns: unit, time, group, outcome, denominator, treatment
-        (or legacy column names).
-    groups : list of str, optional
-        List of groups (K dimension) to plot. If None, uses all unique groups.
-    rate_multiplier : float, default=1000
-        Multiplier for rate calculation.
-    treatment_dates : dict, optional
-        Dictionary of {label: date} for vertical marker lines.
-    plot_type : str, default='rate'
-        What to plot: 'rate' (outcome/denominator * multiplier) or 'count' (raw counts).
-    figsize : tuple, default=(12, 8)
-        Figure size (width, height).
-
-    Returns
-    -------
-    fig : matplotlib.Figure
-        The figure object.
-    axes : np.ndarray
-        Array of axes objects.
-
-    Examples
-    --------
-    >>> fig, axes = make_group_comparison_plot(
-    ...     df, groups=["usborn", "foreign"], treatment_dates={"Policy": "2022-06-24"}
-    ... )
-    >>> fig.savefig("group_comparison.png")
+    df : columns unit, time, group, outcome, denominator, treatment (or legacy names).
+    groups : groups to plot; None uses every group present.
+    rate_multiplier : e.g. 1000 = rate per 1,000.
+    treatment_dates : {label: date} for vertical marker lines.
+    plot_type : 'rate' (outcome/denominator * multiplier) or 'count'.
     """
     _setup_plot_style()
 
-    # Standardize column names
     df = _standardize_columns(df)
 
-    # Ensure time is datetime
     if "time" in df.columns:
         df["time"] = pd.to_datetime(df["time"])
 
-    # Get groups to plot
     if groups is None:
         groups = df["group"].unique().tolist()
 
@@ -1174,17 +883,14 @@ def make_group_comparison_plot(
         fig, ax = _empty_placeholder_fig(figsize, "No groups to plot")
         return fig, np.array([ax])
 
-    # Determine subplot layout
     ncols = min(2, n_groups)
     nrows = int(np.ceil(n_groups / ncols))
 
     fig, axes = _new_grid_fig(figsize, nrows, ncols, squeeze=False, sharex=True)
     axes_flat = axes.flatten()
 
-    # Identify treated units
     treated_units = _identify_treated_units(df)
 
-    # Colors
     colors = {
         "Treated": "#E41A1C",
         "Control": "#999999",
@@ -1193,7 +899,6 @@ def make_group_comparison_plot(
     for idx, group in enumerate(groups):
         ax = axes_flat[idx]
 
-        # Filter to this group
         group_df = df[df["group"] == group].copy()
 
         if len(group_df) == 0:
@@ -1208,19 +913,16 @@ def make_group_comparison_plot(
             ax.set_title(group, fontsize=11, fontweight="bold")
             continue
 
-        # Assign treatment group
         group_df["treatment_group"] = group_df["unit"].apply(
             lambda u: "Treated" if u in treated_units else "Control"
         )
 
-        # Aggregate by treatment_group and time
         agg_df = (
             group_df.groupby(["treatment_group", "time"])
             .agg(outcome=("outcome", "sum"), denominator=("denominator", "sum"))
             .reset_index()
         )
 
-        # Compute y-value based on plot_type
         if plot_type == "count":
             agg_df["y_value"] = agg_df["outcome"]
             ylabel = "Count"
@@ -1231,7 +933,6 @@ def make_group_comparison_plot(
             ylabel = f"Rate per {rate_multiplier:,.0f}"
         agg_df = agg_df.sort_values("time")
 
-        # Plot each treatment group
         for tgroup in ["Control", "Treated"]:
             tg_data = agg_df[agg_df["treatment_group"] == tgroup]
             if len(tg_data) == 0:
@@ -1250,7 +951,6 @@ def make_group_comparison_plot(
                 alpha=alpha,
             )
 
-        # Add treatment date markers with colors
         if treatment_dates is not None:
             marker_colors = ["#FF8C00", "#DC143C", "#9400D3", "#228B22"]
             for i, (_label, date_str) in enumerate(treatment_dates.items()):
@@ -1263,15 +963,12 @@ def make_group_comparison_plot(
         ax.set_title(group, fontsize=11, fontweight="bold")
         ax.set_ylabel(ylabel, fontsize=9)
 
-        # Only add legend to first subplot
-        if idx == 0:
+        if idx == 0:  # legend on first subplot only
             ax.legend(loc="best", frameon=True, fontsize=8)
 
-    # Hide unused axes
     for idx in range(len(groups), len(axes_flat)):
         axes_flat[idx].set_visible(False)
 
-    # Set common x-label
     fig.supxlabel("Time", fontsize=11)
     title_type = "Rate" if plot_type == "rate" else "Count"
     fig.suptitle(
@@ -1289,26 +986,9 @@ def make_unit_fit_plot(
     outcome_col: str = "outcome",
     figsize: tuple[int, int] = (10, 6),
 ) -> tuple[Figure, Axes]:
-    """
-    Make fit plot showing observed vs predicted over time for a specific unit.
+    """Observed vs predicted (with 95% CI) over time for one unit/group.
 
-    Parameters
-    ----------
-    quantiles_df : pd.DataFrame
-        DataFrame with quantiles (ypred_mean, ypred_lower, ypred_upper).
-    unit_name : str
-        Name of the unit to plot.
-    group : str, default='total'
-        Group to filter.
-    outcome_col : str, default='outcome'
-        Outcome variable name.
-    figsize : tuple, default=(10, 6)
-        Figure size.
-
-    Returns
-    -------
-    fig : matplotlib.Figure
-    ax : matplotlib.Axes
+    ``quantiles_df`` needs ypred_mean, ypred_lower, ypred_upper columns.
     """
     _setup_plot_style()
     sns.set_palette("husl")
@@ -1335,13 +1015,12 @@ def make_unit_fit_plot(
 
     df_plot = df_plot.sort_values("time")
 
-    # Drop rows where prediction or outcome is missing (NaN) to avoid spurious lines
+    # drop NaN rows separately per series so gaps don't draw spurious lines
     df_pred = df_plot.dropna(subset=["ypred_mean", "ypred_lower", "ypred_upper"])
     df_obs = df_plot.dropna(subset=[outcome_col])
 
     fig, ax = _new_fig(figsize)
 
-    # Credible Interval (only over timepoints with predictions)
     if not df_pred.empty:
         ax.fill_between(
             df_pred["time"],
@@ -1352,7 +1031,6 @@ def make_unit_fit_plot(
             label="95% CI",
         )
 
-        # Mean Prediction line — break at gaps in time index
         sns.lineplot(
             data=df_pred,
             x="time",
@@ -1363,7 +1041,6 @@ def make_unit_fit_plot(
             ax=ax,
         )
 
-    # Observed Data — only plot finite observations
     if not df_obs.empty:
         sns.scatterplot(
             data=df_obs,
@@ -1377,7 +1054,6 @@ def make_unit_fit_plot(
             ax=ax,
         )
 
-    # Treatment line
     if (
         "treated_unit" in df_plot.columns
         and df_plot["treated_unit"].iloc[0]
@@ -1411,27 +1087,9 @@ def make_unit_gap_plot(
     outcome_col: str = "outcome",
     figsize: tuple[int, int] = (10, 6),
 ) -> tuple[Figure, Axes]:
-    """
-    Make gap plot showing difference between observed and predicted relative to prediction
-    for a specific unit.
+    """Relative gap (observed/predicted - 1) over time for one unit/group.
 
-    Parameters
-    ----------
-    quantiles_df : pd.DataFrame
-        DataFrame with quantiles (ypred_mean, ypred_lower, ypred_upper).
-    unit_name : str
-        Name of the unit to plot.
-    group : str, default='total'
-        Group to filter.
-    outcome_col : str, default='outcome'
-        Outcome variable name.
-    figsize : tuple, default=(10, 6)
-        Figure size.
-
-    Returns
-    -------
-    fig : matplotlib.Figure
-    ax : matplotlib.Axes
+    ``quantiles_df`` needs ypred_mean, ypred_lower, ypred_upper columns.
     """
     _setup_plot_style()
     df = _standardize_columns(quantiles_df)
@@ -1457,7 +1115,7 @@ def make_unit_gap_plot(
 
     df_plot = df_plot.sort_values("time")
 
-    # Drop rows where outcome or predictions are NaN/non-positive (ratio undefined)
+    # ratio undefined for NaN/non-positive predictions
     df_plot = df_plot.dropna(
         subset=[outcome_col, "ypred_mean", "ypred_lower", "ypred_upper"]
     )
@@ -1471,7 +1129,6 @@ def make_unit_gap_plot(
         fig, ax = _empty_placeholder_fig(figsize, "No valid data points")
         return fig, ax
 
-    # Treatment Date
     t_date = None
     if (
         "treated_unit" in df_plot.columns
@@ -1492,7 +1149,7 @@ def make_unit_gap_plot(
     color_line = sns.color_palette("dark")[3]
 
     if t_date is not None:
-        # Separate pre/post so ribbon and line do not connect across the intervention
+        # pre/post split so the ribbon/line don't connect across treatment
         pre = df_plot["time"] < t_date
         post = df_plot["time"] >= t_date
 
@@ -1545,33 +1202,19 @@ def make_interval_plot(
     color_group: str | None = None,
     figsize: tuple[int, int] = (12, 10),
 ) -> tuple[Figure, Axes]:
-    """
-    Generate interval plots showing causal effects with credible intervals using seaborn aesthetics.
+    """Effect estimate with 67%/95% credible intervals, one row per
+    ``x_var`` value (default: unit).
 
     Parameters
     ----------
-    merged_df : pd.DataFrame
-        DataFrame with draws (e.g., .draw, time, unit, group, mu, mu_treated, etc.)
-    units : list of str, optional
-        Units to include.
-    group_var : str, default='unit'
-        Variable to aggregate by.
-    categories : list of str, optional
-        Categories to include.
-    outcome_col : str, default='outcome'
-        Outcome variable name.
-    denom_col : str, default='denominator'
-        Denominator variable name.
-    rate_normalizer : float, default=1000
-    estimand : str, default='diff' ('diff' or 'ratio')
-    method : str, default='mu' ('pred' or 'mu')
-    x_var : str, default='unit'
-    color_group : str, optional
-    figsize : tuple
-
-    Returns
-    -------
-    fig, ax
+    merged_df : draws with .draw, time, unit, group, mu, mu_treated, etc.
+    units : units to include; None = all treated units.
+    group_var : variable to aggregate the effect by (default 'unit').
+    categories : categories to include; None = all.
+    estimand : 'diff' (rate difference) or 'ratio' (percent change).
+    method : 'mu' (model log-rate) or 'pred' (posterior predictive counts).
+    x_var : variable plotted on the y-axis rows (default 'unit').
+    color_group : variable used to color/dodge points within a row.
     """
     _setup_plot_style()
     df = _standardize_columns(merged_df)
@@ -1599,7 +1242,6 @@ def make_interval_plot(
     if units is not None:
         df = df[df["unit"].isin(units)]
 
-    # Compute unit-level effect
     agg_cols = list(
         set(
             [".draw", group_var]
@@ -1676,7 +1318,6 @@ def make_interval_plot(
         .reset_index()
     )
 
-    # Sort
     sort_order = plot_df.groupby(x_var)["median"].median().sort_values().index
     plot_df[x_var] = pd.Categorical(plot_df[x_var], categories=sort_order, ordered=True)
     plot_df = plot_df.sort_values(x_var)
@@ -1783,39 +1424,16 @@ def make_all_ppc_plots(
     ppc_units: list[str] | None = None,
     ppc_exclude_units: list[str] | None = None,
 ) -> dict[str, dict]:
-    """
-    Generate all PPC plots and optionally save to files.
+    """Run all four PPC checks (abs residual, ACF, RMSE, unit correlation);
+    save PNGs + a combined p-values CSV if ``output_dir`` is given.
 
-    Parameters
-    ----------
-    draws_df : pd.DataFrame
-        DataFrame with MCMC draws.
-    output_dir : str, optional
-        Directory to save plots. If None, plots are not saved.
-    outcome_col : str, default='outcome'
-        Name of the outcome column.
-    categories : list of str, optional
-        Categories (K dimension) to include.
-    figsize : tuple, default=(12, 8)
-        Figure size for plots.
-    acf_lag : int, default=6
-        Lag for ACF computation.
-    max_treat_date : str, optional
-        Maximum date for unit correlation plot.
-    ndraws : int, default=1000
-        Number of draws for unit correlation plot.
-
-    Returns
-    -------
-    dict
-        Dictionary with keys 'abs', 'acf', 'rmse', 'unit_corr'.
-        Each value is a dict with 'fig' and 'pvals' keys.
+    Returns a dict keyed by 'abs', 'acf', 'rmse', 'unit_corr', each
+    ``{'fig': ..., 'pvals': ...}``.
     """
     results = {}
 
     logger.info("Generating PPC plots...")
 
-    # Maximum absolute residual
     logger.info("  - Maximum absolute residual plot...")
     fig_abs, pvals_abs = make_abs_ppc_plot(
         draws_df,
@@ -1828,7 +1446,6 @@ def make_all_ppc_plots(
     results["abs"] = {"fig": fig_abs, "pvals": pvals_abs}
     logger.debug(f"    Generated {len(pvals_abs)} p-values for abs residual check")
 
-    # ACF
     resolved_acf_lags = acf_lags if acf_lags is not None else [acf_lag]
     acf_results = {}
     for lag in resolved_acf_lags:
@@ -1849,7 +1466,6 @@ def make_all_ppc_plots(
     if len(resolved_acf_lags) == 1:
         results["acf"] = next(iter(acf_results.values()))
 
-    # RMSE
     logger.info("  - RMSE plot...")
     fig_rmse, pvals_rmse = make_rmse_ppc_plot(
         draws_df,
@@ -1862,11 +1478,8 @@ def make_all_ppc_plots(
     results["rmse"] = {"fig": fig_rmse, "pvals": pvals_rmse}
     logger.debug(f"    Generated {len(pvals_rmse)} p-values for RMSE check")
 
-    # Unit correlation. Deliberately NOT filtered by ppc_units: the spectral
-    # norm of the cross-unit residual correlation matrix is undefined with
-    # <2 units, so this check always runs on every unit in the frame (matches
-    # upstream, which passes the full merged_df here while filtering the
-    # per-unit checks above to ppc_states).
+    # Not filtered by ppc_units: spectral norm needs >=2 units, so this
+    # check always runs on every unit in the frame (matches upstream).
     logger.info("  - Unit correlation plot...")
     fig_corr, pvals_corr = make_unit_corr_ppc_plot(
         draws_df,
@@ -1879,7 +1492,6 @@ def make_all_ppc_plots(
     results["unit_corr"] = {"fig": fig_corr, "pvals": pvals_corr}
     logger.debug(f"    Generated {len(pvals_corr)} p-values for unit correlation check")
 
-    # Save plots if output_dir provided
     if output_dir is not None:
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
@@ -1899,7 +1511,6 @@ def make_all_ppc_plots(
         )
         logger.debug("  Saved all PPC plot images")
 
-        # Save p-values to CSV
         all_pvals = []
         for name, data in results.items():
             if name == "acf":
@@ -1921,10 +1532,10 @@ def make_all_ppc_plots(
 # Figure selection registry
 # -----------------------------------------------------------------------------
 
-# Figure name -> plotting function. ``output.figures`` selects which of these
-# reports.generate_reports() renders; config.py imports this dict directly, so
-# there is no separate key list to drift. ``summary_table`` is a table, not a
-# figure: it always renders, so it is deliberately absent here.
+# Figure name -> plotting function. output.figures selects which of these
+# reports.generate_reports() renders; config.py imports this dict directly,
+# so there's no separate key list to keep in sync. summary_table is a table,
+# not a figure, and always renders, so it's not listed here.
 PLOT_REGISTRY: dict[str, Callable] = {
     "unit_fit": make_unit_fit_plot,
     "unit_gap": make_unit_gap_plot,

@@ -1,10 +1,9 @@
 """Per-type / per-rank analysis pipeline: data loading, MCMC dispatch,
 convergence gating, draws serialization, reporting dispatch.
 
-CLI parsing, config loading, and the module-top
-``numpyro.set_host_device_count()`` call stay in ``cli.py``. This module
-imports ``inference``/``cut`` (which import jax), so it must never run before
-that call -- see the ordering note in ``cli.py``.
+This module imports ``inference``/``cut``, which import jax. Do not import
+it before ``cli.py``'s module-top ``numpyro.set_host_device_count()`` call
+(see the ordering note there).
 """
 
 import json
@@ -33,11 +32,10 @@ from bayesian_panel_nmf.validation import ConfigError
 
 
 def _write_draws(df: pd.DataFrame, stem: Path, fmt: str) -> Path:
-    """Write the (large) draws artifact as csv or parquet; return the path written.
+    """Write the draws artifact as csv or parquet; return the path written.
 
-    Additive, opt-in via ``output.draws_format`` (default ``"csv"``). Only
-    ever applied to the two big draws artifacts, never the small human-facing
-    summary/table CSVs.
+    Format is set by ``output.draws_format`` (default ``"csv"``). Only used
+    for the big draws artifacts, never the small summary/table CSVs.
     """
     if fmt == "parquet":
         path = stem.with_suffix(".parquet")
@@ -60,9 +58,8 @@ def _read_draws(stem: Path) -> pd.DataFrame:
 
 
 def _validate_run_analysis_config(config: Config) -> None:
-    """Run-analysis-specific check beyond generic schema validation (already
-    enforced by ``Config.from_yaml``/``Config.model_validate``): at least one
-    model type must be configured."""
+    """Check not covered by schema validation: at least one model type must
+    be configured."""
     if not config.model.types:
         raise ConfigError("config['model'] missing 'types' section")
 
@@ -106,8 +103,8 @@ def _draws_filename(config: Config, model_type: str, rank: int) -> str:
 
 
 def _clean_scoped_samples(mcmc, model_type: str, rank: int) -> dict:
-    """Filter scoped ('/') sample keys via results.drop_scoped_samples, with
-    per-run debug logging of what was dropped."""
+    """Drop scoped ('/') sample keys via results.drop_scoped_samples and log
+    what was dropped."""
     from bayesian_panel_nmf.results import drop_scoped_samples
 
     raw_samples = mcmc.get_samples(group_by_chain=True)
@@ -130,9 +127,9 @@ def _run_reporting(
 ) -> None:
     """Generate figures + tables under ``<output_dir>/figs/``.
 
-    ``figures_override`` (when not ``None``) replaces ``output_config.figures``
-    for this render -- e.g. ``[]`` from ``viz --tables-only`` to write/print
-    tables while skipping every figure.
+    ``figures_override``, when set, replaces ``output_config.figures`` for
+    this render -- e.g. ``[]`` from ``viz --tables-only`` to write tables and
+    skip every figure.
     """
     from bayesian_panel_nmf.reports import generate_reports
 
@@ -163,8 +160,8 @@ def _run_reporting(
 def _prepare_type_output_dir(
     base_output_dir: Path, model_type: str, output_config: OutputConfig
 ) -> Path:
-    """Return this model type's output directory, optionally clearing it
-    first when output.clean is true."""
+    """Return this model type's output directory; clear it first if
+    ``output.clean`` is true."""
     type_output_dir = base_output_dir / model_type
 
     if output_config.clean and type_output_dir.exists():
@@ -185,9 +182,8 @@ def _run_single_rank(
     save_traces: bool,
     output_config: OutputConfig,
 ) -> None:
-    """Run MCMC inference for one rank, write the convergence gate,
-    optionally save a trace sidecar, write draws, and optionally dispatch
-    reporting/figure generation."""
+    """Run MCMC for one rank: write the convergence gate, optionally save a
+    trace sidecar, write draws, and dispatch reporting if figures are on."""
     if config.model.inference_mode == "cut":
         _run_cut_rank(
             rank,
@@ -214,8 +210,8 @@ def _run_single_rank(
     extra_fields = mcmc.get_extra_fields()
     idata_dict = {"posterior": clean_samples}
     if "diverging" in extra_fields:
-        # get_extra_fields() is flat (chains*samples,); reshape to match the
-        # (chain, draw) samples returned by get_samples(group_by_chain=True).
+        # get_extra_fields() is flat (chains*samples,); reshape to (chain, draw)
+        # to match get_samples(group_by_chain=True).
         diverging = extra_fields["diverging"].reshape(mcmc.num_chains, -1)
         idata_dict["sample_stats"] = {"diverging": diverging}
     idata = az.from_dict(idata_dict)
@@ -322,11 +318,11 @@ def _cut_stage1(
     save_traces: bool,
 ):
     """Fit the untreated baseline, write its PPC product (+ optional traces),
-    and select the chain-stratified Stage-1 draws that seed Stage 2.
+    and select the Stage-1 draws that seed Stage 2.
 
-    Returns ``(stage1_diag, refs, stage1_num_chains)``. Releases the full
+    Returns ``(stage1_diag, refs, stage1_num_chains)``. Frees the full
     Stage-1 posterior before returning; ``refs`` hold the selected copies.
-    The Stage-1 PPC uses the independent ``mcmc.random_seed + 1`` stream.
+    Stage-1 PPC uses the independent ``mcmc.random_seed + 1`` stream.
     """
     import arviz as az
     from jax import random as jax_random
@@ -404,13 +400,13 @@ def _cut_stage2_components(
     draws_format: str,
     save_traces: bool,
 ):
-    """Run one conditional multi-chain Stage-2 fit per selected baseline draw.
+    """Run one multi-chain Stage-2 fit per selected baseline draw.
 
-    Writes the combined draws artifact (csv incremental-append or a single
-    parquet write) and returns ``(component_records, combined_path)``. Uses
-    the ``settings.stage2_seed`` stream, split into per-component fit/predict
-    keys. Raises ``DataError`` if components yield unequal output-draw counts
-    (equal counts preserve the equal-weight nested Monte Carlo).
+    Writes the combined draws artifact (csv append or one parquet write) and
+    returns ``(component_records, combined_path)``. Splits
+    ``settings.stage2_seed`` into per-component fit/predict keys. Raises
+    ``DataError`` if components disagree on output-draw count -- equal
+    counts are required for equal Monte Carlo weights.
     """
     import arviz as az
     from jax import random as jax_random
@@ -496,8 +492,7 @@ def _cut_stage2_components(
             te_flat, ypred, chain_ids, ref, data_dict, draw_offset
         )
         if draws_format == "parquet":
-            # parquet has no cheap append mode; buffer components and
-            # write once below via _write_draws.
+            # parquet has no cheap append mode; buffer and write once below.
             component_dfs.append(df)
         else:
             df.to_csv(
@@ -742,8 +737,7 @@ def _run_sequential(
     save_traces: bool,
     log_level: str,
 ) -> None:
-    """Run each model type one at a time in this process (preserves rich
-    per-type logging; used when workers == 1)."""
+    """Run each model type one at a time in this process."""
     total_count = len(types_to_run)
     for index, (model_type, type_config) in enumerate(types_to_run.items(), start=1):
         logger.info(f"RUNNING MODEL TYPE: {model_type.upper()} ({index}/{total_count})")

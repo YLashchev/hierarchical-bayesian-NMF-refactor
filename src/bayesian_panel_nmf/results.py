@@ -4,9 +4,8 @@ Joint mode uses ``format_draws``; cut mode adds source-tagged component
 frames (``format_cut_component_draws``), the Stage-1 PPC frame
 (``format_stage1_ppc_draws``), and the convergence manifest
 (``build_cut_convergence_manifest``). Transforms only -- all file I/O stays in
-cli.py. Uses fixed column names; downcasts dtypes
-(categorical for unit/group, int8/int32 for integer cols, float32 for
-predictions).
+cli.py. Column names are fixed; dtypes are downcast (categorical for
+unit/group, int8/int32 for integer columns, float32 for predictions).
 """
 
 from typing import TYPE_CHECKING
@@ -25,9 +24,9 @@ if TYPE_CHECKING:
 def drop_scoped_samples(samples: dict) -> dict:
     """Drop sample keys containing '/' (from numpyro.handlers.scope).
 
-    xarray DataTree rejects '/' in variable names (path-separator conflict),
-    so the convergence gate and trace sidecars need this filter before
-    handing samples to az.from_dict.
+    xarray DataTree rejects '/' in variable names (path-separator conflict).
+    The convergence gate and trace sidecars need this filter before
+    passing samples to az.from_dict.
     """
     return {k: v for k, v in samples.items() if "/" not in k}
 
@@ -71,12 +70,12 @@ def _build_posterior_draws_frame(
     units: list[str],
     times: list,
 ) -> pd.DataFrame:
-    """Build the long-format posterior draws frame (one row per
-    chain x sample x group x unit x time) from raw MCMC arrays.
+    """Build the long-format posterior draws frame from raw MCMC arrays,
+    one row per chain x sample x group x unit x time.
 
-    Returns the draws frame with .draw/.chain/.iteration, group, unit,
-    time, ypred, mu, mu_treated, plus integer K/D/N index columns used
-    as merge keys by _merge_observed_columns.
+    Returns .draw/.chain/.iteration, group, unit, time, ypred, mu,
+    mu_treated, plus integer K/D/N index columns used as merge keys by
+    _merge_observed_columns.
     """
     C, S, K, D, N = (
         predictions.shape[0],
@@ -169,10 +168,9 @@ def _merge_observed_columns(
     times: list,
     df_preprocessed: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Left-join observed outcome/denominator/treatment columns onto the
-    posterior draws frame, keyed on (group, unit, time) via integer
-    index columns, then drop the join-key columns and fix output column
-    order.
+    """Left-join observed outcome/denominator/treatment onto the posterior
+    draws frame, keyed on (group, unit, time) via integer index columns.
+    Drops the join-key columns and fixes output column order.
     """
     obs_df = df_preprocessed.copy()
 
@@ -189,9 +187,9 @@ def _merge_observed_columns(
         obs_cols.append("denominator")
     if "treatment" in obs_df.columns:
         obs_cols.append("treatment")
-    # Period interval boundaries (present only under temporal aggregation).
-    # Reporting needs them to compute person-years; without them rates fall
-    # back to years=1.0. See _aggregate_temporal in data.py.
+    # Period interval boundaries, present only under temporal aggregation.
+    # Reporting needs them for person-years; without them rates default to
+    # years=1.0. See _aggregate_temporal in data.py.
     for col in ("start_date", "end_date"):
         if col in obs_df.columns:
             obs_cols.append(col)
@@ -224,11 +222,10 @@ def _merge_observed_columns(
 def format_draws(
     samples: dict[str, np.ndarray], predictions: np.ndarray, data_dict: dict
 ) -> pd.DataFrame:
-    """
-    Merge MCMC draws with observed data into tidy DataFrame.
+    """Merge MCMC draws with observed data into a tidy DataFrame.
 
-    Uses FIXED standardized column names throughout - no column name parameters.
-    Automatically optimizes memory usage via dtype downcasting.
+    Column names are fixed and standardized -- no column-name parameters.
+    Downcasts dtypes to shrink memory use.
 
     Parameters
     ----------
@@ -266,8 +263,8 @@ def format_draws(
 
     Notes
     -----
-    For 4 chains x 250 samples x 2 groups x 51 units x 48 times: ~75% memory reduction
-    vs naive float64/object construction.
+    For 4 chains x 250 samples x 2 groups x 51 units x 48 times: ~75% less
+    memory than naive float64/object construction.
     """
     validate_samples(samples)
     validate_predictions(predictions, samples)
@@ -298,17 +295,17 @@ def format_draws(
 # ---------------------------------------------------------------------------
 # Cut-posterior formatting
 # ---------------------------------------------------------------------------
-# The combined cut CSV keeps the reporting schema built by format_draws (one
-# component at a time) plus the Stage-1 source columns. ``.draw`` is globally
-# unique across components; ``.chain`` is the real Stage-2 chain within the
-# component; ``.iteration`` indexes the component's output subsample.
+# The combined cut CSV reuses format_draws's schema, one component at a time,
+# plus Stage-1 source columns. ``.draw`` is globally unique across components;
+# ``.chain`` is the real Stage-2 chain within the component; ``.iteration``
+# indexes the component's output subsample.
 
 
 def format_stage1_ppc_draws(mu_ctrl, ypred, data_dict: dict) -> pd.DataFrame:
-    """Full Stage-1 posterior product (all retained draws, no ``te``).
+    """Full Stage-1 posterior (all retained draws, no ``te``).
 
-    This frame feeds ONLY the JAMA PPC suite; effect summaries come from the
-    combined cut draws.
+    Feeds only the JAMA PPC suite; effect summaries come from the combined
+    cut draws.
     """
     return format_draws({"mu_ctrl": np.asarray(mu_ctrl)}, np.asarray(ypred), data_dict)
 
@@ -327,12 +324,12 @@ def format_cut_component_draws(
     ----------
     te_draws, ypred : arrays (n_out, K, D, N)
         Output-subsampled treatment effects and independently generated
-        untreated predictive counts, draws concatenated in ascending
-        Stage-2-chain order.
+        untreated predictive counts, concatenated in ascending Stage-2-chain
+        order.
     chain_ids : array (n_out,)
         1-based real Stage-2 chain of each draw, grouped ascending.
     draw_offset : int
-        Global ``.draw`` offset (sum of output draws of prior components).
+        Global ``.draw`` offset (sum of output draws from prior components).
     """
     te_draws = np.asarray(te_draws)
     ypred = np.asarray(ypred)
@@ -347,8 +344,9 @@ def format_cut_component_draws(
         data_dict,
     )
 
-    # format_draws saw a (1, n_out) grid; restore real per-draw coordinates.
-    # Rows are draw-major: each draw occupies cell_count consecutive rows.
+    # format_draws only saw a (1, n_out) grid; restore the real per-draw
+    # coordinates. Rows are draw-major: each draw fills cell_count
+    # consecutive rows.
     _, counts = np.unique(chain_ids, return_counts=True)
     iter_ids = np.concatenate([np.arange(1, c + 1) for c in counts])
     df[".chain"] = np.repeat(chain_ids.astype(np.int8), cell_count)
@@ -368,9 +366,9 @@ def build_cut_convergence_manifest(
 ) -> dict:
     """One manifest: Stage-1 gate plus every conditional fit's gate.
 
-    Top-level ``converged`` is true only when Stage 1 AND every component
-    passed. Aggregate counts are provided for convenience, but R-hat/ESS are
-    never computed across pooled conditional targets.
+    Top-level ``converged`` is true only if Stage 1 and every component
+    passed. Aggregate counts are for convenience; R-hat/ESS are never
+    pooled across conditional targets.
     """
     all_converged = all(bool(r["converged"]) for r in component_records)
     return {

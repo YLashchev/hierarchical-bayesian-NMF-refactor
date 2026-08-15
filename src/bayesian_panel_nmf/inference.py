@@ -24,43 +24,37 @@ from bayesian_panel_nmf.validation import DataError
 def run_mcmc_inference(
     data_dict: dict[str, np.ndarray], model_fn: Callable, rank: int, config: Config
 ) -> MCMC:
-    """
-    Run MCMC inference on the panel NMF model.
+    """Run MCMC inference on the panel NMF model.
 
     Parameters
     ----------
     data_dict : dict
-        Dictionary containing model data with keys:
-        - Y: outcome array (K, D, N)
-        - denominators: population array (K, D, N)
-        - control_idx_array: boolean control mask (K, D, N)
-        - missing_idx_array: boolean missing data mask (K, D, N)
+        Keys: Y, denominators, control_idx_array, missing_idx_array, each
+        shape (K, D, N).
     model_fn : callable
-        NumPyro model function
+        NumPyro model function.
     rank : int
-        Rank for matrix factorization
+        Rank for the low-rank factorization.
     config : Config
-        Typed configuration (see ``config.py``). Reads ``config.model``
-        (outcome_distribution, nb_disp, sample_disp, adjust_for_missingness,
-        model_treated) and ``config.mcmc`` (auto_parallelism, max_chains,
-        num_chains, chain_method, num_warmup, num_samples, thinning,
-        random_seed, progress_bar).
+        Reads config.model (outcome_distribution, nb_disp, sample_disp,
+        adjust_for_missingness, model_treated) and config.mcmc
+        (auto_parallelism, max_chains, num_chains, chain_method, num_warmup,
+        num_samples, thinning, random_seed, progress_bar).
 
     Returns
     -------
     MCMC
-        Fitted MCMC object containing posterior samples
+        Fitted MCMC object with posterior samples.
 
     Raises
     ------
     DataError
-        If data_dict is missing required keys or has inconsistent shapes
+        data_dict missing required keys or shapes don't match.
 
     Notes
     -----
-    JAX dispatch is asynchronous, so runtime logging blocks until posterior
-    samples are ready. Use convergence_summary(idata) explicitly when
-    diagnostics are needed.
+    JAX dispatch is async; runtime logging blocks until samples are ready.
+    Call convergence_summary(idata) separately for diagnostics.
     """
     validate_data_dict(data_dict)
     rank = validate_rank(rank)
@@ -149,36 +143,31 @@ def generate_predictions(
     rank: int,
     config: Config,
 ) -> np.ndarray:
-    """
-    Generate posterior predictive samples (counterfactual predictions).
-
-    Generates predictions under the counterfactual scenario where
-    treatment effects are not applied (model_treated=False).
+    """Generate counterfactual posterior predictions (model_treated=False).
 
     Parameters
     ----------
     mcmc : MCMC
-        Fitted MCMC object from run_mcmc_inference
+        Fitted MCMC object from run_mcmc_inference.
     data_dict : dict
-        Dictionary containing model data with keys:
-        - denominators: population array (K, D, N)
+        Needs key denominators, shape (K, D, N).
     model_fn : callable
-        NumPyro model function
+        NumPyro model function.
     rank : int
-        Rank used in model fitting
+        Rank used when fitting.
     config : Config
-        Typed configuration. Reads ``config.model`` (outcome_distribution,
-        nb_disp, sample_disp) and ``config.mcmc.random_seed``.
+        Reads config.model (outcome_distribution, nb_disp, sample_disp) and
+        config.mcmc.random_seed.
 
     Returns
     -------
     np.ndarray
-        Posterior predictive samples with shape (num_chains, num_samples, K, D, N)
+        Shape (num_chains, num_samples, K, D, N).
 
     Raises
     ------
     DataError
-        If data_dict is missing required keys or rank is invalid
+        data_dict missing denominators, or rank is invalid.
     """
     rank = validate_rank(rank)
 

@@ -5,8 +5,7 @@ primitives live in ``plots.py``. This module holds the pure pandas/numpy
 table math (``make_summary_table``, quantile aggregation, per-unit
 post-treatment totals) and rich-terminal rendering (``_print_rich_tables``,
 ``print_run_summary_panel``). rich is imported lazily inside the render
-functions, matching the pattern already used for terminal output elsewhere
-in this package.
+functions rather than at module level.
 """
 
 from __future__ import annotations
@@ -65,10 +64,7 @@ def make_summary_table(
     denom_col: str = "denominator",
     rate_normalizer: float = 1000.0,
 ) -> pd.DataFrame:
-    """
-    Generate summary table for observed vs expected outcomes.
-
-    Returns a pandas DataFrame.
+    """Build the observed-vs-expected summary table, one row per group.
 
     Parameters
     ----------
@@ -323,8 +319,8 @@ def _print_rich_tables(
     """Print the headline + per-unit rich tables.
 
     ``target_unit`` anchors the headline table title. ``highlight_unit`` is the
-    unit whose per-unit row is bold-green; pass None (e.g. when the target was
-    auto-detected rather than explicitly set) for no highlight.
+    unit whose per-unit row is bold-green; pass None (e.g. auto-detected
+    target) for no highlight.
     """
     from rich.console import Console
     from rich.table import Table
@@ -418,8 +414,8 @@ def render_diagnostics_table(rows: list[dict], title: str | None = None) -> bool
     for r in rows:
         fmt = lambda v, p: "\u2014" if v is None else f"{v:{p}}"  # noqa: E731
         gated = r.get("gated", True)
-        # Non-gated rows are informational: dim them and blank the status
-        # style so they don't read as run failures.
+        # Non-gated rows are informational only -- dim them so they don't
+        # read as run failures.
         style = _STATUS_STYLE.get(r["status"]) if gated else "dim"
         t.add_row(
             r["param"],
@@ -484,16 +480,14 @@ def print_run_summary_panel(
 ) -> None:
     """Render a rich Panel summarizing one completed rank run.
 
-    Purely additive terminal output: no file or data side effects, so it
-    cannot affect any golden-checked artifact. Intended to be called right
-    after a rank's convergence gate and figures have been written, from
-    both the joint (``_run_single_rank``) and cut (``_run_cut_rank``) paths.
+    Display only -- no file or data side effects. Call after a rank's
+    convergence gate and figures are written, from both the joint
+    (``_run_single_rank``) and cut (``_run_cut_rank``) paths.
 
-    The panel reports the divergence count as a plain fact and carries NO
-    roll-up PASS/FAIL verdict: per-parameter/per-component status (the
-    config-driven ``ConvergenceThresholds`` bands) is shown in the diagnostics
-    table above, and the authoritative gate is the ``_convergence.json`` write
-    plus its logged warning in the pipeline.
+    Shows the divergence count as a fact, not a verdict. Per-parameter or
+    per-component PASS/WARN/FAIL (the ``ConvergenceThresholds`` bands) is
+    in the diagnostics table printed above; the real gate is the
+    ``_convergence.json`` write and its logged warning.
 
     Parameters
     ----------
@@ -503,14 +497,14 @@ def print_run_summary_panel(
     chain_method : str
     outcome_distribution : str
     convergence : dict
-        The convergence dict (``diagnostics.convergence_summary()`` /
+        Convergence summary dict (``diagnostics.convergence_summary()`` /
         ``cut.summarize_mcmc()`` / ``results.build_cut_convergence_manifest()``
-        shape). Only ``divergences`` is read here for display; the roll-up
-        ``converged`` bool is intentionally not surfaced in the panel.
+        shape). Only ``divergences`` is read here; the roll-up ``converged``
+        bool is not shown in the panel.
     figures : list of str
-        Figure names selected for this run (``PLOT_REGISTRY`` subset).
+        Figure names rendered this run (``PLOT_REGISTRY`` subset).
     artifact_paths : list of str, or str/Path
-        Artifact directory or list of written artifact paths to display.
+        Artifact directory or paths to display.
     """
     from rich.console import Console
     from rich.panel import Panel
@@ -519,12 +513,7 @@ def print_run_summary_panel(
 
     div = convergence.get("divergences", 0)
 
-    # Per-parameter (joint) or per-component (cut) diagnostics table, worst
-    # first, printed before the panel. Constant sites show as 'fixed'. The
-    # per-row PASS/WARN/FAIL there is the config-driven ConvergenceThresholds
-    # verdict; the panel deliberately carries NO roll-up pass/fail (that gate
-    # lives in the _convergence.json write + its logged warning), only the
-    # factual divergence count. Display only.
+    # Diagnostics table (worst-first); constant sites show as 'fixed'.
     if diagnostic_rows is not None:
         render_diagnostics_table(
             diagnostic_rows, title=f"Convergence — {model_type} rank {rank}"

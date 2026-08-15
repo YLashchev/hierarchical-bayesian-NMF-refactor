@@ -248,15 +248,11 @@ def _extract_fit(mcmc: MCMC) -> MCMCFit:
     """Convert one MCMC run to host arrays; strip scoped suppressed_counts/*
     keys via results.drop_scoped_samples (xarray rejects '/' in var names).
 
-    Before returning, purge NumPyro's cached device (JAX) arrays off the MCMC
-    object. NumPyro retains the posterior in ``_states``/``_last_state`` and
-    keeps per-signature entries in ``_cache``/``_init_state_cache``; across the
-    cut Stage-2 loop these leak ~1 GB of device buffers per component (verified:
-    ``jax.live_arrays()`` climbs monotonically otherwise, and neither
-    ``gc.collect()`` nor ``jax.clear_caches()`` reclaims them because the object
-    stays reachable). Clearing the attributes here — after extraction to host
-    numpy — releases them the moment the caller drops the fit. Output is
-    unaffected: ``samples``/``diverging`` are already ``np.asarray`` host copies.
+    Then clear NumPyro's cached JAX arrays off the MCMC object
+    (``_states``/``_last_state``/``_cache``/``_init_state_cache``). Without
+    this, each cut Stage-2 fit leaks ~1 GB of device buffers that
+    ``gc.collect()``/``jax.clear_caches()`` can't reclaim while the object is
+    reachable. Safe here: samples/diverging are already host numpy copies.
     """
     from .results import drop_scoped_samples
 

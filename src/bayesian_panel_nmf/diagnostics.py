@@ -16,9 +16,8 @@ import numpy as np
 class ConvergenceThresholds:
     """Pass/warn/fail bands for the convergence gate.
 
-    Defaults reproduce the historical gate (R-hat < 1.01, ESS > 400, and the
-    old hard-FAIL at ESS < 100 via ``ess_min`` being the warn line with
-    ``rhat_fail`` the R-hat hard line). A parameter is:
+    Defaults: R-hat warn at 1.01, ESS warn at 400, hard FAIL at ESS < 100.
+    A parameter is:
 
     - PASS  when rhat < ``rhat_warn`` and ess >= ``ess_min``
     - FAIL  when rhat >= ``rhat_fail`` or ess < ``ess_min`` * (fail fraction)
@@ -31,8 +30,8 @@ class ConvergenceThresholds:
     rhat_warn: float = 1.01
     rhat_fail: float = 1.05
     ess_min: float = 400.0
-    # ESS below this fraction of ess_min is a hard FAIL (else WARN). 0.25 keeps
-    # the historical FAIL-at-100 when ess_min=400.
+    # ESS below ess_min * this fraction is a hard FAIL (else WARN).
+    # 0.25 -> FAIL below 100 when ess_min=400.
     ess_fail_fraction: float = 0.25
 
     def status(self, rhat: float, ess: float) -> str:
@@ -61,13 +60,12 @@ def convergence_summary(
 ) -> dict[str, Any]:
     """Rank-normalized R-hat / ESS gate (Vehtari et al. 2021 via ArviZ).
 
-    The verdict and the reported rhat_max / ess_*_min are computed over
-    ``params`` only (prefix match on variable name, so "mu" covers "mu" and
-    scoped variants) — so non-identifiable sites (state_fe_z, unit_weight, ...)
-    excluded from ``params`` don't fail the gate. Default None = every
-    parameter (the historical gate). Divergences are ALWAYS counted over the
-    full run regardless of ``params``. ``thresholds`` defaults to the
-    historical R-hat<1.01 / ESS>400 bands.
+    The verdict and rhat_max/ess_*_min are computed over ``params`` only
+    (prefix match, so "mu" also covers scoped variants), so non-identifiable
+    sites (state_fe_z, unit_weight, ...) excluded from ``params`` can't fail
+    the gate. Default None = every parameter. Divergences are always counted
+    over the full run regardless of ``params``. ``thresholds`` defaults to
+    R-hat<1.01 / ESS>400.
     """
     import arviz as az
 

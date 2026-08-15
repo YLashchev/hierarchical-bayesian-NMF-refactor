@@ -204,7 +204,7 @@ get selected is independent of the draws themselves; an explicit
 `cut.stage2_mcmc.random_seed` is rejected for the same reason.
 
 Cut runs write `{stem}_cut.csv` (combined draws with `cut_component` +
-`stage1_*` provenance columns), `{stem}_cut_stage1_ppc.csv` (full Stage-1
+`stage1_*` columns), `{stem}_cut_stage1_ppc.csv` (full Stage-1
 posterior-predictive draws), `{stem}_cut_convergence.json` (per-stage
 manifest), and with `--save-traces` also `{stem}_cut_stage1_traces.nc` +
 `{stem}_cut_stage2_traces/component_*.nc`. See
@@ -310,7 +310,7 @@ Built-in but still being hardened:
 - [x] **Add MCMC diagnostics** — done: `bpnmf traces` (R-hat/ESS table + trace plots) and the per-run convergence gate (`*_convergence.json`)
 - [ ] **Unit test coverage** — current suite is mostly integration / regression against synthetic CSVs; add targeted unit tests for functions in `models/`, `inference.py`, and `results.py`
 - [ ] **GPU support** — JAX already runs on GPU; surface a config flag + verify chain parallelism against `numpyro.set_host_device_count`
-- [ ] **Server/HPC multi-model-type parallelism** — model types currently always run sequentially in one process (chain-level parallelism via `mcmc.auto_parallelism` is automatic within each fit). If running many independent model types on a server/HPC host becomes a bottleneck, revisit process-level parallelism across model types, with the same CPU/RAM oversubscription guards the removed `analysis_workers` mechanism had.
+- [ ] **Server/HPC multi-model-type parallelism** — model types currently always run sequentially in one process (chain-level parallelism via `mcmc.auto_parallelism` is automatic within each fit). If running many independent model types on a server/HPC host becomes a bottleneck, revisit process-level parallelism across model types, with the same CPU/RAM oversubscription guards as the removed `analysis_workers` mechanism.
 - [ ] **Reference-style post-hoc diagnostics** — optionally save selected latent draws (`te`, treatment effects, `unit_weight`, `time_fac`, `disp`) as compact sidecar files so R-hat/ESS can be computed after a run without calling NumPyro `summary()` during production; keep full-run diagnostics off by default. (Parquet output for the main draws artifact already shipped via `output.draws_format: "parquet"`.)
 - [ ] **Spillover analysis** — diagnostics for contamination between treated and neighboring control units
 - [ ] **Donor-pool sensitivity** — systematic leave-one-out / leave-region-out robustness checks

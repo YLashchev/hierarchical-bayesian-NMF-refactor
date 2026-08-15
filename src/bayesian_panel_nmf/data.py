@@ -34,25 +34,21 @@ def load_and_prepare(
     exclude_units: list[str] | None = None,
     type_config: dict | None = None,
 ) -> dict:
-    """
-    Load CSV, standardize columns, filter, aggregate, and prepare model arrays.
+    """Load CSV, standardize columns, filter, aggregate, and build model arrays.
 
-    This is the single entry point for all data preparation. After loading,
-    all operations use fixed column names: unit, time, group, outcome,
-    denominator, treatment.
+    Single entry point for data preparation. Output columns are fixed:
+    unit, time, group, outcome, denominator, treatment.
 
     Parameters
     ----------
     filepath : str
-        Path to input CSV file
+        Path to input CSV file.
     config : Config
         Typed configuration (see ``config.py``).
     groups : list of str
-        Which outcome groups to include (e.g., ["total"] or ["usborn", "foreign"])
+        Outcome groups to include (e.g. ["total"] or ["usborn", "foreign"]).
     exclude_units : list of str, optional
-        Units (e.g., states) to exclude from the analysis. Useful when
-        certain units have missing data for specific subgroups (e.g.,
-        California lacks marital status data for births).
+        Units to drop from the analysis (e.g. a state missing a subgroup).
 
     Returns
     -------
@@ -70,10 +66,9 @@ def load_and_prepare(
     Raises
     ------
     DataError
-        If filepath doesn't exist or is invalid, or if data file is missing
-        required columns or has invalid values
+        Filepath missing/invalid, or data file has bad or missing columns.
     ConfigError
-        If config is missing required sections or keys
+        Config is missing required sections or keys.
     """
     validate_filepath(filepath)
     validate_groups(groups)
@@ -151,11 +146,11 @@ def _validate_and_resolve_total(
     """
     defined_labels = [o["label"] for o in schema_outcomes]
 
-    # If total is not requested or is explicitly defined, no synthetic aggregation needed
+    # No synthetic total needed: not requested, or already defined.
     if "total" not in groups or "total" in defined_labels:
         return None
 
-    # Total is requested but not defined — need synthetic aggregation
+    # Total requested but undefined: need total_from/total_all from type_config.
     if type_config is None:
         raise ConfigError(
             "'total' is not defined as an outcome label in the schema. "
@@ -323,15 +318,14 @@ def _validate_denominators(df: pd.DataFrame, schema_info: dict, unit_col: str) -
 def _load_and_standardize(
     filepath: str, schema_info: dict, date_format: str = "auto"
 ) -> pd.DataFrame:
-    """
-    Load CSV and parse time column.
+    """Load CSV and parse the time column.
 
-    Does NOT rename columns yet - that happens in _wide_to_long.
+    Columns are not renamed yet -- that happens in ``_wide_to_long``.
 
     Raises
     ------
     DataError
-        If required columns are missing, time cannot be parsed, or treatment has invalid values
+        Required columns missing, time unparsable, or bad treatment values.
     """
     path = Path(filepath)
     if not path.exists():
@@ -402,10 +396,9 @@ def _wide_to_long(
     groups: list[str],
     total_from_labels: list[str] | None = None,
 ) -> pd.DataFrame:
-    """
-    Convert wide format to long format with standard column names.
+    """Convert wide format to long format with standard column names.
 
-    Handles "total" group by summing all outcomes/denominators.
+    Sums outcomes/denominators into a synthetic "total" group when needed.
     Output columns: unit, time, group, outcome, denominator, treatment.
     """
     # Check if "total" is requested but not defined
@@ -476,11 +469,7 @@ def _filter_time_range(
 
 
 def _aggregate_temporal(df: pd.DataFrame, period: str) -> pd.DataFrame:
-    """
-    Aggregate data to specified time periods.
-
-    Supports: monthly, bimonthly, quarterly, yearly.
-    """
+    """Aggregate rows to monthly, bimonthly, quarterly, or yearly periods."""
     df = df.copy()
 
     # Extract year/month
@@ -521,7 +510,7 @@ def _aggregate_temporal(df: pd.DataFrame, period: str) -> pd.DataFrame:
         df_agg["_year"].astype(str) + "-" + first_month.astype(str) + "-01"
     )
 
-    # Add period boundaries for reference
+    # Add period start/end boundaries
     df_agg["start_date"] = df_agg[TIME_COL]
     df_agg["end_date"] = (
         df_agg[TIME_COL] + pd.DateOffset(months=months_per_period) - timedelta(days=1)

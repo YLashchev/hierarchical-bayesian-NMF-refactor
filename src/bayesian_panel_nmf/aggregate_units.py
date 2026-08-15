@@ -139,10 +139,10 @@ def add_aggregate_units(
     except ValidationError as e:
         raise ConfigError(str(e)) from e
 
-    # draws_df is only read (never mutated); avoid copying it. On large cut
-    # PPC frames (millions of rows) the old double-copy (source_df +
-    # result_df) tripled peak memory and drove the reporting OOM. result_df
-    # starts as the input and is only copied lazily when an overwrite spec
+    # draws_df is read-only here, so skip copying it up front. On large cut
+    # PPC frames (millions of rows), copying both source_df and result_df
+    # tripled peak memory and caused OOMs during reporting. result_df starts
+    # as an alias of the input and is only copied when an overwrite spec
     # filters it; the final concat allocates the combined frame once.
     source_df = draws_df
     result_df = draws_df

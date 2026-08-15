@@ -78,19 +78,15 @@ def _check_arrays_consistency(
 
 
 def validate_data_dict(data_dict: dict) -> None:
-    """
-    Validate data dictionary structure and shapes.
+    """Check that data_dict has the required keys and consistent shapes.
 
-    Parameters
-    ----------
-    data_dict : dict
-        Dictionary containing model data with keys:
-        Y, denominators, control_idx_array, missing_idx_array, groups, units, times
+    Requires Y, denominators, control_idx_array, missing_idx_array, groups,
+    units, times.
 
     Raises
     ------
     DataError
-        If required keys are missing or shapes are inconsistent
+        Missing keys or inconsistent shapes.
     """
     if not isinstance(data_dict, dict):
         raise DataError(f"data_dict must be dict, got {type(data_dict).__name__}")
@@ -102,7 +98,6 @@ def validate_data_dict(data_dict: dict) -> None:
     if missing:
         raise DataError(f"data_dict missing: {missing}")
 
-    # Check Y is 3D
     shape = data_dict["Y"].shape
     if len(shape) != 3:
         raise DataError(f"Arrays must be 3D (K,D,N), got shape {shape}")
@@ -126,19 +121,14 @@ def validate_rank(rank: Any) -> int:
 
 
 def validate_samples(samples: dict[str, np.ndarray]) -> None:
-    """
-    Validate MCMC samples dictionary.
+    """Check that samples has a 5D 'mu_ctrl' array (C, S, K, D, N).
 
-    Parameters
-    ----------
-    samples : dict
-        MCMC samples from mcmc.get_samples(group_by_chain=True)
-        Must contain 'mu_ctrl' key with 5D array (C, S, K, D, N)
+    `samples` is the dict from ``mcmc.get_samples(group_by_chain=True)``.
 
     Raises
     ------
     DataError
-        If samples are invalid
+        Missing 'mu_ctrl' or wrong shape.
     """
     if not isinstance(samples, dict):
         raise DataError(f"samples must be dict, got {type(samples).__name__}")
@@ -147,7 +137,7 @@ def validate_samples(samples: dict[str, np.ndarray]) -> None:
         raise DataError("samples missing 'mu_ctrl' key")
 
     mu_ctrl = samples["mu_ctrl"]
-    # Check for array-like with ndim attribute (works for numpy and jax arrays)
+    # `ndim` check works for both numpy and jax arrays
     if not hasattr(mu_ctrl, "ndim") or mu_ctrl.ndim != 5:
         raise DataError(
             f"samples['mu_ctrl'] must be 5D array (C,S,K,D,N), got shape {getattr(mu_ctrl, 'shape', 'N/A')}"
@@ -157,22 +147,17 @@ def validate_samples(samples: dict[str, np.ndarray]) -> None:
 def validate_predictions(
     predictions: np.ndarray, samples: dict[str, Any] | None = None
 ) -> None:
-    """
-    Validate predictions array.
+    """Check predictions is a 5D array (C, S, K, D, N).
 
-    Parameters
-    ----------
-    predictions : np.ndarray
-        Posterior predictive samples, shape (C, S, K, D, N)
-    samples : dict, optional
-        If provided, validates predictions shape matches samples['mu_ctrl']
+    If `samples` is given, also checks the shape matches
+    ``samples['mu_ctrl']``.
 
     Raises
     ------
     DataError
-        If predictions have invalid shape
+        Wrong shape, or mismatch with samples.
     """
-    # Check for array-like with ndim attribute (works for numpy and jax arrays)
+    # `ndim` check works for both numpy and jax arrays
     if not hasattr(predictions, "ndim"):
         raise DataError(
             f"predictions must be array-like, got {type(predictions).__name__}"

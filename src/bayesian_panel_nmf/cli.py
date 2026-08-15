@@ -129,7 +129,7 @@ def _interactive_run_setup(args: argparse.Namespace) -> argparse.Namespace:
 
 
 def _run_command(args: argparse.Namespace) -> None:
-    """``bpnmf run`` — port of ``scripts/run_analysis.py``'s ``main()``."""
+    """Entry point for the ``bpnmf run`` subcommand."""
     args = _interactive_run_setup(args)
     log_level = "DEBUG" if args.verbose else "INFO"
     setup_logging(level=log_level, log_file=args.log_file)
@@ -468,20 +468,13 @@ def _select_variables_to_plot(
     given prefixes, falling back to the first 5 available variables if
     nothing matches.
 
-    Without --param-filter: scalar/low-dimensional parameters (dispersion,
-    treatment/category scales, the state_fe hyperparameters state_fe_mu/
-    state_fe_sigma) first, then higher-dimensional matrix parameters
-    (treatment effects, factors, per-unit fixed effects incl. state_fe_z and
-    the non-centered treatment_kt_z/state_treatment_effect_z/
-    state_category_te_z raw z-scores), in a fixed priority order. The
-    deterministic treatment_kt/state_treatment_effect/state_category_te
-    remain plotted too -- they are the identified reported quantities, only
-    their raw z-scores are non-identified nuisance. The large derived
-    log-rate surfaces mu/mu_ctrl are excluded by default (thousands of
-    cells; a subsampled trace is not a useful convergence view -- the gate
-    summarizes them, and --param-filter mu still reaches them). Falls back
-    to the first 5 available variables if none of the priority names are
-    present.
+    Without --param-filter: scalar parameters first (dispersion, treatment/
+    category scales, state_fe hyperparameters), then matrix parameters
+    (treatment effects, factors, per-unit fixed effects, and their raw
+    non-centered z-scores) in a fixed order. mu/mu_ctrl are excluded by
+    default -- thousands of cells, not a useful trace view (--param-filter
+    mu still reaches them; the gate already summarizes them). Falls back to
+    the first 5 available variables if nothing in the priority list matches.
     """
     if param_filters:
         vars_to_plot = [
@@ -529,13 +522,12 @@ def _select_informative_coords(
     da, max_subplots: int, rng: np.random.Generator
 ) -> dict | None:
     """Pick a subset of coordinates per non-chain/draw dimension so the
-    total subplot count stays near max_subplots, preferring cells with
-    non-zero posterior variance (structurally-zero cells like `te` on
-    control units produce uninformative flatline traces).
+    subplot count stays near max_subplots. Prefers cells with non-zero
+    posterior variance -- structurally-zero cells (e.g. `te` on control
+    units) produce flat, uninformative traces.
 
-    Returns None if the variable is structurally zero everywhere (caller
-    should skip it entirely). Returns {} if no subsampling is needed.
-    Returns a populated dict otherwise.
+    Returns None if the variable is zero everywhere (caller skips it),
+    {} if no subsampling is needed, or a populated dict otherwise.
     """
     param_dims = [d for d in da.dims if d not in ("chain", "draw")]
     coords: dict = {}
@@ -582,8 +574,8 @@ def _select_informative_coords(
 
 
 def _render_and_save_trace(idata, var: str, coords: dict, out_dir: Path) -> Path:
-    """Render one variable's trace plot and save it as a PNG. Caller handles
-    exceptions."""
+    """Render one variable's trace plot and save it as a PNG. No try/except
+    here -- the caller catches failures per variable."""
     az.plot_trace(idata, var_names=[var], coords=coords or None, backend="matplotlib")
     fig = plt.gcf()
     suffix = f" (subset {_MAX_TRACE_SUBPLOTS})" if coords else ""
@@ -674,8 +666,8 @@ def _interactive_traces_setup(args: argparse.Namespace) -> argparse.Namespace:
 
 
 def _traces_command(args: argparse.Namespace) -> None:
-    """``bpnmf traces`` — folds ``scripts/analyze_traces.py`` (default,
-    numeric table) and ``scripts/make_trace_plots.py`` (``--plots``, PNGs)."""
+    """Entry point for the ``bpnmf traces`` subcommand: numeric table by
+    default, PNG trace plots with ``--plots``."""
     args = _interactive_traces_setup(args)
     nc_path = Path(args.nc_path)
     if not nc_path.exists():

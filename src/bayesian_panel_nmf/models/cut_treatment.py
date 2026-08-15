@@ -76,14 +76,11 @@ def stage2_model(
     )
 
     # Non-centered: treatment_kt/state_treatment_effect/state_category_te each
-    # sample a standard-normal z inside the same plate, then scale
-    # deterministically. Their scale priors are tight/weakly-identified
-    # (HalfNormal(0.1) / HalfNormal(1) with sparse exposed-cell data),
-    # producing a centered-parameterization funnel (divergences, ESS<30) --
-    # mirrors the joint model's identical fix (parity enforced by
-    # tests/test_cut_model_parity.py). category_treatment_effect is left
-    # centered: its scale is data-informed (ESS ~1000, PASS), where centered
-    # mixes better.
+    # sample a standard-normal z, then scale deterministically. Their priors
+    # are tight/weakly-identified with sparse exposed-cell data, and centered
+    # form gives a funnel (divergences, ESS < 30) -- same fix as joint.py.
+    # category_treatment_effect stays centered: its scale is data-informed
+    # (ESS ~1000, PASS), and centered mixes better there.
     with numpyro.plate("num_treated", num_treated):
         treatment_kt_z = numpyro.sample("treatment_kt_z", dist.Normal(0, 1))
     treatment_kt = numpyro.deterministic(
