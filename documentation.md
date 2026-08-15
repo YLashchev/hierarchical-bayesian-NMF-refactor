@@ -10,6 +10,220 @@ factorization. Grows alongside the codebase.
 
 ---
 
+## The model
+
+### What it estimates
+
+The data is a panel of counts indexed by group (`K`), unit (`D`), and time
+period (`N`) — shape `(K, D, N)` everywhere in the model. For each cell the model builds an untreated log-rate surface `mu_ctrl`
+from a low-rank factorization plus fixed effects, then (optionally) adds a
+treatment effect `te` for cells past exposure. The observed count is drawn
+from that combined rate `mu = mu_ctrl + te`.
+
+`mu_ctrl` decomposes as:
+
+```
+mu_ctrl[k, d, n] = time_factor[k, d, n] + state_fe[k, d] + time_fe[k, n] + log(denominator[k, d, n])
+time_factor[k, d, n] = log( sum_f exp(time_fac[k, f, n] + unit_weight[d, f]) )
+```
+
+`time_fac` is a set of `rank` latent time-factor curves per group; `unit_weight`
+gives each unit a convex-combination-like mixture over those `rank` factors
+(rows sum to 1 in linear space, via the Dirichlet prior below). `state_fe` and
+`time_fe` are unit- and time-level fixed effects, both in log-rate space.
+`denominator` (population/exposure) converts the log-rate surface to a
+log-count rate.
+
+### Likelihood
+
+Two outcome families, chosen by `model.outcome_distribution` (`"NB"` or
+`"Poisson"`):
+
+- **Poisson**: `y_obs ~ Poisson(rate = exp(mu))`.
+- **Negative Binomial** (`NegativeBinomial2`, mean/dispersion form): `y_obs ~ NB2(mean = exp(mu), concentration = 1 / nb_disp)`.
+  Dispersion is either a fixed constant `model.nb_disp` (default `1e-4`,
+  giving concentration `1/nb_disp = 10000` — nearly Poisson) or, if
+  `model.sample_disp` is true, a per-unit value sampled from `Uniform(0, 1)`
+  with a custom log-density penalty favoring small `disp` (`-0.5*log(disp) -
+  100*sqrt(disp)`), then inverted to a concentration.
+  `sample_disp` is ignored under Poisson.
+
+**Censored small counts.** The source data suppresses small nonzero counts
+(values 1–9) to protect privacy. When `model.adjust_for_missingness` is true
+(default), cells flagged in `missing_idx_array` get a likelihood adjustment
+instead of an observed value: `missingness_adjustment()` adds `log P(y in
+{1..9})` for those cells and `log P(y not in {1..9})` for observed control
+cells, integrating over the censored range rather than treating it as a
+point observation.
+This is separate from a cell being structurally absent from the panel
+(`data.allow_unbalanced_panel`), which the array-building step handles, not
+the likelihood.
+
+### Sample sites and priors
+
+| Site | Prior / form | Notes |
+|---|---|---|
+| `time_fac` | `Gamma(20, 20)`, then logged | shape `(K, rank, N)`; `time_fac_alpha=20` is fixed in code, not configurable |
+| `state_fe_mu` | `ImproperUniform(real)` | shared mean, one scalar |
+| `state_fe_sigma` | `HalfNormal(0.5)` | shared scale |
+| `state_fe_z` | `Normal(0, 1)`, shape `(D,)` per group | `state_fe = state_fe_mu + state_fe_sigma * state_fe_z` |
+| `time_fe` | `Gamma(1, 1)`, then logged | shape `(N,)` per group |
+| `unit_weight` | `Dirichlet(ones(rank))`, then logged | shape `(D, rank)`; rows are a simplex over the `rank` factors |
+| `disp` | fixed (`nb_disp`, default `1e-4`) or `Uniform(0,1)` if `sample_disp` | NB only; deterministic under Poisson (not constructed) |
+| `treatment_it_scale` | `HalfNormal(0.1)` | scale for `treatment_kt` |
+| `treatment_state_scale` | `HalfNormal(1)` | scale for `state_treatment_effect` |
+| `treatment_category_scale` | `HalfNormal(1)` | scale for `category_treatment_effect` |
+| `state_category_scale` | `HalfNormal(1)` | scale for `state_category_te` |
+| `treatment_kt_z` | `Normal(0, 1)`, shape `(num_treated,)` | non-centered; `treatment_kt = treatment_kt_z * treatment_it_scale` |
+| `state_treatment_effect_z` | `Normal(0, 1)`, shape `(D,)` | non-centered; `state_treatment_effect = state_treatment_effect_z * treatment_state_scale` |
+| `state_category_te_z` | `Normal(0, 1)`, shape `(K, D)` | non-centered; `state_category_te = state_category_te_z * state_category_scale` |
+| `category_treatment_effect` | `Normal(0, treatment_category_scale)` | centered (not `_z`); scale is well-identified from data |
+
+`state_fe`, `treatment_kt`, `state_treatment_effect`, and `state_category_te`
+use a **non-centered** parameterization: sample a standard-normal `_z`, then
+scale it deterministically. A directly-centered `Normal(mean, scale)` prior
+on these sites creates a funnel geometry when the scale is weakly identified
+(sparse exposed-cell data, tight `HalfNormal(0.1)`/`HalfNormal(1)` scale
+priors) — NUTS then diverges and ESS drops below 30. Non-centering removes
+that funnel. `category_treatment_effect` is the exception: its scale is
+data-informed (ESS around 1000), so centered sampling already mixes well and
+non-centering isn't needed.
+
+### Treatment / exposure structure
+
+Exposure is **staggered**, not a single global cutoff: `control_idx_array`
+is a per-cell boolean array (`True` = untreated), so different units can
+cross into treatment at different times. `model_treated=True` requires
+`control_idx_array` (raises `ValueError` otherwise) and builds `te` only on
+treated cells (`~control_idx_array`): a per-treated-cell term
+(`treatment_kt`), plus unit-level, group-level, and unit×group interaction
+terms broadcast across the treated mask. `model_treated=False` yields
+`mu = mu_ctrl` — the counterfactual/baseline path used for prediction and for
+cut-model Stage 1.
+
+### Interpreting the factor sites
+
+`time_fac` and `unit_weight` are not identifiable on their own: any rotation
+that preserves their product `time_factor` gives the same likelihood, so
+individual factor values and their per-chain orderings can vary across MCMC
+runs without meaning anything is wrong. This is a standard property of
+low-rank factorizations, not a bug in this model. The quantities that are
+identifiable and meaningful to report are the **combined** deterministic
+sites: `mu_ctrl` (untreated log-rate), `mu` (log-rate including treatment),
+and `te` (treatment effect) — these are what diagnostics, plots, and tables
+should be read from, not the raw factor sites.
+
+---
+
+## Cut mode (two-stage inference)
+
+### The problem it solves
+
+In joint inference, one likelihood covers both the untreated baseline (factors, fixed effects) and the treatment effect. Gradients from post-exposure data flow back into the baseline factors — exposed outcomes can pull the "what would have happened without treatment" estimate toward the observed treated outcome. The cut posterior removes that path:
+
+```
+p_cut(phi, theta | Z, Y) = p(phi | Z) * p(theta | Y, phi)
+```
+
+`phi` is the baseline (factors, fixed effects); `theta` is the treatment effect; `Z` is untreated data; `Y` is the full outcome data. `phi`'s posterior depends only on `Z`.
+
+### Stage 1: untreated baseline
+
+`stage1_model` (`models/cut_baseline.py`) fits the same low-rank factor model as the joint model's `model_treated=False` branch — same plates, same priors, same site names (`time_fac`, `state_fe_mu`/`state_fe_sigma`/`state_fe_z`, `time_fe`, `unit_weight`, optional `disp`). It is a separate copy of that code by design — no shared helpers with `models/joint.py` — and parity between the two is pinned by `tests/test_cut_model_parity.py`.
+
+The likelihood covers only untreated, non-missing cells (`control_idx_array & ~missing_idx_array`); censored untreated counts (present but suppressed, 1–9) are integrated over when `adjust_for_missingness=True`. It deterministically records `mu_ctrl` (log-rate surface including `log(denominators)`) and `mu` (identical to `mu_ctrl` in Stage 1).
+
+Stage 1 runs as an ordinary multi-chain NUTS fit (`run_stage1_mcmc`, `cut.py`), gated by the same R-hat/ESS/divergence checks as joint mode. It also produces a full posterior-predictive draw of untreated counts for every retained Stage-1 sample, using an independent RNG stream (`mcmc.random_seed + 1`), written as `{stem}_stage1_ppc.csv`.
+
+### Draw selection
+
+`select_stage1_draws` (`cut.py`) picks `cut.num_stage1_draws` (default 25) draws from the retained Stage-1 posterior without replacement, split evenly across chains (`selection_seed`, default `mcmc.random_seed + 2`). Each pick becomes one "component," numbered 1..M in `(chain, iteration)` order — reproducible regardless of RNG draw order. Each `Stage1DrawRef` carries that one draw's `mu_ctrl` array and matching NB concentration (`1/disp` if dispersion was sampled, `1/nb_disp` if fixed; `None` for Poisson).
+
+### Stage 2: treatment effect, one component at a time
+
+`stage2_model` (`models/cut_treatment.py`) takes `mu_ctrl` and `nb_concentration` as plain array arguments — not sample sites. There is nothing to condition on with `numpyro.handlers.condition`; the baseline is a fixed number. This is a valid boundary because the exposed-cell likelihood depends on the Stage-1 parameters only through `mu_ctrl` and the matched concentration — nothing else about Stage 1 reaches Stage 2.
+
+Stage 2 samples the treatment-effect hierarchy only: `treatment_it_scale`, `treatment_state_scale`, `treatment_category_scale`, `state_category_scale` (all `HalfNormal`), then `treatment_kt`, `state_treatment_effect`, `state_category_te` via non-centered `*_z ~ Normal(0,1)` scaled deterministically (funnel avoidance under sparse exposed-cell data), and `category_treatment_effect` sampled directly as `Normal(0, treatment_category_scale)` (kept centered — its scale is data-informed and mixes fine centered). `mu = mu_ctrl + te`; the likelihood covers exposed, non-missing cells only, with the same 1–9 censoring treatment as Stage 1.
+
+Each component is its own complete multi-chain NUTS fit (`run_stage2_mcmc`), using `cut.stage2_mcmc` — every joint-mode `mcmc.*` setting except `random_seed`, overridable per key (`{**mcmc_cfg, **stage2_overlay}`). Setting `stage2_mcmc.random_seed` explicitly is rejected at config-load time; `cut.stage2_seed` (default `mcmc.random_seed + 3`) is the only Stage-2 seed. Every component reuses the same model function and array shapes so XLA does not recompile per component.
+
+### Combined output
+
+For each component, `subsample_component_draws` thins the retained Stage-2 draws to `cut.stage2_draws_per_component` (default 100) per chain, evenly strided — diagnostics still use the full retained draws, only the CSV/parquet output is thinned. The combined draws file carries provenance columns `cut_component`, `stage1_draw`, `stage1_chain`, `stage1_iteration` so every row traces back to the exact Stage-1 draw it was conditioned on. All components must produce the same output-draw count, or the run raises `DataError` — unequal counts would give components unequal Monte Carlo weight when pooled.
+
+Each component gets its own convergence entry; nothing is pooled across components. These are assembled into one manifest (`build_cut_convergence_manifest`) written to `{stem}_cut_convergence.json`, holding the Stage-1 diagnostics plus a per-component list. With `--save-traces`, Stage 1 writes `{stem}_cut_stage1_traces.nc` and Stage 2 writes one `component_NNNN.nc` per component under `{stem}_cut_stage2_traces/`.
+
+### Practical notes
+
+- **Memory**: after each MCMC run (Stage 1 or any Stage-2 component), `_extract_fit` copies samples/diverging to host NumPy arrays, then clears NumPyro's cached JAX state off the `MCMC` object (`_states`, `_last_state`, `_cache`, etc.). Without this, each Stage-2 fit leaks roughly 1 GB of device buffers that `gc.collect()`/`jax.clear_caches()` cannot reclaim while the object stays reachable.
+- **Cost**: total work scales with `cut.num_stage1_draws` — each one is a full Stage-2 multi-chain MCMC run, not a cheap conditional update.
+- **Diagnostics**: a Stage-2 component is an ordinary MCMC run with its own chains, R-hat, and ESS — there's no special-cased single-draw diagnostic path.
+
+---
+
+## Data pipeline
+
+Input is a single CSV in wide or prefix-wide format, one row per `(unit, time)` (or per `(unit, time, subgroup)` if outcomes come from column prefixes). `load_and_prepare()` is the one entry point: it reads the CSV, resolves the schema, converts to a standardized long DataFrame, and builds the `(K, D, N)` model arrays.
+
+**Schema.** `data.schema` names the columns that carry meaning: `unit_col`, `time_col`, `treatment_col`, plus outcomes. Outcomes come from exactly one of two places — an explicit `outcomes: [{outcome_col, denominator_col, label}, ...]` list, or `outcomes_from_prefixes: {outcome_prefix, denominator_prefix, include}` (every column starting with `outcome_prefix` becomes one group, its label is the column name with the prefix stripped, `include` restricts which labels are kept). Exactly one of the two must be set — config load fails otherwise. A `denominator_col` is optional per outcome; when present it must be non-null and positive everywhere or load fails.
+
+**Time.** `data.date_format` is `"auto"` by default: it tries `None` (pandas infer), then `%Y-%m-%d`, `%m/%d/%y`, `%m/%d/%Y`, `%d-%m-%Y` in that order and keeps the first that parses the whole column. Set an explicit `strftime` format to skip the guessing. `data.start_date` / `data.end_date` filter rows to `time >= start_date` and `time < end_date` (end is exclusive) after parsing.
+
+**Optional temporal aggregation.** `data.aggregation.enabled` (default `false`) collapses rows into `monthly`, `bimonthly` (default), `quarterly`, or `yearly` buckets: outcome sums, denominator means, treatment takes `max` (a period counts as treated if any sub-period in it is).
+
+**What `load_and_prepare()` does, in order:** parse schema → load CSV and parse time → resolve `"total"` synthetic group if requested (sums specified outcome labels; needs `total_from` or `total_all` from the model-type config) → pivot wide to long with fixed columns `unit, time, group, outcome, denominator, treatment` → reject duplicate `(group, unit, time)` rows → filter by date range → drop `exclude_units` → optional temporal aggregation → `build_model_arrays()`. Duplicate `(group, unit, time)` combinations raise `DataError` immediately; the model assumes exactly one row per cell.
+
+**Arrays.** `build_model_arrays()` (in `arrays.py`) turns the long DataFrame into dense `(K, D, N)` NumPy arrays — `K` groups, `D` units, `N` time points, axes ordered by sorted label — using a vectorized categorical-code scatter, not a per-row loop. Denominators are divided by `denominator_scale` (default `1e4`, i.e. rates per 10,000) wherever present and positive; otherwise they default to `1`. `control_idx_array` is `True` wherever `treatment == 0`.
+
+Two different kinds of "missing" exist and must not be confused:
+- **Present but suppressed**: the outcome cell has a row but a null/NaN value (e.g. a small count masked for privacy). `missing_idx_array` is `True` there; the likelihood treats it as a 1–9 censored interval rather than an exact count.
+- **Structurally absent**: no row exists for that `(group, unit, time)` at all. This only happens when `allow_unbalanced_panel: true`; otherwise `build_model_arrays` raises `DataError`. When allowed, absent cells are OR'd into the same `missing_idx_array` and logged as "structurally absent."
+
+The convention for `missing_idx_array` is: **unset (all `False`) means nothing is missing.** A cell is only "missing" if a row said so (null value) or the panel is unbalanced and the cell has no row.
+
+**Aggregate units (`aggregate_units.py`).** Purely post-hoc: `add_aggregate_units()` runs on a fitted model's posterior draws DataFrame, after `bpnmf run` has already produced `mu`/`ypred`/etc. It is never part of the array build or the likelihood — the model never sees or fits an aggregate unit. Each `AggregateUnitSpec` under `output.aggregate_units` picks source units via one selector — `include_units: [...]` (explicit list), `include_treated_units: true` (units with `treatment == 1` anywhere), or `include_all_units: true` — optionally minus `exclude_units`, and gives the synthetic unit a `unit` name. `strict: true` makes a missing referenced unit an error instead of a warning. `overwrite: true` lets the spec replace an existing unit of that name; otherwise a name collision raises `ConfigError`. Aggregation sums `outcome`/`ypred`/`denominator` across source units per draw, takes `max` of `treatment`, and log-sum-exps `mu`/`mu_treated` (correct pooling for log-rate columns) — each spec aggregates from the *original* draws, so chaining multiple specs never double-counts.
+
+## Architecture
+
+```
+bpnmf CLI (cli.py)
+  -> Config.from_yaml (config.py)
+  -> load_and_prepare (data.py) -> build_model_arrays (arrays.py)
+  -> run_mcmc_inference / generate_predictions (inference.py), via pipeline.py
+  -> format_draws / format_cut_component_draws (results.py)
+  -> generate_reports (reports.py) -> tables.py + plots.py
+```
+
+`cli.py` parses arguments and dispatches to `pipeline.py`, which loads config, builds arrays, calls into `inference.py` (joint mode) or `cut.py` (cut mode), writes draws via `results.py`, gates convergence via `diagnostics.py`, and triggers `reports.py` when `output.figures` is non-empty. Everything downstream of the arrays is orchestration; `models/` is where the actual NumPyro model lives.
+
+| Module | Role |
+| --- | --- |
+| `cli.py` | `bpnmf` entry point: `run`/`viz`/`traces`/`init` subcommands |
+| `pipeline.py` | Per-type/per-rank orchestration: load, fit, gate, write, report |
+| `config.py` | Pydantic config schema — single source of truth for shape/defaults |
+| `data.py` | CSV load, schema resolution, wide-to-long, filtering |
+| `arrays.py` | Long DataFrame -> `(K, D, N)` NumPy arrays |
+| `models/joint.py` | Joint NumPyro model: factors, fixed effects, treatment, likelihood |
+| `models/cut_baseline.py` | Cut Stage 1: untreated-baseline model only |
+| `models/cut_treatment.py` | Cut Stage 2: treatment-effect model only |
+| `models/likelihood.py` | Shared missingness/censoring likelihood helpers |
+| `inference.py` | NUTS/MCMC run + posterior prediction (joint mode) |
+| `diagnostics.py` | R-hat/bulk-tail-ESS/divergence convergence gate |
+| `cut.py` | Two-stage cut-posterior orchestration: seeds, draw selection, Stage-1/2 runners |
+| `results.py` | Posterior draws -> tidy reporting DataFrame |
+| `reports.py` | Figure/table orchestration entry point |
+| `tables.py` | Pandas-only summary tables + terminal rendering |
+| `plots.py` | Matplotlib figures and PPC plots |
+| `aggregate_units.py` | Post-hoc synthetic reporting units on draws |
+| `parallelism.py` | Picks chain count/method from visible JAX devices |
+| `checks.py` | Runtime validators for arrays, samples, filepaths |
+| `validation.py` | `ConfigError`/`DataError` exception types |
+| `logging_config.py` | Loguru setup |
+
+`models/joint.py` and the `models/cut_baseline.py` + `models/cut_treatment.py` pair are intentionally duplicated, not shared: the cut Stage 1/2 models reimplement the joint model's untreated and treatment blocks independently rather than importing from `joint.py`. `tests/test_cut_model_parity.py` pins the two implementations to identical site names, shapes, sampled values, and log-densities, so any drift between the copies fails the test suite rather than silently diverging.
+
+---
+
 ## Installation
 
 Requires **Python 3.12–3.14** and [`uv`](https://docs.astral.sh/uv/).
